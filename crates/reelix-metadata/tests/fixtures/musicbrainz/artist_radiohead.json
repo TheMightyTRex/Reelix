@@ -1,0 +1,21 @@
+{
+  "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+  "name": "Radiohead",
+  "sort-name": "Radiohead",
+  "disambiguation": "",
+  "type": "Group",
+  "type-id": "e431f5f6-b5d2-343d-8b36-72607fffb74b",
+  "country": "GB",
+  "isnis": ["0000000115475162"],
+  "life-span": {"begin": "1991", "end": null, "ended": false},
+  "genres": [
+    {"id": "ceeaa283-5d7b-4202-8d1d-e25d116b2a18", "name": "alternative rock", "count": 30, "disambiguation": ""},
+    {"id": "89255676-1f14-4dd8-bbad-fca839d6aff4", "name": "electronic", "count": 12, "disambiguation": ""},
+    {"id": "a2782cb6-1cd0-477c-a61d-b3f8b42dacad", "name": "art rock", "count": 25, "disambiguation": ""}
+  ],
+  "relations": [
+    {"type": "official homepage", "type-id": "fe33d22f-c3b0-4d68-bd53-a856badf2b15", "direction": "forward", "target-type": "url", "url": {"id": "1b3b8d1c-0000-4000-8000-000000000001", "resource": "https://www.radiohead.com/"}},
+    {"type": "wikidata", "direction": "forward", "target-type": "url", "url": {"id": "1b3b8d1c-0000-4000-8000-000000000002", "resource": "https://www.wikidata.org/wiki/Q44190"}},
+    {"type": "member of band", "direction": "backward", "target-type": "artist", "artist": {"id": "8bfac288-ccc5-448d-9573-c33ea2aa5c30", "name": "Thom Yorke"}}
+  ]
+}

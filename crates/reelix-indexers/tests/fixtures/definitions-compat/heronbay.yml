@@ -1,0 +1,95 @@
+# Original example definition for a FICTIONAL private tracker (tests only).
+# Exercises: oneurl login, :root/:contains selectors, templated selectors, URL-encoded path
+# templates with a redirect, custom headers, requestDelay, rows.after, dateheaders,
+# andmatch, nth-child on merged rows, .NET date layouts and lookahead regexes.
+id: heronbay
+name: Heron Bay
+description: Fictional tracker with two-line rows grouped under day headers
+language: en-US
+type: private
+encoding: UTF-8
+requestDelay: 0.05
+links:
+  - https://heronbay.invalid/
+caps:
+  categorymappings:
+    - { id: 4, cat: Movies/HD, desc: Movies }
+    - { id: 5, cat: TV/HD, desc: TV }
+  modes:
+    search: [q]
+settings:
+  - { name: passkey, type: text, label: Passkey }
+  - { name: freeleech, type: checkbox, label: Freeleech only, default: false }
+login:
+  path: "login.php?pk="
+  method: oneurl
+  inputs:
+    oneurl: "{{ .Config.passkey }}"
+  error:
+    - selector: ':root:contains("Account is Banned")'
+      message:
+        text: banned
+  test:
+    path: index.php
+    selector: ':root:contains("Welcome back")'
+search:
+  headers:
+    X-Heron-Key: ["{{ .Config.passkey }}"]
+  paths:
+    - path: "search/{{ if .Keywords }}{{ .Keywords }}{{ else }}latest{{ end }}"
+      followredirect: true
+  keywordsfilters:
+    - name: diacritics
+      args: replace
+  rows:
+    selector: 'table#list > tbody > tr:not(.dayhead){{ if .Config.freeleech }}:not(.paid){{ else }}{{ end }}'
+    after: 1
+    filters:
+      - name: andmatch
+    dateheaders:
+      selector: 'td[colspan] > b:contains("Added")'
+      filters:
+        - name: replace
+          args: ["Added ", ""]
+        - name: dateparse
+          args: "dddd d MMMM yyyy"
+  fields:
+    category:
+      selector: td.cat a
+      attribute: href
+      filters:
+        - name: querystring
+          args: cat
+    title:
+      selector: td.name a
+      filters:
+        - name: re_replace
+          args: ["(?i)\\bMULTI\\b(?!\\.)", "MULTi"]
+    details:
+      selector: td.name a
+      attribute: href
+    download:
+      selector: 'a[href^="get.php"]'
+      attribute: href
+    size:
+      selector: 'td:contains("Size:")'
+      filters:
+        - name: replace
+          args: ["Size: ", ""]
+    seeders:
+      selector: 'td:contains("Seeds:")'
+      filters:
+        - name: regexp
+          args: "(\\d+)"
+    leechers:
+      selector: "td:nth-child(7)"
+      filters:
+        - name: regexp
+          args: "(\\d+)"
+    downloadvolumefactor:
+      case:
+        img.free: 0
+        'td:contains("FREE")': 0
+        "*": 1
+    uploadvolumefactor:
+      text: 1

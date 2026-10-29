@@ -1,0 +1,59 @@
+[package]
+name = "reelix-server"
+description = "The Reelix server binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "reelix"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+clap.workspace = true
+figment.workspace = true
+futures.workspace = true
+reelix-api.workspace = true
+reelix-api-types.workspace = true
+reelix-books.workspace = true
+reelix-core = { workspace = true, features = ["bus"] }
+reelix-db.workspace = true
+reelix-jobs.workspace = true
+reelix-library.workspace = true
+reelix-pipeline.workspace = true
+reelix-lists.workspace = true
+reelix-mediaserver.workspace = true
+reelix-metadata.workspace = true
+reelix-music.workspace = true
+reelix-notify.workspace = true
+reelix-parser.workspace = true
+reelix-providers.workspace = true
+reelix-requests.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+figment = { workspace = true, features = ["test"] }
+http-body-util.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,37 @@
+//! Settings screens.
+
+pub mod custom_formats;
+pub mod download_clients;
+pub mod general;
+pub mod import_lists;
+pub mod indexers;
+pub mod media_management;
+pub mod media_servers;
+pub mod metadata;
+pub mod naming;
+pub mod notifications;
+pub mod parse;
+pub mod profiles;
+pub mod quality;
+pub mod requests;
+pub mod security;
+pub mod tags;
+pub mod users;
+
+pub use custom_formats::CustomFormatsPage;
+pub use download_clients::DownloadClientsPage;
+pub use general::GeneralPage;
+pub use import_lists::ImportListsPage;
+pub use indexers::IndexerSettingsPage;
+pub use media_management::MediaManagementPage;
+pub use media_servers::MediaServersPage;
+pub use metadata::MetadataPage;
+pub use naming::NamingPage;
+pub use notifications::NotificationsPage;
+pub use parse::ParsePage;
+pub use profiles::ProfilesPage;
+pub use quality::QualityPage;
+pub use requests::RequestSettingsPage;
+pub use security::SecuritySettingsPage;
+pub use tags::TagsPage;
+pub use users::UsersPage;

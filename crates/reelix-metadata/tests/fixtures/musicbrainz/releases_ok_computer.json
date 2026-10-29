@@ -1,0 +1,89 @@
+{
+  "release-count": 2,
+  "release-offset": 0,
+  "releases": [
+    {
+      "id": "0b6b4ba0-d36f-47bd-b4ea-6a5b91842d29",
+      "title": "OK Computer",
+      "status": "Official",
+      "status-id": "4e304316-386d-3409-af2e-78857eec5cfe",
+      "country": "GB",
+      "date": "1997-05-21",
+      "barcode": "724385522925",
+      "disambiguation": "",
+      "packaging": "Jewel Case",
+      "artist-credit": [{"name": "Radiohead", "joinphrase": "", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead", "sort-name": "Radiohead"}}],
+      "label-info": [
+        {"catalog-number": "NODATA 02", "label": {"id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9", "name": "Parlophone"}}
+      ],
+      "media": [
+        {
+          "position": 1,
+          "format": "CD",
+          "title": "",
+          "track-count": 3,
+          "track-offset": 0,
+          "tracks": [
+            {
+              "id": "6b9a509f-a5bb-3e4a-9b07-6c6d5e7a8a11",
+              "number": "1",
+              "position": 1,
+              "title": "Airbag",
+              "length": 284733,
+              "recording": {"id": "f1c1d4c0-1111-4a2b-8c3d-000000000001", "title": "Airbag", "length": 284200, "video": false}
+            },
+            {
+              "id": "6b9a509f-a5bb-3e4a-9b07-6c6d5e7a8a12",
+              "number": "2",
+              "position": 2,
+              "title": "Paranoid Android",
+              "length": null,
+              "recording": {"id": "f1c1d4c0-1111-4a2b-8c3d-000000000002", "title": "Paranoid Android", "length": 383000, "video": false}
+            },
+            {
+              "id": "6b9a509f-a5bb-3e4a-9b07-6c6d5e7a8a13",
+              "number": "3",
+              "position": 3,
+              "title": "Subterranean Homesick Alien",
+              "length": 267000,
+              "recording": {"id": "f1c1d4c0-1111-4a2b-8c3d-000000000003", "title": "Subterranean Homesick Alien", "length": 267000},
+              "artist-credit": [
+                {"name": "Radiohead", "joinphrase": " feat. ", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead"}},
+                {"name": "Guest", "joinphrase": "", "artist": {"id": "9e8d7c6b-0000-4000-8000-0000000000ef", "name": "Guest Artist"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4a2d5dd7-36a0-4e4e-9a0e-9d1d1e8b0a10",
+      "title": "OK Computer",
+      "status": "Official",
+      "country": "XE",
+      "date": "1997-06-16",
+      "barcode": "",
+      "disambiguation": "180 g vinyl",
+      "artist-credit": [{"name": "Radiohead", "joinphrase": "", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead"}}],
+      "label-info": [{"catalog-number": null, "label": null}],
+      "media": [
+        {
+          "position": 1,
+          "format": "12\" Vinyl",
+          "title": "Side A",
+          "tracks": [
+            {"id": "7c0a1b2c-0000-4000-8000-0000000000a1", "number": "A1", "position": 1, "title": "Airbag", "length": 284733, "recording": {"id": "f1c1d4c0-1111-4a2b-8c3d-000000000001", "title": "Airbag"}}
+          ]
+        },
+        {
+          "position": 2,
+          "format": "12\" Vinyl",
+          "title": "Side B",
+          "tracks": [
+            {"id": "7c0a1b2c-0000-4000-8000-0000000000b1", "number": "B1", "position": 1, "title": "Paranoid Android", "length": 383000, "recording": {"id": "f1c1d4c0-1111-4a2b-8c3d-000000000002", "title": "Paranoid Android"}}
+          ]
+        }
+      ]
+    }
+  ]
+}

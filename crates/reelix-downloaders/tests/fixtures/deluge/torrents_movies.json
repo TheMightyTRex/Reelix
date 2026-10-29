@@ -1,0 +1,18 @@
+{"result": {
+  "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c": {"hash": "1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c",
+    "name": "Anatomy.of.a.Fall.2023.1080p.BluRay.x264-JustWatch", "state": "Seeding", "progress": 100.0, "eta": 0,
+    "message": "OK", "is_finished": true, "save_path": "/var/lib/deluge/Downloads", "download_location": "/var/lib/deluge/Downloads",
+    "total_size": 7340032000, "total_done": 7340032000, "ratio": 0.5, "stop_ratio": 2.0, "stop_at_ratio": true, "seeding_time": 1800},
+  "2a3b4c5d6e7f80912a3b4c5d6e7f80912a3b4c5d": {"hash": "2a3b4c5d6e7f80912a3b4c5d6e7f80912a3b4c5d",
+    "name": "Perfect.Days.2023.1080p.BluRay.x264-USURY", "state": "Paused", "progress": 100.0, "eta": 0,
+    "message": "OK", "is_finished": true, "save_path": "/var/lib/deluge/Downloads", "download_location": "/var/lib/deluge/Downloads",
+    "total_size": 6000000000, "total_done": 6000000000, "ratio": 2.1, "stop_ratio": 2.0, "stop_at_ratio": true, "seeding_time": 99000},
+  "3b4c5d6e7f8091a23b4c5d6e7f8091a23b4c5d6e": {"hash": "3b4c5d6e7f8091a23b4c5d6e7f8091a23b4c5d6e",
+    "name": "Fallen.Leaves.2023.1080p.WEB.h264-EDITH", "state": "Downloading", "progress": 25.0, "eta": 900,
+    "message": "OK", "is_finished": false, "save_path": "/var/lib/deluge/Downloads",
+    "total_size": 4000000000, "total_done": 1000000000, "ratio": 0.0, "stop_ratio": 2.0, "stop_at_ratio": false, "seeding_time": 0},
+  "4c5d6e7f8091a2b34c5d6e7f8091a2b34c5d6e7f": {"hash": "4c5d6e7f8091a2b34c5d6e7f8091a2b34c5d6e7f",
+    "name": "Totally.Broken.2023.720p", "state": "Error", "progress": 3.0, "eta": 0,
+    "message": "Error: No space left on device", "is_finished": false, "save_path": "/var/lib/deluge/Downloads",
+    "total_size": 1000, "total_done": 30, "ratio": 0.0, "stop_ratio": 2.0, "stop_at_ratio": false, "seeding_time": 0}
+}, "error": null, "id": 11}

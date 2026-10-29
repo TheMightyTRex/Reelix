@@ -1,0 +1,5 @@
+{"Items":[
+ {"Name":"Blade Runner","ServerId":"0f3c2a","Id":"aa01","ProductionYear":1982,"Type":"Movie","ProviderIds":{"Tmdb":"78","Imdb":"tt0083658"}},
+ {"Name":"Firefly","ServerId":"0f3c2a","Id":"aa02","ProductionYear":2002,"Type":"Series","ProviderIds":{"Tvdb":"78874","Imdb":"tt0303461","Tmdb":"1437"}},
+ {"Name":"Serenity","Id":"aa03","ProductionYear":2005,"Type":"Movie","ProviderIds":{"tmdb":"16320"}}
+],"TotalRecordCount":3,"StartIndex":0}

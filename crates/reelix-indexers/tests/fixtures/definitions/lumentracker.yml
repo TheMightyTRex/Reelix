@@ -1,0 +1,112 @@
+# Original example definition for a FICTIONAL private tracker (tests only).
+id: lumentracker
+name: Lumen Tracker
+description: Fictional private HTML tracker used by the Reelix test-suite
+language: en-US
+type: private
+encoding: UTF-8
+links:
+  - https://lumen.invalid/
+caps:
+  categorymappings:
+    - { id: 10, cat: Movies/HD, desc: "Movies 1080p" }
+    - { id: 11, cat: Movies/UHD, desc: "Movies 2160p" }
+    - { id: 20, cat: TV/HD, desc: "TV HD" }
+    - { id: 21, cat: TV/Anime, desc: "Anime" }
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q, imdbid]
+settings:
+  - { name: username, type: text, label: Username }
+  - { name: password, type: password, label: Password }
+  - { name: freeleech, type: checkbox, label: Freeleech only, default: false }
+  - name: sort
+    type: select
+    label: Sort results by
+    default: added
+    options:
+      added: Date added
+      seeders: Seeders
+      size: Size
+  - { name: info_rules, type: info, label: Rules, default: "Keep a ratio above 1.0" }
+login:
+  path: login.php
+  method: post
+  inputs:
+    username: "{{ .Config.username }}"
+    password: "{{ .Config.password }}"
+    keeplogged: 1
+  error:
+    - selector: div.login-error
+  test:
+    path: index.php
+    selector: a[href="logout.php"]
+search:
+  paths:
+    - path: browse.php
+  inputs:
+    $raw: "{{ range .Categories }}c{{ . }}=1&{{ end }}"
+    search: "{{ if .Query.IMDBID }}{{ .Query.IMDBID }}{{ else }}{{ .Keywords }}{{ end }}"
+    searchin: "{{ if .Query.IMDBID }}imdb{{ else }}title{{ end }}"
+    sort: "{{ .Config.sort }}"
+    fl: "{{ if .Config.freeleech }}1{{ else }}0{{ end }}"
+  keywordsfilters:
+    - name: re_replace
+      args: ["[^a-zA-Z0-9]+", " "]
+  error:
+    - selector: div.search-error
+  rows:
+    selector: table#torrents > tbody > tr.torrent
+  fields:
+    category:
+      selector: a[href^="browse.php?cat="]
+      attribute: href
+      filters:
+        - name: querystring
+          args: cat
+    title:
+      selector: a.name
+      remove: span.tag
+    details:
+      selector: a.name
+      attribute: href
+    download:
+      selector: a[href^="download.php"]
+      attribute: href
+    imdbid:
+      selector: a[href*="imdb.com/title/"]
+      attribute: href
+      optional: true
+      filters:
+        - name: regexp
+          args: "(tt\\d+)"
+    size:
+      selector: td.size
+    seeders:
+      selector: td.seeders
+    leechers:
+      selector: td.leechers
+    grabs:
+      selector: td.snatched
+      filters:
+        - name: replace
+          args: [" times", ""]
+    date:
+      selector: td.added
+      filters:
+        - name: dateparse
+          args: "02/01/2006 15:04"
+    downloadvolumefactor:
+      case:
+        span.tag.free: 0
+        span.tag.half: 0.5
+        "*": 1
+    uploadvolumefactor:
+      case:
+        span.tag.double: 2
+        "*": 1
+    minimumratio:
+      text: 1.0
+    minimumseedtime:
+      text: 259200

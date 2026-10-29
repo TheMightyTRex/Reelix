@@ -1,0 +1,9 @@
+{
+  "MediaContainer": {
+    "size": 1,
+    "Metadata": [
+      { "ratingKey": "5d776b59ad5437001f79c6f8", "guid": "plex://movie/5d776b59ad5437001f79c6f8", "type": "movie", "title": "Signal Fires", "year": 2024,
+        "Guid": [ { "id": "imdb://tt7700110" }, { "id": "tmdb://770011" } ] }
+    ]
+  }
+}

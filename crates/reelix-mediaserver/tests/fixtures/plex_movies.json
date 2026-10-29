@@ -1,0 +1,11 @@
+{
+  "MediaContainer": {
+    "size": 1, "totalSize": 1, "librarySectionID": 1,
+    "Metadata": [
+      { "ratingKey": "5012", "key": "/library/metadata/5012", "guid": "plex://movie/5d7768a1aa2a3c001f3fb222",
+        "type": "movie", "title": "The Lighthouse Keeper", "year": 2023, "addedAt": 1705351267,
+        "Media": [ { "id": 7001, "videoResolution": "1080", "Part": [ { "id": 9001, "file": "/media/movies/The Lighthouse Keeper (2023)/The Lighthouse Keeper (2023) Bluray-1080p.mkv", "size": 9663676416 } ] } ],
+        "Guid": [ { "id": "imdb://tt9123450" }, { "id": "tmdb://912345" }, { "id": "tvdb://55501" } ] }
+    ]
+  }
+}

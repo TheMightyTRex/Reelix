@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "result": {
+    "message_id": 4711,
+    "from": { "id": 7000000001, "is_bot": true, "first_name": "Reelix", "username": "reelix_home_bot" },
+    "chat": { "id": -1001234567890, "title": "Media", "type": "supergroup" },
+    "date": 1793188800,
+    "text": "Grabbed: The Lighthouse Keeper (2023)"
+  }
+}

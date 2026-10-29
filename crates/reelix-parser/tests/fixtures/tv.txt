@@ -1,0 +1,146 @@
+# Standard TV: single and multi episode, alternate numbering styles, specials.
+Harbor.Watch.S01E01.720p.HDTV.x264-KILLERS => t=Harbor Watch; kind=episode; s=1; e=1; q=HDTV-720p; g=KILLERS
+Harbor.Watch.S01E02.HDTV.x264-LOL => t=Harbor Watch; s=1; e=2; q=SDTV; g=LOL
+Harbor.Watch.S01E03.1080p.WEB-DL.DD5.1.H.264-NTb => s=1; e=3; q=WEBDL-1080p; g=NTb; ch=5.1
+Harbor.Watch.S01E04.1080p.WEB.h264-TBS => s=1; e=4; q=WEBDL-1080p; g=TBS
+Harbor.Watch.S01E05.720p.WEB.x264-TBS[eztv] => s=1; e=5; q=WEBDL-720p; g=TBS
+Harbor.Watch.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb => svc=AMZN; e=6; q=WEBDL-1080p
+Harbor.Watch.S01E07.2160p.NF.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX => svc=NF; q=WEBDL-2160p; hdr=dolby_vision,hdr10; ac=eac3,atmos
+Harbor.Watch.S01E08.PROPER.720p.HDTV.x264-KILLERS => e=8; v=2; repack=false; q=HDTV-720p
+Harbor.Watch.S01E09.REPACK.1080p.WEB.H264-GGEZ => e=9; v=2; repack=true
+Harbor.Watch.S01E10.REAL.PROPER.720p.HDTV.x264-KILLERS => e=10; v=2; real=1
+Harbor.Watch.S01E10.REAL.REAL.PROPER.720p.HDTV.x264-KILLERS => real=2
+Harbor.Watch.S01E10.RERIP.720p.HDTV.x264-KILLERS => v=2; repack=true
+Harbor.Watch.S01E11.Real.Talk.720p.HDTV.x264-KILLERS => real=0; v=1
+Harbor.Watch.S02E01E02.720p.HDTV.x264-KILLERS => s=2; e=1,2
+Harbor.Watch.S02E01-E03.1080p.WEB-DL.DD5.1.H.264-NTb => s=2; e=1,2,3
+Harbor.Watch.S02E01-03.1080p.WEB-DL.DD5.1.H.264-NTb => s=2; e=1,2,3
+Harbor.Watch.S02E04.E05.720p.HDTV.x264-KILLERS => s=2; e=4,5
+Harbor.Watch.S02E06-S02E07.720p.HDTV.x264-KILLERS => s=2; e=6,7
+Harbor.Watch.S02E08E09E10.720p.HDTV.x264-KILLERS => s=2; e=8,9,10
+Harbor Watch - S02E11 - The Long Night [1080p WEB-DL] => t=Harbor Watch; s=2; e=11; q=WEBDL-1080p
+Harbor Watch - S02E12E13 - Two Parter [720p HDTV] => s=2; e=12,13; q=HDTV-720p
+Harbor Watch S03E01 1080p WEB H264-CAKES => t=Harbor Watch; s=3; e=1; g=CAKES
+Harbor.Watch.3x02.720p.HDTV.x264-KILLERS => t=Harbor Watch; s=3; e=2
+Harbor.Watch.3x03-3x04.HDTV.XviD-LOL => s=3; e=3,4; vc=xvid
+Harbor.Watch.3x05-06.HDTV.XviD-LOL => s=3; e=5,6
+Harbor Watch - 3x07 - Episode Title => t=Harbor Watch; s=3; e=7
+Harbor.Watch.S03.E08.720p.HDTV.x264-KILLERS => s=3; e=8
+Harbor.Watch.S03 E09.720p.HDTV.x264-KILLERS => s=3; e=9
+Harbor Watch Season 3 Episode 10 720p HDTV => t=Harbor Watch; s=3; e=10
+Harbor.Watch.S00E01.Christmas.Special.720p.HDTV.x264-KILLERS => s=0; e=1; special=true
+Harbor.Watch.S00E02.720p.WEB-DL.x264-NTb => s=0; special=true
+Harbor.Watch.S10E101.1080p.WEB.h264-BAE => s=10; e=101
+Harbor.Watch.S2024E05.1080p.WEB.h264-BAE => s=2024; e=5
+Harbor.Watch.2019.S01E01.1080p.WEB.h264-BAE => t=Harbor Watch; y=2019; s=1; e=1
+Harbor Watch (2019) S01E02 1080p WEB h264-BAE => t=Harbor Watch; y=2019; s=1; e=2
+Harbor.Watch.US.S01E01.720p.HDTV.x264-KILLERS => t=Harbor Watch US; s=1; e=1
+Harbor.Watch.UK.S05E04.720p.HDTV.x264-ORGANiC => t=Harbor Watch UK; s=5; e=4
+The.Hundred.Doors.S04E07.1080p.WEB-DL.DD5.1.H264-RARBG => t=The Hundred Doors; s=4; e=7; g=RARBG
+24.Hours.Left.S01E01.720p.HDTV.x264-KILLERS => t=24 Hours Left; s=1; e=1
+1923.S01E01.1080p.WEB.h264-GOSSIP => t=1923; s=1; e=1; y=-
+9-1-1.Dispatch.S03E04.720p.HDTV.x264-AVS => t=9-1-1 Dispatch; s=3; e=4; g=AVS
+S.W.A.T.2017.S05E10.720p.HDTV.x264-SYNCOPY => t=S.W.A.T.; y=2017; s=5; e=10
+Marvels.Agents.of.S.H.I.E.L.D.S07E01.720p.HDTV.x264-AVS => t=Marvels Agents of S.H.I.E.L.D.; s=7; e=1
+Mr.Robotic.S04E13.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb => t=Mr Robotic; s=4; e=13
+Doctor.Whom.2005.S13E01.1080p.iP.WEB-DL.AAC2.0.H.264-SOIL => t=Doctor Whom; y=2005; svc=iP; ac=aac; ch=2.0; g=SOIL
+Late.Night.Talk.S12E45.720p.WEB.h264-KOGi => s=12; e=45; g=KOGi
+Space.Station.Diaries.S02E08.Lift.Off.1080p.DSNP.WEB-DL.DDP5.1.H.264-FLUX => t=Space Station Diaries; s=2; e=8; svc=DSNP
+Space.Station.Diaries.S02E09.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX => svc=ATVP
+Space.Station.Diaries.S02E10.1080p.HMAX.WEB-DL.DD5.1.H.264-NTb => svc=HMAX
+Space.Station.Diaries.S02E10.1080p.MAX.WEB-DL.DDP5.1.H.264-NTb => svc=MAX
+Space.Station.Diaries.S02E10.1080p.PCOK.WEB-DL.DDP5.1.H.264-NTb => svc=PCOK
+Space.Station.Diaries.S02E10.1080p.PMTP.WEB-DL.DDP5.1.H.264-NTb => svc=PMTP
+Space.Station.Diaries.S02E10.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG => svc=CR
+Space.Station.Diaries.S02E10.720p.RED.WEB-DL.AAC2.0.H.264-GRP => svc=RED
+Space.Station.Diaries.S02E10.1080p.STZ.WEB-DL.DDP5.1.H.264-NTb => svc=STZ
+Space.Station.Diaries.S02E10.1080p.SHO.WEB-DL.DDP5.1.H.264-NTb => svc=SHO
+Space.Station.Diaries.S02E10.1080p.ROKU.WEB-DL.DD5.1.H.264-NTb => svc=ROKU
+Space.Station.Diaries.S02E10.1080p.DCU.WEB-DL.DD5.1.H.264-NTb => svc=DCU
+Space.Station.Diaries.S02E10.1080p.HULU.WEB-DL.DDP5.1.H.264-NTb => svc=HULU
+Space.Station.Diaries.S02E10.1080p.WEBRip.x264-ION10 => q=WEBRip-1080p; svc=-
+Space.Station.Diaries.S02E10.720p.WEBRip.x264-TBS => q=WEBRip-720p
+Space.Station.Diaries.S02E10.WEBRip.x264-TBS => q=WEBRip-480p
+Space.Station.Diaries.S02E10.480p.x264-mSD => q=WEBDL-480p; g=mSD
+Space.Station.Diaries.S02E10.HDTV.x264-mSD => q=SDTV
+Space.Station.Diaries.S02E10.1080i.HDTV.MPEG2-GRP => q=Raw-HD
+Space.Station.Diaries.S02E10.1080p.HDTV.H.264-CtrlHD => q=HDTV-1080p
+Space.Station.Diaries.S02E10.2160p.UHDTV.HEVC-GRP => q=HDTV-2160p
+Space.Station.Diaries.S02E10.DSR.XviD-GRP => q=SDTV
+Space.Station.Diaries.S02E10.720p.BluRay.x264-DEMAND => q=Bluray-720p
+Space.Station.Diaries.S02E10.1080p.BluRay.x264-ROVERS => q=Bluray-1080p; g=ROVERS
+Space.Station.Diaries.S02E10.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP => q=Remux-1080p; g=NOGRP
+Space.Station.Diaries.S02E10.DVDRip.XviD-SAiNTS => q=DVD
+Space.Station.Diaries.S02E10.FRENCH.720p.HDTV.x264-HYBRiS => lang=French
+Space.Station.Diaries.S02E10.VOSTFR.720p.WEB.H264-WEEDS => lang=French
+Space.Station.Diaries.S02E10.GERMAN.DL.720p.WEB.H264-TVARCHiV => lang=German,English
+Space.Station.Diaries.S02E10.German.720p.WEB.h264-GERTV => lang=German
+Space.Station.Diaries.S02E10.iTALiAN.720p.WEB.h264-GRP => lang=Italian
+Space.Station.Diaries.S02E10.SPANISH.720p.HDTV.x264-GRP => lang=Spanish
+Space.Station.Diaries.S02E10.NORDiC.720p.HDTV.x264-GRP => lang=English
+Space.Station.Diaries.S02E10.MULTi.1080p.WEB.H264-GRP => lang=English
+Space.Station.Diaries.S02E10.720p.HDTV.x264-GRP.mkv => g=GRP
+Space.Station.Diaries.S02E10.720p.HDTV.x264-GRP.mp4 => g=GRP
+Space.Station.Diaries.S02E10.720p.HDTV.x264-GRP.avi => g=GRP
+Space.Station.Diaries.S02E10.720p.HDTV.x264 => g=-
+Space.Station.Diaries.S02E10.1080p.WEB-DL.DD5.1.H.264 => g=-; q=WEBDL-1080p
+Space.Station.Diaries.S02E10.1080p.WEB-DL => g=-
+Space_Station_Diaries_S02E10_720p_HDTV_x264-GRP => t=Space Station Diaries; s=2; e=10; g=GRP
+space.station.diaries.s02e10.720p.hdtv.x264-grp => t=space station diaries; s=2; e=10; q=HDTV-720p
+SPACE.STATION.DIARIES.S02E10.720P.HDTV.X264-GRP => t=SPACE STATION DIARIES; q=HDTV-720p
+Space Station Diaries S02E10 HDTV x264 => q=SDTV; g=-
+Space.Station.Diaries.S02E10.720p.HDTV.x264.HC-GRP => hc=true
+Space.Station.Diaries.S02E10.720p.HDTV.x264.KORSUB-GRP => hc=true
+Space.Station.Diaries.S02E10.720p.HDTV.x264-GRP => hc=false; 3d=false
+Space.Station.Diaries.S02E10.v2.720p.HDTV.x264-GRP => v=2
+Fjord.Patrol.S01E01.1080p.WEB.h264-EDITH => t=Fjord Patrol; s=1; e=1; g=EDITH
+Fjord.Patrol.S01E02.1080p.WEB.h264-EDITH => s=1; e=2
+Fjord.Patrol.S01E03.Pilot.Redux.1080p.WEB.h264-EDITH => s=1; e=3
+Fjord.Patrol.S01E04.1080p.WEB.h264-EDITH => s=1; e=4
+Fjord.Patrol.S01E05.720p.HDTV.x264-FLEET => s=1; e=5; g=FLEET
+Fjord.Patrol.S01E06.720p.HDTV.x264-FLEET => s=1; e=6
+Fjord.Patrol.S01E07.480p.HDTV.x264-mSD => s=1; e=7; q=SDTV
+Fjord.Patrol.S01E08.1080p.HEVC.x265-MeGusta => s=1; e=8; vc=h265; g=MeGusta
+Fjord.Patrol.S01E09.720p.HEVC.x265-MeGusta => s=1; e=9; q=WEBDL-720p
+Fjord.Patrol.S01E10.Finale.1080p.WEB.h264-EDITH => s=1; e=10
+Fjord Patrol - 1x11 - Into the Ice.mkv => t=Fjord Patrol; s=1; e=11
+Fjord.Patrol.S01E12.Part.Two.1080p.WEB.h264-EDITH => s=1; e=12
+The.Midnight.Garden.S03E04.Episode.Title.Here.1080p.WEB-DL.AAC2.0.H.264-WELP => t=The Midnight Garden; s=3; e=4; g=WELP
+The.Midnight.Garden.S03E05.2160p.WEB.H265-GGWP => q=WEBDL-2160p; g=GGWP
+The.Midnight.Garden.S03E06.720p.WEB.H264-GGWP => q=WEBDL-720p
+The.Midnight.Garden.S03E07.1080p.WEB.H264-GGWP => q=WEBDL-1080p
+The.Midnight.Garden.S03E08.1080p.WEB.H264-GLHF => g=GLHF
+The.Midnight.Garden.S03E09.1080p.WEB.H264-CAKES => g=CAKES
+The.Midnight.Garden.S03E10.1080p.WEB.H264-SuccessfulCrab => g=SuccessfulCrab
+The.Midnight.Garden.S03E11.1080p.WEB.H264-NHTFS => g=NHTFS
+The.Midnight.Garden.S03E12.1080p.WEB.H264-RAWR => g=RAWR
+Copper.Valley.S01E01.1080p.WEB.H264-STRiFE => t=Copper Valley; s=1; e=1; g=STRiFE
+Copper.Valley.S01E02.1080p.WEB.H264-STRiFE => s=1; e=2
+Copper.Valley.S01E03.720p.WEB.H264-STRiFE => s=1; e=3; q=WEBDL-720p
+Copper.Valley.S01E04.2160p.WEB.H265-STRiFE => s=1; e=4; q=WEBDL-2160p
+Copper.Valley.S01E05.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX => s=1; e=5; svc=AMZN
+Copper.Valley.S01E06.1080p.AMZN.WEBRip.DDP5.1.x264-NTb => s=1; e=6; q=WEBRip-1080p
+Copper.Valley.S01E07.HDR.2160p.WEB.H265-STRiFE => hdr=hdr10; q=WEBDL-2160p
+Copper.Valley.S01E08.DV.2160p.WEB.H265-STRiFE => hdr=dolby_vision
+Copper.Valley.S01E09.1080p.BluRay.x264-BORDURE => q=Bluray-1080p; g=BORDURE
+Copper.Valley.S01E10.720p.BluRay.x264-BORDURE => q=Bluray-720p
+Copper.Valley.S02E01.ITA.ENG.1080p.AMZN.WEB-DL.DDP5.1.H.264-MeM => lang=Italian,English; svc=AMZN; g=MeM
+Copper.Valley.S02E02.iTALiAN.720p.WEB.x264-GRP => lang=Italian
+Copper.Valley.S02E03.SWEDiSH.1080p.WEB.h264-GRP => lang=Swedish
+Copper.Valley.S02E04.DANiSH.1080p.WEB.h264-GRP => lang=Danish
+Copper.Valley.S02E05.NORWEGiAN.1080p.WEB.h264-GRP => lang=Norwegian
+Copper.Valley.S02E06.FiNNiSH.1080p.WEB.h264-GRP => lang=Finnish
+Copper.Valley.S02E07.DUTCH.1080p.WEB.h264-GRP => lang=Dutch
+Copper.Valley.S02E08.POLISH.1080p.WEB.h264-GRP => lang=Polish
+Copper.Valley.S02E09.RUSSIAN.1080p.WEB.h264-GRP => lang=Russian
+Copper.Valley.S02E10.KOREAN.1080p.WEB.h264-GRP => lang=Korean
+Copper.Valley.S03E01E02.1080p.WEB.h264-GRP => s=3; e=1,2
+Copper.Valley.S03E03-E05.1080p.WEB.h264-GRP => s=3; e=3,4,5
+Copper.Valley.S03E06.E07.1080p.WEB.h264-GRP => s=3; e=6,7
+Copper.Valley.S03E08-09.1080p.WEB.h264-GRP => s=3; e=8,9
+Copper.Valley.S03E10.REPACK.1080p.WEB.h264-GRP => v=2; repack=true
+Copper.Valley.S03E11.PROPER.1080p.WEB.h264-GRP => v=2
+Copper.Valley.S03E12.iNTERNAL.1080p.WEB.h264-GRP => v=1; t=Copper Valley
+Copper.Valley.S03E13.1080p.HEVC.x265-MeGusta => vc=h265; g=MeGusta
+Copper.Valley.S03E14.XviD-AFG => vc=xvid; q=SDTV; g=AFG
+Copper.Valley.S03E15.480p.x264-mSD => q=WEBDL-480p

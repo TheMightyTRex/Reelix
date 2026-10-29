@@ -1,0 +1,13 @@
+{"config": {
+  "misc": {
+    "complete_dir": "/data/usenet/complete", "download_dir": "/data/usenet/incomplete",
+    "history_retention": "-1",
+    "enable_tv_sorting": 1, "tv_categories": ["tv"], "enable_movie_sorting": 1, "movie_categories": ["software"],
+    "enable_date_sorting": 0, "date_categories": ["tv"]
+  },
+  "categories": [
+    {"name": "*", "order": 0, "pp": "3", "script": "None", "dir": "", "priority": 0},
+    {"name": "movies", "order": 1, "pp": "", "script": "Default", "dir": "", "priority": -100}
+  ],
+  "servers": []
+}}

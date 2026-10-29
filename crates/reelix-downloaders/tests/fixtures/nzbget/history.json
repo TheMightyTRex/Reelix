@@ -1,0 +1,17 @@
+{"version": "1.1", "id": 5, "result": [
+  {"NZBID": 31, "Name": "Oppenheimer.2023.1080p.BluRay.x264-SPARKS", "Kind": "NZB", "Category": "movies",
+   "FileSizeLo": 1705032704, "FileSizeHi": 2, "FileSizeMB": 9818, "Status": "SUCCESS/ALL", "ParStatus": "SUCCESS",
+   "UnpackStatus": "SUCCESS", "MoveStatus": "SUCCESS", "ScriptStatus": "NONE", "DeleteStatus": "NONE", "MarkStatus": "NONE",
+   "DestDir": "/downloads/intermediate/Oppenheimer.#31", "FinalDir": "/downloads/completed/movies/Oppenheimer.2023.1080p.BluRay.x264-SPARKS",
+   "HistoryTime": 1730150000, "Parameters": []},
+  {"NZBID": 32, "Name": "Past.Lives.2023.1080p.WEB-DL.DDP5.1.H.264-FLUX", "Kind": "NZB", "Category": "movies",
+   "FileSizeLo": 4000000000, "FileSizeHi": 0, "Status": "FAILURE/UNPACK", "ParStatus": "SUCCESS", "UnpackStatus": "PASSWORD",
+   "DestDir": "/downloads/intermediate/Past.Lives.#32", "FinalDir": ""},
+  {"NZBID": 33, "Name": "Aftersun.2022.1080p.WEB.H264-NAISU", "Kind": "NZB", "Category": "movies",
+   "FileSizeLo": 3000000000, "FileSizeHi": 0, "Status": "DELETED/HEALTH", "ParStatus": "NONE", "UnpackStatus": "NONE",
+   "DestDir": "", "FinalDir": ""},
+  {"NZBID": 34, "Name": "Manually.Removed.Movie.2020.720p", "Kind": "NZB", "Category": "movies",
+   "FileSizeLo": 1, "FileSizeHi": 0, "Status": "DELETED/MANUAL", "DestDir": "", "FinalDir": ""},
+  {"NZBID": 35, "Name": "Some.Other.Thing", "Kind": "NZB", "Category": "", "FileSizeLo": 1, "FileSizeHi": 0,
+   "Status": "SUCCESS/ALL", "DestDir": "/downloads/completed/Some.Other.Thing", "FinalDir": ""}
+]}

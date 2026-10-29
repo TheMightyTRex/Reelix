@@ -1,0 +1,18 @@
+[package]
+name = "reelix-parser"
+description = "Release title parser and the shared quality/language model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+reelix-core.workspace = true
+regex.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

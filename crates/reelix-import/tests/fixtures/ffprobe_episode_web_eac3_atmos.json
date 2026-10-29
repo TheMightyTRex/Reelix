@@ -1,0 +1,24 @@
+{
+  "streams": [
+    {
+      "index": 0, "codec_name": "h264", "profile": "High", "codec_type": "video", "codec_tag_string": "avc1",
+      "width": 1920, "height": 1080, "pix_fmt": "yuv420p", "bits_per_raw_sample": "8",
+      "color_transfer": "bt709", "color_primaries": "bt709",
+      "r_frame_rate": "24000/1001", "avg_frame_rate": "2997/125", "bit_rate": "7812345", "duration": "3121.580000",
+      "disposition": {"default": 1, "forced": 0}, "tags": {"language": "und", "handler_name": "VideoHandler"}
+    },
+    {
+      "index": 1, "codec_name": "eac3", "codec_type": "audio", "profile": "Dolby Digital Plus + Dolby Atmos",
+      "sample_rate": "48000", "channels": 6, "channel_layout": "5.1(side)", "bit_rate": "768000",
+      "disposition": {"default": 1, "forced": 0}, "tags": {"language": "eng", "handler_name": "SoundHandler"}
+    },
+    {
+      "index": 2, "codec_name": "mov_text", "codec_type": "subtitle",
+      "disposition": {"default": 0, "forced": 0}, "tags": {"language": "spa"}
+    }
+  ],
+  "format": {
+    "filename": "Show.S02E05.mp4", "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": "3121.600000", "size": "3349876543", "bit_rate": "8585000"
+  }
+}

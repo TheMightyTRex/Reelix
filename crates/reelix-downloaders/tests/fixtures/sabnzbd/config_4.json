@@ -1,0 +1,22 @@
+{"config": {
+  "misc": {
+    "complete_dir": "/downloads/complete", "download_dir": "/downloads/incomplete",
+    "history_retention": "", "history_retention_option": "all", "history_retention_number": 1,
+    "enable_tv_sorting": 0, "tv_categories": [], "enable_movie_sorting": 0, "movie_categories": [],
+    "enable_date_sorting": 0, "date_categories": [], "api_key": "x", "nzb_key": "y",
+    "host": "::", "port": "8080", "url_base": "/sabnzbd"
+  },
+  "categories": [
+    {"name": "*", "order": 0, "pp": "3", "script": "None", "dir": "", "newzbin": "", "priority": 0},
+    {"name": "movies", "order": 1, "pp": "", "script": "Default", "dir": "movies", "newzbin": "", "priority": -100},
+    {"name": "tv", "order": 2, "pp": "", "script": "Default", "dir": "/mnt/media-staging/tv", "newzbin": "", "priority": -100},
+    {"name": "software", "order": 3, "pp": "", "script": "Default", "dir": "software", "newzbin": "", "priority": -100}
+  ],
+  "sorters": [
+    {"name": "Series Sorting", "order": 0, "min_size": "50M", "multipart_label": "",
+     "sort_string": "%sn/Season %s/%sn - %sx%0e - %en.%ext", "sort_cats": ["tv"], "sort_type": [1], "is_active": 1},
+    {"name": "Movie Sorting", "order": 1, "min_size": "50M", "multipart_label": "",
+     "sort_string": "%title (%y)/%title.%ext", "sort_cats": ["movies"], "sort_type": [2], "is_active": 0}
+  ],
+  "servers": [{"name": "news.example.net", "host": "news.example.net", "port": 563, "ssl": 1, "connections": 20, "enable": 1}]
+}}

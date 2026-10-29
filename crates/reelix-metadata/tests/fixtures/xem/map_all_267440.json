@@ -1,0 +1,14 @@
+{
+  "result": "success",
+  "data": [
+    { "scene": { "season": 1, "episode": 1, "absolute": 1 }, "tvdb": { "season": 1, "episode": 1, "absolute": 1 } },
+    { "scene": { "season": 1, "episode": 2, "absolute": 2 }, "tvdb": { "season": 1, "episode": 2, "absolute": 2 } },
+    { "scene": { "season": 2, "episode": 1, "absolute": 26 }, "tvdb": { "season": 2, "episode": 1, "absolute": 26 } },
+    { "scene": { "season": 3, "episode": 1, "absolute": 38 }, "tvdb": { "season": 3, "episode": 1, "absolute": 38 } },
+    { "scene": { "season": 3, "episode": 13, "absolute": 50 }, "tvdb": { "season": 3, "episode": 13, "absolute": 50 } },
+    { "scene": { "season": 4, "episode": 1, "absolute": 60 }, "tvdb": { "season": 4, "episode": 1, "absolute": 60 }, "anidb": { "season": 1, "episode": 1, "absolute": 0 } },
+    { "scene": { "season": 4, "episode": 17, "absolute": 76 }, "tvdb": { "season": 4, "episode": 17, "absolute": 76 } },
+    { "scene": { "season": 4, "episode": 29, "absolute": 88 }, "tvdb": { "season": 0, "episode": 13, "absolute": 0 } }
+  ],
+  "message": "full mapping for 267440 on tvdb. this was a cached version"
+}

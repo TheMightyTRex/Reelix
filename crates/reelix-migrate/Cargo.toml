@@ -1,0 +1,11 @@
+[package]
+name = "reelix-migrate"
+description = "Reelix migrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

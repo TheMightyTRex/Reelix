@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<methodResponse><fault><value><struct>
+<member><name>faultCode</name><value><i8>-501</i8></value></member>
+<member><name>faultString</name><value><string>Could not find info-hash.</string></value></member>
+</struct></value></fault></methodResponse>

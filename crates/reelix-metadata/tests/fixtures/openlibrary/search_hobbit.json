@@ -1,0 +1,27 @@
+{
+  "numFound": 2,
+  "start": 0,
+  "numFoundExact": true,
+  "q": "the hobbit",
+  "offset": null,
+  "docs": [
+    {
+      "key": "/works/OL27482W",
+      "title": "The Hobbit",
+      "author_key": ["OL26320A"],
+      "author_name": ["J.R.R. Tolkien"],
+      "first_publish_year": 1937,
+      "cover_i": 14627509,
+      "edition_count": 120,
+      "isbn": ["0261102214", "9780261102217", "978-0-618-26030-0", "9780261102217"]
+    },
+    {
+      "key": "/works/OL15331214W",
+      "title": "The Annotated Hobbit",
+      "author_key": ["OL26320A", "OL2631291A"],
+      "author_name": ["J.R.R. Tolkien", "Douglas A. Anderson"],
+      "first_publish_year": 1988,
+      "edition_count": 6
+    }
+  ]
+}

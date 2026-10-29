@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <title>Sample Usenet Index</title>
+    <description>Sample Usenet Index API results</description>
+    <newznab:response offset="0" total="2" />
+    <item>
+      <title>The.Lantern.Keeper.2024.1080p.BluRay.x264-NIMBUS</title>
+      <guid isPermaLink="true">https://usenet.example/details/5f2c9a1e</guid>
+      <link>https://usenet.example/getnzb/5f2c9a1e.nzb?i=7&amp;r=KEY</link>
+      <comments>https://usenet.example/details/5f2c9a1e#comments</comments>
+      <pubDate>Wed, 29 Apr 2026 06:00:00 +0000</pubDate>
+      <category>Movies &gt; HD</category>
+      <description>The.Lantern.Keeper.2024.1080p.BluRay.x264-NIMBUS</description>
+      <enclosure url="https://usenet.example/getnzb/5f2c9a1e.nzb?i=7&amp;r=KEY" length="9126805504" type="application/x-nzb" />
+      <newznab:attr name="category" value="2000" />
+      <newznab:attr name="category" value="2040" />
+      <newznab:attr name="size" value="9126805504" />
+      <newznab:attr name="grabs" value="57" />
+      <newznab:attr name="imdb" value="0123456" />
+      <newznab:attr name="usenetdate" value="Wed, 29 Apr 2026 05:41:12 +0000" />
+    </item>
+    <item>
+      <title>The.Lantern.Keeper.2024.720p.WEB-DL.DD5.1.H264-NIMBUS</title>
+      <guid isPermaLink="false">9b8a7c6d</guid>
+      <link>https://usenet.example/getnzb/9b8a7c6d.nzb?i=7&amp;r=KEY</link>
+      <pubDate>Tue, 28 Apr 2026 18:20:00 +0000</pubDate>
+      <enclosure url="https://usenet.example/getnzb/9b8a7c6d.nzb?i=7&amp;r=KEY" length="3221225472" type="application/x-nzb" />
+      <newznab:attr name="category" value="2040" />
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,113 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# The web crate targets wasm32 and is built with Trunk; keep it out of plain `cargo build`.
+default-members = [
+    "crates/reelix-core",
+    "crates/reelix-db",
+    "crates/reelix-jobs",
+    "crates/reelix-api-types",
+    "crates/reelix-api",
+    "crates/reelix-server",
+    "crates/reelix-parser",
+    "crates/reelix-decision",
+    "crates/reelix-metadata",
+    "crates/reelix-indexers",
+    "crates/reelix-downloaders",
+    "crates/reelix-import",
+    "crates/reelix-notify",
+    "crates/reelix-mediaserver",
+    "crates/reelix-lists",
+    "crates/reelix-providers",
+    "crates/reelix-library",
+    "crates/reelix-requests",
+    "crates/reelix-pipeline",
+    "crates/reelix-migrate",
+    "crates/reelix-books",
+    "crates/reelix-music",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/reelix/reelix"
+
+[workspace.dependencies]
+reelix-core = { path = "crates/reelix-core" }
+reelix-db = { path = "crates/reelix-db" }
+reelix-jobs = { path = "crates/reelix-jobs" }
+reelix-api-types = { path = "crates/reelix-api-types" }
+reelix-api = { path = "crates/reelix-api" }
+reelix-parser = { path = "crates/reelix-parser" }
+reelix-decision = { path = "crates/reelix-decision" }
+reelix-metadata = { path = "crates/reelix-metadata" }
+reelix-indexers = { path = "crates/reelix-indexers" }
+reelix-downloaders = { path = "crates/reelix-downloaders" }
+reelix-import = { path = "crates/reelix-import" }
+reelix-notify = { path = "crates/reelix-notify" }
+reelix-mediaserver = { path = "crates/reelix-mediaserver" }
+reelix-lists = { path = "crates/reelix-lists" }
+reelix-providers = { path = "crates/reelix-providers" }
+reelix-library = { path = "crates/reelix-library" }
+reelix-requests = { path = "crates/reelix-requests" }
+reelix-pipeline = { path = "crates/reelix-pipeline" }
+reelix-books = { path = "crates/reelix-books" }
+reelix-music = { path = "crates/reelix-music" }
+
+anyhow = "1"
+argon2 = "0.5"
+aes-gcm = "0.10"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["ws", "macros"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+base64 = "0.22"
+bitflags = "2"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+futures = "0.3"
+hex = "0.4"
+# Audio tags and embedded covers (MP3/FLAC/M4A/M4B/OGG/Opus) for books and music.
+lofty = "0.22"
+quick-xml = { version = "0.37", features = ["serialize"] }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "cookies", "socks", "multipart", "stream"] }
+http-body-util = "0.1"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tempfile = "3"
+url = { version = "2", features = ["serde"] }
+wiremock = "0.6"
+# EPUB (OPF) metadata.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "fs", "set-header", "compression-gzip", "timeout"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+utoipa = { version = "5", features = ["chrono"] }
+utoipa-scalar = { version = "0.3", features = ["axum"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.release.package.reelix-web]
+opt-level = "z"

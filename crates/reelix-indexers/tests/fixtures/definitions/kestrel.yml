@@ -1,0 +1,67 @@
+# Original example definition for a FICTIONAL public JSON API (tests only).
+id: kestrel
+name: Kestrel Index
+description: Fictional public JSON torrent API used by the Reelix test-suite
+language: en-US
+type: public
+links:
+  - https://kestrel.invalid/
+caps:
+  categories:
+    movies: Movies
+    tv: TV
+    anime: TV/Anime
+  modes:
+    search: [q]
+    movie-search: [q, imdbid, tmdbid]
+    tv-search: [q, season, ep, tvdbid]
+settings:
+  - { name: info_api, type: info, label: About, default: "No account needed" }
+search:
+  paths:
+    - path: api/v2/torrents
+      response:
+        type: json
+  inputs:
+    query: "{{ .Keywords }}"
+    imdb: "{{ .Query.IMDBIDShort }}"
+    tmdb: "{{ .Query.TMDBID }}"
+    type: '{{ join .Categories "," }}'
+    limit: 100
+  rows:
+    selector: data.results
+  fields:
+    category:
+      selector: type
+    title:
+      selector: name
+    _id:
+      selector: id
+    details:
+      text: "torrent/{{ .Result._id }}"
+    infohash:
+      selector: hash
+    size:
+      selector: size_bytes
+    seeders:
+      selector: stats.seeders
+    leechers:
+      selector: stats.leechers
+    grabs:
+      selector: stats.completed
+      optional: true
+    date:
+      selector: uploaded_at
+    imdbid:
+      selector: ids.imdb
+      optional: true
+    tmdbid:
+      selector: ids.tmdb
+      optional: true
+    files:
+      selector: file_count
+      optional: true
+    downloadvolumefactor:
+      text: 0
+    uploadvolumefactor:
+      text: 1

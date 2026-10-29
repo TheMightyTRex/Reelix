@@ -1,0 +1,27 @@
+[package]
+name = "reelix-db"
+description = "Reelix persistence: SQLite pool, migrations and repositories"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes-gcm.workspace = true
+base64.workspace = true
+chrono.workspace = true
+rand.workspace = true
+reelix-core.workspace = true
+reelix-decision.workspace = true
+reelix-parser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "data": {
+    "series": { "id": 267440, "name": "Attack on Titan", "slug": "attack-on-titan" },
+    "episodes": [
+      { "id": 4600001, "seriesId": 267440, "name": "Ilse's Notebook", "aired": "2013-12-09", "runtime": 24, "overview": "OAD: the notebook of a Survey Corps soldier.", "image": "https://artworks.thetvdb.com/banners/episodes/267440/4600001.jpg", "isMovie": 0, "number": 1, "absoluteNumber": 0, "seasonNumber": 0, "finaleType": null, "year": "2013" },
+      { "id": 4528611, "seriesId": 267440, "name": "To You, in 2000 Years: The Fall of Shiganshina, Part 1", "aired": "2013-04-07", "runtime": 24, "overview": "After a hundred years of peace, humanity is suddenly reminded of the terror of being at the Titans' mercy.", "image": "https://artworks.thetvdb.com/banners/episodes/267440/4528611.jpg", "isMovie": 0, "number": 1, "absoluteNumber": 1, "seasonNumber": 1, "finaleType": null, "year": "2013" },
+      { "id": 4528612, "seriesId": 267440, "name": "That Day: The Fall of Shiganshina, Part 2", "aired": "2013-04-14", "runtime": 24, "overview": "Eren and Mikasa flee to the inner wall.", "image": "", "isMovie": 0, "number": 2, "absoluteNumber": 2, "seasonNumber": 1, "finaleType": null, "year": "2013" }
+    ]
+  },
+  "links": { "prev": null, "self": "https://api4.thetvdb.com/v4/series/267440/episodes/default/eng?page=0", "next": "https://api4.thetvdb.com/v4/series/267440/episodes/default/eng?page=1", "total_items": 5, "page_size": 3 }
+}

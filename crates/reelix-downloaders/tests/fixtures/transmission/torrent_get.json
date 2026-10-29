@@ -1,0 +1,20 @@
+{"arguments": {"torrents": [
+  {"id": 1, "hashString": "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", "name": "Past.Lives.2023.1080p.WEB-DL.DDP5.1.H.264-FLUX",
+   "downloadDir": "/downloads/complete/movies-reelix", "totalSize": 4000000000, "leftUntilDone": 0, "eta": -1, "status": 6,
+   "error": 0, "errorString": "", "isFinished": false, "uploadRatio": 0.82, "seedRatioLimit": 2, "seedRatioMode": 0,
+   "secondsSeeding": 3600, "labels": [], "percentDone": 1},
+  {"id": 2, "hashString": "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22", "name": "The.Zone.of.Interest.2023.1080p.BluRay.x264-PiGNUS",
+   "downloadDir": "/downloads/complete/movies-reelix", "totalSize": 8000000000, "leftUntilDone": 0, "eta": -1, "status": 0,
+   "error": 0, "errorString": "", "isFinished": true, "uploadRatio": 2.01, "seedRatioLimit": 2, "seedRatioMode": 0,
+   "secondsSeeding": 86400, "labels": ["movies-reelix"], "percentDone": 1},
+  {"id": 3, "hashString": "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33", "name": "Frieren.S01E02.1080p.WEB.H264-VARYG",
+   "downloadDir": "/srv/elsewhere", "totalSize": 1400000000, "leftUntilDone": 700000000, "eta": 140, "status": 4,
+   "error": 2, "errorString": "Tracker gave HTTP response code 404 (Not Found)", "isFinished": false, "uploadRatio": 0,
+   "seedRatioLimit": 2, "seedRatioMode": 0, "secondsSeeding": 0, "labels": ["tv-reelix"], "percentDone": 0.5},
+  {"id": 4, "hashString": "dd44dd44dd44dd44dd44dd44dd44dd44dd44dd44", "name": "debian-12.7.0-amd64-netinst.iso",
+   "downloadDir": "/downloads/complete", "totalSize": 600000000, "leftUntilDone": 0, "eta": -1, "status": 6,
+   "error": 0, "errorString": "", "isFinished": false, "uploadRatio": 9, "labels": [], "percentDone": 1},
+  {"id": 5, "hashString": "ee55ee55ee55ee55ee55ee55ee55ee55ee55ee55", "name": "Frieren.S01E03.1080p.WEB.H264-VARYG",
+   "downloadDir": "/downloads/complete/tv-reelix", "totalSize": 1400000000, "leftUntilDone": 1400000000, "eta": -2, "status": 3,
+   "error": 0, "errorString": "", "isFinished": false, "uploadRatio": -1, "labels": [], "percentDone": 0}
+]}, "result": "success"}

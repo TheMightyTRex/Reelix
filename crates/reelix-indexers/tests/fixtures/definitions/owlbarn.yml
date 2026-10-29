@@ -1,0 +1,95 @@
+# Original example definition for a FICTIONAL semi-private tracker (tests only).
+id: owlbarn
+name: Owl Barn
+description: Fictional semi-private tracker with a CSRF-protected login form
+language: en-GB
+type: semi-private
+links:
+  - https://owlbarn.invalid/
+caps:
+  categorymappings:
+    - { id: films, cat: Movies, desc: Films }
+    - { id: series, cat: TV, desc: Series }
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+settings:
+  - { name: username, type: text, label: Username }
+  - { name: password, type: password, label: Password }
+login:
+  path: account/login
+  method: form
+  form: form#signin
+  inputs:
+    user: "{{ .Config.username }}"
+    pass: "{{ .Config.password }}"
+  error:
+    - selector: p.flash-error
+      message:
+        selector: p.flash-error > span
+  test:
+    path: account
+    selector: "#whoami"
+search:
+  paths:
+    - path: films/search
+      categories: [films]
+    - path: series/search
+      categories: [series]
+  inputs:
+    q: "{{ .Keywords }}"
+  keywordsfilters:
+    - name: tolower
+  rows:
+    selector: ul.results > li
+  fields:
+    category:
+      selector: span.section
+      filters:
+        - name: tolower
+        - name: trim
+    title:
+      selector: h3
+      filters:
+        - name: re_replace
+          args: ["\\s*\\[[^\\]]*\\]$", ""]
+    details:
+      selector: h3 > a
+      attribute: href
+    magnet:
+      selector: a.magnet
+      attribute: href
+    download:
+      selector: a.torrent
+      attribute: href
+      optional: true
+    size:
+      selector: span.meta
+      filters:
+        - name: split
+          args: ["|", 0]
+        - name: trim
+    seeders:
+      selector: span.meta
+      filters:
+        - name: split
+          args: ["|", 1]
+        - name: regexp
+          args: "(\\d+)"
+    leechers:
+      selector: span.meta
+      filters:
+        - name: split
+          args: ["|", 2]
+        - name: regexp
+          args: "(\\d+)"
+    date:
+      selector: time
+      filters:
+        - name: append
+          args: " ago"
+        - name: timeago
+download:
+  selectors:
+    - selector: a#dl
+      attribute: href

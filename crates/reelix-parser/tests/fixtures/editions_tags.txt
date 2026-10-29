@@ -1,0 +1,99 @@
+# Editions, HDR, 3D, audio layouts, hardcoded subs, revisions on movies.
+The.Long.Expedition.2001.Directors.Cut.1080p.BluRay.x264-GRP => t=The Long Expedition; y=2001; ed=Directors Cut
+The.Long.Expedition.2001.Director's.Cut.720p.BluRay.x264-GRP => ed=Director's Cut
+The.Long.Expedition.2001.EXTENDED.1080p.BluRay.x264-GRP => ed=EXTENDED
+The.Long.Expedition.2001.Extended.Edition.1080p.BluRay.x264-GRP => ed=Extended Edition
+The.Long.Expedition.2001.Extended.Cut.2160p.UHD.BluRay.x265-GRP => ed=Extended Cut
+The.Long.Expedition.2001.Theatrical.Cut.1080p.BluRay.x264-GRP => ed=Theatrical Cut
+The.Long.Expedition.2001.THEATRICAL.1080p.BluRay.x264-GRP => ed=THEATRICAL
+The.Long.Expedition.2001.UNRATED.1080p.BluRay.x264-GRP => ed=UNRATED
+The.Long.Expedition.2001.Unrated.Cut.720p.BluRay.x264-GRP => ed=Unrated Cut
+The.Long.Expedition.2001.UNCUT.1080p.BluRay.x264-GRP => ed=UNCUT
+The.Long.Expedition.2001.IMAX.1080p.WEB-DL.DDP5.1.H.264-GRP => ed=IMAX; q=WEBDL-1080p
+The.Long.Expedition.2001.IMAX.Enhanced.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-GRP => ed=IMAX Enhanced; svc=DSNP; hdr=dolby_vision,hdr10
+The.Long.Expedition.2001.REMASTERED.1080p.BluRay.x264-GRP => ed=REMASTERED
+The.Long.Expedition.2001.Criterion.Collection.1080p.BluRay.x264-GRP => ed=Criterion Collection
+The.Long.Expedition.2001.CRITERION.1080p.BluRay.x264-GRP => ed=CRITERION
+The.Long.Expedition.2001.Special.Edition.1080p.BluRay.x264-GRP => ed=Special Edition
+The.Long.Expedition.2001.Collectors.Edition.1080p.BluRay.x264-GRP => ed=Collectors Edition
+The.Long.Expedition.2001.Ultimate.Cut.1080p.BluRay.x264-GRP => ed=Ultimate Cut
+The.Long.Expedition.2001.Ultimate.Edition.1080p.BluRay.x264-GRP => ed=Ultimate Edition
+The.Long.Expedition.2001.Final.Cut.1080p.BluRay.x264-GRP => ed=Final Cut
+The.Long.Expedition.2001.Rogue.Cut.1080p.BluRay.x264-GRP => ed=Rogue Cut
+The.Long.Expedition.2001.25th.Anniversary.Edition.1080p.BluRay.x264-GRP => ed=25th Anniversary Edition
+The.Long.Expedition.2001.Anniversary.Edition.1080p.BluRay.x264-GRP => ed=Anniversary Edition
+The.Long.Expedition.2001.Open.Matte.1080p.WEB-DL.x264-GRP => ed=Open Matte
+The.Long.Expedition.2001.Despecialized.720p.x264-GRP => ed=Despecialized
+The.Long.Expedition.2001.Black.and.Chrome.1080p.BluRay.x264-GRP => ed=Black and Chrome
+The.Long.Expedition.2001.Redux.1080p.BluRay.x264-GRP => ed=Redux
+The.Long.Expedition.2001.Fan.Edit.1080p.x264-GRP => ed=Fan Edit
+The.Long.Expedition.2001.Uncensored.1080p.WEB-DL.x264-GRP => ed=Uncensored
+The.Long.Expedition.2001.Extended.Remastered.1080p.BluRay.x264-GRP => ed=Extended Remastered
+The.Long.Expedition.2001.1080p.BluRay.x264-GRP => ed=-
+The.Long.Expedition.2001.Limited.1080p.BluRay.x264-GRP => ed=-
+The Long Expedition (2001) Directors Cut (1080p BluRay x265 10bit Tigole) => ed=Directors Cut; g=Tigole
+The Long Expedition (2001) {edition-Extended} [Bluray-1080p] => t=The Long Expedition; y=2001; ed=Extended; q=Bluray-1080p
+Starfall.Protocol.2022.2160p.WEB-DL.DDP5.1.Atmos.DV.H.265-FLUX => hdr=dolby_vision; q=WEBDL-2160p
+Starfall.Protocol.2022.2160p.WEB-DL.DDP5.1.Atmos.HDR.H.265-FLUX => hdr=hdr10
+Starfall.Protocol.2022.2160p.WEB-DL.DDP5.1.Atmos.HDR10.H.265-FLUX => hdr=hdr10
+Starfall.Protocol.2022.2160p.AMZN.WEB-DL.DDP5.1.HDR10+.H.265-FLUX => hdr=hdr10_plus; svc=AMZN
+Starfall.Protocol.2022.2160p.AMZN.WEB-DL.DDP5.1.HDR10Plus.H.265-FLUX => hdr=hdr10_plus
+Starfall.Protocol.2022.2160p.WEB-DL.DDP5.1.DV.HDR10+.H.265-FLUX => hdr=dolby_vision,hdr10_plus
+Starfall.Protocol.2022.2160p.UHD.BluRay.x265.DoVi.HDR.TrueHD.Atmos.7.1-GRP => hdr=dolby_vision,hdr10; ac=true_hd,atmos; ch=7.1
+Starfall.Protocol.2022.2160p.BluRay.REMUX.DV.HDR10.HEVC.TrueHD.7.1.Atmos-FraMeSToR => q=Remux-2160p; hdr=dolby_vision,hdr10; g=FraMeSToR
+Starfall.Protocol.2022.2160p.HLG.WEB-DL.H.265-GRP => hdr=hlg
+Starfall.Protocol.2022.2160p.WEB-DL.PQ.H.265-GRP => hdr=pq
+Starfall.Protocol.2022.2160p.WEB-DL.SDR.H.265-GRP => hdr=
+Starfall.Protocol.2022.1080p.BluRay.x264-GRP => hdr=
+Starfall Protocol (2022) 2160p UHD BluRay HDR DV x265 TrueHD Atmos 7.1 => hdr=hdr10,dolby_vision; q=Bluray-2160p; ch=7.1
+Starfall.Protocol.2022.3D.1080p.BluRay.Half-SBS.x264-GRP => 3d=true; q=Bluray-1080p
+Starfall.Protocol.2022.1080p.3D.BluRay.HSBS.x264-GRP => 3d=true
+Starfall.Protocol.2022.1080p.BluRay.3D.H-OU.x264-GRP => 3d=true
+Starfall.Protocol.2022.1080p.BluRay.MVC-GRP => 3d=true
+Starfall.Protocol.2022.1080p.BluRay.x264-GRP => 3d=false
+Step.Up.3D.2010.1080p.BluRay.x264-GRP => t=Step Up 3D; y=2010; 3d=false
+Starfall.Protocol.2022.HC.HDRip.x264-GRP => hc=true
+Starfall.Protocol.2022.1080p.HC.WEB-DL.x264-GRP => hc=true
+Starfall.Protocol.2022.KORSUB.1080p.HDRip.x264-GRP => hc=true
+Starfall.Protocol.2022.720p.HDCAM.ENGSUB.x264-GRP => hc=true; q=CAM
+Starfall.Protocol.2022.1080p.WEBRip.x264.HardSub-GRP => hc=true
+Starfall.Protocol.2022.SUBBED.HDRip.x264-GRP => hc=true
+Starfall.Protocol.2022.1080p.BluRay.x264.SoftSubs-GRP => hc=false
+Starfall.Protocol.2022.1080p.BluRay.x264.MultiSubs-GRP => hc=false
+Starfall.Protocol.2022.PROPER.1080p.BluRay.x264-GRP => v=2; repack=false
+Starfall.Protocol.2022.REPACK.1080p.BluRay.x264-GRP => v=2; repack=true
+Starfall.Protocol.2022.REPACK2.1080p.BluRay.x264-GRP => v=3; repack=true
+Starfall.Protocol.2022.REAL.PROPER.1080p.BluRay.x264-GRP => v=2; real=1
+Starfall.Protocol.2022.1080p.BluRay.x264-GRP => v=1; real=0; repack=false
+Starfall.Protocol.2022.iNTERNAL.1080p.BluRay.x264-GRP => v=1; t=Starfall Protocol
+Starfall.Protocol.2022.LIMITED.1080p.BluRay.x264-GRP => t=Starfall Protocol
+Starfall.Protocol.2022.1080p.BluRay.DD+5.1.x264-GRP => ac=eac3; ch=5.1
+Starfall.Protocol.2022.1080p.WEB-DL.DDP2.0.H.264-GRP => ac=eac3; ch=2.0
+Starfall.Protocol.2022.1080p.WEB-DL.EAC3.5.1.H.264-GRP => ac=eac3; ch=5.1
+Starfall.Protocol.2022.1080p.WEB-DL.AC3.5.1.H.264-GRP => ac=ac3; ch=5.1
+Starfall.Protocol.2022.1080p.WEB-DL.DD2.0.H.264-GRP => ac=ac3; ch=2.0
+Starfall.Protocol.2022.1080p.BluRay.DTS-HD.MA.7.1.x264-GRP => ac=dts_hd_ma; ch=7.1
+Starfall.Protocol.2022.1080p.BluRay.DTS-HD.MA.5.1.x264-GRP => ac=dts_hd_ma; ch=5.1
+Starfall.Protocol.2022.1080p.BluRay.DTS-MA.5.1.x264-GRP => ac=dts_hd_ma
+Starfall.Protocol.2022.1080p.BluRay.DTS-HD.HRA.5.1.x264-GRP => ac=dts
+Starfall.Protocol.2022.1080p.BluRay.DTS.5.1.x264-GRP => ac=dts; ch=5.1
+Starfall.Protocol.2022.1080p.BluRay.DTS-X.MA.7.1.x264-GRP => ac=dts_x
+Starfall.Protocol.2022.1080p.BluRay.TrueHD.5.1.x264-GRP => ac=true_hd; ch=5.1
+Starfall.Protocol.2022.1080p.BluRay.TrueHD.Atmos.7.1.x264-GRP => ac=true_hd,atmos; ch=7.1
+Starfall.Protocol.2022.1080p.BluRay.AAC5.1.x264-GRP => ac=aac; ch=5.1
+Starfall.Protocol.2022.1080p.BluRay.AAC.2.0.x264-GRP => ac=aac; ch=2.0
+Starfall.Protocol.2022.1080p.BluRay.FLAC.1.0.x264-GRP => ac=flac; ch=1.0
+Starfall.Protocol.2022.720p.BluRay.6CH.x264-GRP => ch=5.1
+Starfall.Protocol.2022.720p.BluRay.2CH.x264-GRP => ch=2.0
+Starfall.Protocol.2022.1080p.BluRay.x264.DTS-HD.MA.5.1.AC3-GRP => ac=dts_hd_ma,ac3; ch=5.1
+Starfall.Protocol.2022.1080p.BluRay.x264-GRP => ac=; ch=-
+Starfall.Protocol.2022.1080p.BluRay.H.264-GRP => vc=h264
+Starfall.Protocol.2022.1080p.BluRay.H264-GRP => vc=h264
+Starfall.Protocol.2022.1080p.BluRay.AVC.REMUX-GRP => vc=h264; q=Remux-1080p
+Starfall.Protocol.2022.2160p.BluRay.H.265-GRP => vc=h265
+Starfall.Protocol.2022.2160p.BluRay.HEVC-GRP => vc=h265
+Starfall.Protocol.2022.1080p.WEB-DL.AV1-GRP => vc=av1
+Starfall.Protocol.2022.1080p.WEB-DL.VP9-GRP => vc=vp9
+Starfall.Protocol.2022.DVDRip.XviD-GRP => vc=xvid
+Starfall.Protocol.2022.DVDRip.DivX-GRP => vc=divx
+Starfall.Protocol.2022.1080i.HDTV.MPEG2-GRP => vc=mpeg2

@@ -1,0 +1,14 @@
+{"version": "1.1", "id": 4, "result": [
+  {"NZBID": 41, "NZBName": "The.Bear.S03E01.1080p.WEB.h264-ETHEL", "NZBNicename": "The.Bear.S03E01.1080p.WEB.h264-ETHEL",
+   "Kind": "NZB", "URL": "", "NZBFilename": "The.Bear.S03E01.1080p.WEB.h264-ETHEL.nzb", "DestDir": "/downloads/intermediate/The.Bear.S03E01.1080p.WEB.h264-ETHEL.#41",
+   "FinalDir": "", "Category": "tv", "FileSizeLo": 2147483648, "FileSizeHi": 0, "FileSizeMB": 2048,
+   "RemainingSizeLo": 1073741824, "RemainingSizeHi": 0, "RemainingSizeMB": 1024, "PausedSizeLo": 0, "PausedSizeHi": 0, "PausedSizeMB": 0,
+   "FileCount": 40, "RemainingFileCount": 20, "RemainingParCount": 4, "MinPostTime": 1730000000, "MaxPostTime": 1730000100,
+   "MinPriority": 0, "MaxPriority": 50, "ActiveDownloads": 8, "Status": "DOWNLOADING", "Health": 1000, "CriticalHealth": 900,
+   "DupeKey": "", "DupeScore": 0, "DupeMode": "SCORE", "Parameters": [], "ScriptStatuses": []},
+  {"NZBID": 42, "NZBName": "Shogun.2024.S01E05.2160p.WEB.H265-NHTFS", "Category": "tv", "FileSizeLo": 0, "FileSizeHi": 1,
+   "RemainingSizeLo": 0, "RemainingSizeHi": 0, "PausedSizeLo": 0, "PausedSizeHi": 0, "MaxPriority": 0, "Status": "UNPACKING",
+   "DestDir": "/downloads/intermediate/Shogun.#42"},
+  {"NZBID": 43, "NZBName": "Ubuntu.24.04.Desktop.amd64", "Category": "software", "FileSizeLo": 5000, "FileSizeHi": 0,
+   "RemainingSizeLo": 5000, "RemainingSizeHi": 0, "MaxPriority": 0, "Status": "QUEUED", "DestDir": ""}
+]}

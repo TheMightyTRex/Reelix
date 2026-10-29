@@ -1,0 +1,16 @@
+# Keep the build context small and the chef cache stable.
+target/
+**/target/
+.git/
+.github/
+data/
+dev-data/
+crates/reelix-web/dist/
+**/node_modules/
+*.db
+*.db-shm
+*.db-wal
+.env
+.idea/
+.vscode/
+docker/docker-compose*.yml

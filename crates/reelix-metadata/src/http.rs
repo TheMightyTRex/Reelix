@@ -1,0 +1,216 @@
+//! Shared HTTP plumbing: sliding-window rate limiting, retry on 429/5xx and a TTL cache.
+
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use reqwest::{RequestBuilder, Response, StatusCode};
+use serde_json::Value;
+use tokio::time::Instant;
+
+use crate::MetaError;
+
+/// Allows at most `max` requests in any rolling `period`.
+#[derive(Debug)]
+pub struct RateLimiter {
+    max: usize,
+    period: Duration,
+    sent: tokio::sync::Mutex<VecDeque<Instant>>,
+}
+
+impl RateLimiter {
+    pub fn new(max: usize, period: Duration) -> Self {
+        Self {
+            max: max.max(1),
+            period,
+            sent: tokio::sync::Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// Waits until a request slot is free and claims it.
+    pub async fn acquire(&self) {
+        let mut sent = self.sent.lock().await;
+        loop {
+            let now = Instant::now();
+            while sent
+                .front()
+                .is_some_and(|t| now.duration_since(*t) >= self.period)
+            {
+                sent.pop_front();
+            }
+            if sent.len() < self.max {
+                sent.push_back(now);
+                return;
+            }
+            // Holding the lock while sleeping keeps waiters in FIFO order.
+            let wait_until = sent[0] + self.period;
+            tokio::time::sleep_until(wait_until).await;
+        }
+    }
+}
+
+/// How failed requests are retried.
+#[derive(Debug, Clone)]
+pub struct RetryPolicy {
+    /// Retries after the first attempt (429 and 5xx only).
+    pub max_retries: u32,
+    /// Backoff when the server sent no `Retry-After`; doubled per attempt.
+    pub base_backoff: Duration,
+    /// Upper bound for any single wait.
+    pub max_wait: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            base_backoff: Duration::from_millis(500),
+            max_wait: Duration::from_secs(30),
+        }
+    }
+}
+
+fn retry_after(resp: &Response) -> Option<Duration> {
+    let v = resp.headers().get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    v.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|s| *s >= 0.0)
+        .map(Duration::from_secs_f64)
+}
+
+/// Sends a request (rebuilt per attempt), honouring the limiter and retrying 429/5xx.
+pub(crate) async fn send(
+    build: impl Fn() -> RequestBuilder,
+    limiter: Option<&RateLimiter>,
+    policy: &RetryPolicy,
+) -> Result<Response, MetaError> {
+    let mut attempt = 0;
+    loop {
+        if let Some(l) = limiter {
+            l.acquire().await;
+        }
+        let result = build().send().await;
+        let wait = match &result {
+            Ok(resp) if resp.status() == StatusCode::TOO_MANY_REQUESTS || resp.status().is_server_error() => {
+                retry_after(resp).unwrap_or(policy.base_backoff * 2u32.saturating_pow(attempt))
+            }
+            Err(e) if e.is_timeout() || e.is_connect() => policy.base_backoff * 2u32.saturating_pow(attempt),
+            _ => return result.map_err(MetaError::from),
+        };
+        if attempt >= policy.max_retries {
+            return match result {
+                Ok(resp) if resp.status() == StatusCode::TOO_MANY_REQUESTS => Err(MetaError::RateLimited {
+                    retry_after_secs: retry_after(&resp).map(|d| d.as_secs()),
+                }),
+                other => other.map_err(MetaError::from),
+            };
+        }
+        attempt += 1;
+        let wait = wait.min(policy.max_wait);
+        tracing::debug!(
+            attempt,
+            wait_ms = wait.as_millis() as u64,
+            "metadata request throttled, retrying"
+        );
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// Small in-memory cache of decoded JSON responses with per-entry expiry.
+#[derive(Debug)]
+pub struct TtlCache {
+    max_entries: usize,
+    entries: Mutex<HashMap<String, (Instant, Arc<Value>)>>,
+}
+
+impl TtlCache {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            max_entries,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<Arc<Value>> {
+        let mut map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        match map.get(key) {
+            Some((exp, v)) if *exp > Instant::now() => Some(v.clone()),
+            Some(_) => {
+                map.remove(key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub fn insert(&self, key: String, value: Arc<Value>, ttl: Duration) {
+        if self.max_entries == 0 || ttl.is_zero() {
+            return;
+        }
+        let now = Instant::now();
+        let mut map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= self.max_entries {
+            map.retain(|_, (exp, _)| *exp > now);
+        }
+        if map.len() >= self.max_entries {
+            // Still full: drop the entry closest to expiry.
+            if let Some(k) = map
+                .iter()
+                .min_by_key(|(_, (exp, _))| *exp)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&k);
+            }
+        }
+        map.insert(key, (now + ttl, value));
+    }
+
+    pub fn clear(&self) {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn limiter_spaces_requests_over_the_window() {
+        let l = RateLimiter::new(3, Duration::from_secs(10));
+        let start = Instant::now();
+        for _ in 0..3 {
+            l.acquire().await;
+        }
+        assert!(start.elapsed() < Duration::from_millis(1));
+        l.acquire().await;
+        assert!(start.elapsed() >= Duration::from_secs(10));
+        // 5th and 6th fit in the same second window as the 4th.
+        l.acquire().await;
+        l.acquire().await;
+        assert!(start.elapsed() < Duration::from_secs(11));
+        l.acquire().await;
+        assert!(start.elapsed() >= Duration::from_secs(20));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cache_expires_and_evicts() {
+        let c = TtlCache::new(2);
+        c.insert("a".into(), Arc::new(Value::from(1)), Duration::from_secs(5));
+        c.insert("b".into(), Arc::new(Value::from(2)), Duration::from_secs(50));
+        assert_eq!(c.get("a").as_deref(), Some(&Value::from(1)));
+        c.insert("c".into(), Arc::new(Value::from(3)), Duration::from_secs(50));
+        assert_eq!(c.len(), 2);
+        assert!(c.get("a").is_none(), "closest-to-expiry entry evicted");
+        tokio::time::advance(Duration::from_secs(51)).await;
+        assert!(c.get("b").is_none());
+    }
+}

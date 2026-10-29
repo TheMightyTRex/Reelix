@@ -1,0 +1,13 @@
+{
+  "MediaContainer": {
+    "size": 2,
+    "Metadata": [
+      { "historyKey": "/status/sessions/history/301", "ratingKey": "6155", "type": "episode", "title": "Low Tide",
+        "grandparentTitle": "Harbor Lights", "grandparentRatingKey": "6100", "parentIndex": 2, "index": 5,
+        "viewedAt": 1792098825, "accountID": 2, "deviceID": 4 },
+      { "historyKey": "/status/sessions/history/300", "ratingKey": "5012", "type": "movie", "title": "The Lighthouse Keeper",
+        "year": 2023, "viewedAt": 1791925331, "accountID": 2, "deviceID": 4 },
+      { "historyKey": "/status/sessions/history/299", "ratingKey": "8001", "type": "track", "title": "Song", "viewedAt": 1791900000, "accountID": 2 }
+    ]
+  }
+}

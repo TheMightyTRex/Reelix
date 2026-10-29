@@ -1,0 +1,9 @@
+{
+  "page": 2,
+  "results": [
+    { "adult": false, "backdrop_path": "/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg", "id": 1396, "name": "Breaking Bad", "original_name": "Breaking Bad", "overview": "Walter White...", "poster_path": "/ztkUQFLlC19CCMYHW9o1zWhJRNq.jpg", "original_language": "en", "genre_ids": [18, 80], "popularity": 352.1, "first_air_date": "2008-01-20", "vote_average": 8.9, "vote_count": 14500, "origin_country": ["US"] },
+    { "adult": false, "backdrop_path": "/x4salpjB11umlUOltfNvSSrjSXm.jpg", "id": 1402, "name": "The Walking Dead", "original_name": "The Walking Dead", "overview": "Sheriff's deputy Rick Grimes awakens from a coma...", "poster_path": "/n7PVu0hSz2sAsVekpOIoCnkWlbn.jpg", "original_language": "en", "genre_ids": [10759, 18, 10765], "popularity": 400.0, "first_air_date": "2010-10-31", "vote_average": 8.1, "vote_count": 16000, "origin_country": ["US"] }
+  ],
+  "total_pages": 12,
+  "total_results": 231
+}

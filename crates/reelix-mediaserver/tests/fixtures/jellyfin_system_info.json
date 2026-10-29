@@ -1,0 +1,9 @@
+{
+  "LocalAddress": "http://172.18.0.5:8096",
+  "ServerName": "living-room",
+  "Version": "10.10.3",
+  "ProductName": "Jellyfin Server",
+  "OperatingSystem": "Linux",
+  "Id": "4b1c9e0f7a2d4e6b8c3f1a5d9e7b2c40",
+  "StartupWizardCompleted": true
+}

@@ -1,0 +1,4 @@
+[
+ {"rank":1,"id":101,"listed_at":"2026-01-10T10:00:00.000Z","type":"movie","movie":{"title":"Dune: Part Two","year":2024,"ids":{"trakt":367444,"slug":"dune-part-two-2024","imdb":"tt15239678","tmdb":693134}}},
+ {"rank":2,"id":102,"listed_at":"2026-01-11T10:00:00.000Z","type":"movie","movie":{"title":"Arrival","year":2016,"ids":{"trakt":210803,"slug":"arrival-2016","imdb":"tt2543164","tmdb":329865}}}
+]

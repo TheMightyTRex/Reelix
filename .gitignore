@@ -1,0 +1,9 @@
+/target
+/data
+/crates/reelix-web/dist
+*.db
+*.db-shm
+*.db-wal
+.env
+/crates/*/data
+*.log

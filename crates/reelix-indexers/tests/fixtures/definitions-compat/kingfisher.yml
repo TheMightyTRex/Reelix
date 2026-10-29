@@ -1,0 +1,42 @@
+# Original example definition for a FICTIONAL RSS feed (tests only). Exercises: XML responses.
+id: kingfisher
+name: Kingfisher Feed
+description: Fictional public RSS feed with torznab attributes
+language: en-US
+type: public
+links:
+  - https://kingfisher.invalid/
+caps:
+  categorymappings:
+    - { id: "2000", cat: Movies, desc: Movies }
+    - { id: "5000", cat: TV, desc: TV }
+  modes:
+    search: [q]
+search:
+  paths:
+    - path: rss.xml
+      response:
+        type: xml
+  inputs:
+    q: "{{ .Keywords }}"
+  rows:
+    selector: rss > channel > item
+  fields:
+    category:
+      selector: 'torznab\:attr[name="category"]'
+      attribute: value
+    title:
+      selector: title
+    details:
+      selector: comments
+    download:
+      selector: enclosure
+      attribute: url
+    size:
+      selector: enclosure
+      attribute: length
+    seeders:
+      selector: '[name=seeders]'
+      attribute: value
+    date:
+      selector: pubDate

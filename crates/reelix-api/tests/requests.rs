@@ -1,0 +1,706 @@
+//! API flows for requests, discovery, issues, users, external login and the M6 settings.
+
+use std::sync::Arc;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{HeaderMap, Method, Request, StatusCode, header};
+use http_body_util::BodyExt;
+use reelix_api::{ApiConfig, AppState};
+use reelix_core::bus::EventBus;
+use reelix_core::{AuthSource, MediaKind, Permissions};
+use reelix_db::secrets::SecretBox;
+use reelix_db::{Db, NewUser};
+use reelix_jobs::JobSystem;
+use reelix_requests::fakes::{
+    self, FakeDirectory, FakeLibrary, FakeMediaServer, FakeMetadata, FakeNotifications,
+};
+use reelix_requests::{MediaServerKind, RequestDeps, RequestService};
+use serde_json::{Value, json};
+use tower::ServiceExt;
+
+const PW: &str = "correct-horse-battery";
+
+struct TestApp {
+    router: Router,
+    lib: FakeLibrary,
+}
+
+async fn app_with(dir: FakeDirectory) -> TestApp {
+    let dir_tmp = tempfile::tempdir().unwrap();
+    let db = Db::in_memory().await.unwrap();
+    let events = EventBus::default();
+    let system = JobSystem::builder(db.clone(), events.clone()).build();
+    let secrets = SecretBox::from_key([7u8; 32]);
+    let lib = FakeLibrary::default();
+    let svc = RequestService::new(RequestDeps {
+        db: db.clone(),
+        events: events.clone(),
+        secrets: secrets.clone(),
+        library: Arc::new(lib.clone()),
+        media_servers: Arc::new(dir),
+        metadata: Arc::new(
+            FakeMetadata::default()
+                .with_movie(fakes::movie(603, "The Matrix", 1999))
+                .with_series(fakes::series(1399, "Game of Thrones", 2))
+                .with_hits(vec![fakes::hit(MediaKind::Movie, 603, "The Matrix")]),
+        ),
+        notifications: Arc::new(FakeNotifications::default()),
+        http: None,
+    });
+    let hash = reelix_api::auth::hash_password(PW).unwrap();
+    for (name, p) in [("admin", Permissions::ADMIN), ("alice", Permissions::ROLE_USER)] {
+        db.users()
+            .create(NewUser {
+                username: name.into(),
+                email: None,
+                display_name: None,
+                password_hash: Some(hash.clone()),
+                auth_source: AuthSource::Local,
+                permissions: p,
+            })
+            .await
+            .unwrap();
+    }
+    let config = ApiConfig {
+        url_base: String::new(),
+        data_dir: dir_tmp.path().to_path_buf(),
+        database: "sqlite".into(),
+        start_time: chrono::Utc::now(),
+    };
+    std::mem::forget(dir_tmp);
+    let state = AppState::new(db, events, system.queue(), secrets, config).with_extension(Arc::new(svc));
+    TestApp {
+        router: reelix_api::router(state),
+        lib,
+    }
+}
+
+async fn app() -> TestApp {
+    app_with(FakeDirectory::new("http://127.0.0.1:9")).await
+}
+
+struct Resp {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Value,
+}
+
+async fn call(app: &TestApp, m: Method, uri: &str, cookie: Option<&str>, body: Option<Value>) -> Resp {
+    let mut b = Request::builder()
+        .method(m)
+        .uri(uri)
+        .header("x-reelix-request", "1")
+        .header(header::HOST, "reelix.local");
+    if let Some(c) = cookie {
+        b = b.header(header::COOKIE, c);
+    }
+    let req = match body {
+        Some(v) => b
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(v.to_string()))
+            .unwrap(),
+        None => b.body(Body::empty()).unwrap(),
+    };
+    let res = app.router.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    Resp {
+        status,
+        headers,
+        body,
+    }
+}
+
+fn cookie_of(r: &Resp) -> String {
+    r.headers
+        .get(header::SET_COOKIE)
+        .expect("set-cookie")
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+async fn login(app: &TestApp, user: &str) -> String {
+    let r = call(
+        app,
+        Method::POST,
+        "/api/v1/auth/login",
+        None,
+        Some(json!({"username": user, "password": PW})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    cookie_of(&r)
+}
+
+#[tokio::test]
+async fn request_routes() {
+    let app = app().await;
+    let admin = login(&app, "admin").await;
+    let alice = login(&app, "alice").await;
+
+    let r = call(&app, Method::GET, "/api/v1/requests", None, None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests",
+        Some(&alice),
+        Some(json!({"kind": "movie", "tmdb_id": 603})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["status"], "pending");
+    let id = r.body["id"].as_i64().unwrap();
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests",
+        Some(&alice),
+        Some(json!({"kind": "movie", "tmdb_id": 603})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/requests/{id}/approve"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests?status=pending",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["total"], 1);
+    assert_eq!(r.body["items"][0]["requested_by"]["username"], "alice");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests?status=nope",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/requests/{id}/approve"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["status"], "approved");
+    assert_eq!(app.lib.state().added_movies.len(), 1);
+
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests",
+        Some(&alice),
+        Some(json!({"kind": "series", "tmdb_id": 1399, "seasons": [2]})),
+    )
+    .await;
+    let tv = r.body["id"].as_i64().unwrap();
+    // Decline without a body, then with a reason.
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/requests/{tv}/decline"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(r.body["decline_reason"].is_null());
+    let r = call(&app, Method::GET, "/api/v1/requests/count", Some(&alice), None).await;
+    assert_eq!(r.body["total"], 2);
+    assert_eq!(r.body["declined"], 1);
+    let r = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/requests/{tv}"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/requests/{tv}"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    let me = call(&app, Method::GET, "/api/v1/auth/me", Some(&alice), None).await;
+    let uid = me.body["id"].as_i64().unwrap();
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/users/{uid}/quota"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["movie"]["used"], 1);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests/options?kind=movie",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests/options?kind=series",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // Settings: admin only, validated.
+    let r = call(&app, Method::GET, "/api/v1/settings/requests", Some(&alice), None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let mut s = call(&app, Method::GET, "/api/v1/settings/requests", Some(&admin), None)
+        .await
+        .body;
+    s["series_type"] = json!("weird");
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/requests",
+        Some(&admin),
+        Some(s.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    s["series_type"] = json!("anime");
+    s["movie_quota_limit"] = json!(5);
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/requests",
+        Some(&admin),
+        Some(s),
+    )
+    .await;
+    assert_eq!(r.body["movie_quota_limit"], 5);
+
+    // Profile notification prefs.
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/profile/notifications",
+        Some(&alice),
+        Some(json!({"events": ["request_available"]})),
+    )
+    .await;
+    assert_eq!(r.body["events"], json!(["request_available"]));
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/profile/notifications",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["events"], json!(["request_available"]));
+}
+
+#[tokio::test]
+async fn discover_and_media_routes() {
+    let app = app().await;
+    let alice = login(&app, "alice").await;
+    for uri in [
+        "/api/v1/discover/trending",
+        "/api/v1/discover/popular-series?page=2",
+        "/api/v1/discover/genre/movie/28",
+        "/api/v1/discover/network/213",
+        "/api/v1/media/movie/603/recommendations",
+        "/api/v1/media/tv/1399/similar",
+    ] {
+        let r = call(&app, Method::GET, uri, Some(&alice), None).await;
+        assert_eq!(r.status, StatusCode::OK, "{uri}: {:?}", r.body);
+        assert_eq!(r.body["results"][0]["tmdb_id"], 603, "{uri}");
+    }
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/unknown-feed",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/genres/movie",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.body[0]["name"], "Action");
+    let r = call(&app, Method::GET, "/api/v1/search?q=matrix", Some(&alice), None).await;
+    assert_eq!(r.body["results"][0]["availability"], "unknown");
+    let r = call(&app, Method::GET, "/api/v1/media/movie/603", Some(&alice), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["title"], "The Matrix");
+    assert_eq!(r.body["request_ability"]["can_request"], true);
+    let r = call(&app, Method::GET, "/api/v1/media/tv/1399", Some(&alice), None).await;
+    assert_eq!(r.body["seasons"].as_array().unwrap().len(), 2);
+    let r = call(&app, Method::GET, "/api/v1/media/movie/1", Some(&alice), None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn issue_routes() {
+    let app = app().await;
+    let admin = login(&app, "admin").await;
+    let alice = login(&app, "alice").await;
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/issues",
+        Some(&alice),
+        Some(json!({"kind": "movie", "tmdb_id": 603, "issue_type": "subtitles", "message": "missing subs"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let id = r.body["id"].as_i64().unwrap();
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/issues/{id}/comments"),
+        Some(&admin),
+        Some(json!({"message": "on it"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(r.body["comments"][0]["message"], "on it");
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/issues/{id}/resolve"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["status"], "resolved");
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/issues/{id}/reopen"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["status"], "open");
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/issues/{id}"),
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["comments"].as_array().unwrap().len(), 1);
+    let r = call(&app, Method::GET, "/api/v1/issues/count", Some(&admin), None).await;
+    assert_eq!(r.body["open"], 1);
+    let r = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/issues/{id}"),
+        Some(&alice),
+        Some(json!({"issue_type": "video"})),
+    )
+    .await;
+    assert_eq!(r.body["issue_type"], "video");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/issues?status=open",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["total"], 1);
+    let r = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/issues/{id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn user_routes() {
+    let app = app().await;
+    let admin = login(&app, "admin").await;
+    let alice = login(&app, "alice").await;
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/users", Some(&alice), None)
+            .await
+            .status,
+        StatusCode::FORBIDDEN
+    );
+    let r = call(&app, Method::GET, "/api/v1/users/roles", Some(&alice), None).await;
+    assert_eq!(r.body["roles"].as_array().unwrap().len(), 4);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/users",
+        Some(&admin),
+        Some(json!({"username": "bob", "password": "short"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/users",
+        Some(&admin),
+        Some(json!({"username": "bob", "password": PW, "permissions": 96})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let bob_id = r.body["id"].as_i64().unwrap();
+    assert_eq!(r.body["has_password"], true);
+    let bob = login(&app, "bob").await;
+
+    // Password reset by admin logs bob out.
+    let mut u = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/users/{bob_id}"),
+        Some(&admin),
+        None,
+    )
+    .await
+    .body;
+    u["password"] = json!("another-long-password");
+    u["display_name"] = json!("Bobby");
+    let r = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/users/{bob_id}"),
+        Some(&admin),
+        Some(u),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["display_name"], "Bobby");
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/auth/me", Some(&bob), None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    let r = call(&app, Method::GET, "/api/v1/users", Some(&admin), None).await;
+    assert_eq!(r.body.as_array().unwrap().len(), 3);
+    let r = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/users/{bob_id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/users/import/servers",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body, json!([]));
+    let r = call(&app, Method::GET, "/api/v1/users/import/9", Some(&admin), None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn external_login_routes() {
+    let dir = FakeDirectory::new("http://127.0.0.1:9").with(
+        3,
+        "Emby",
+        FakeMediaServer {
+            kind: MediaServerKind::Emby,
+            users: vec![(FakeMediaServer::user("e1", "erin"), Some("emby-pw".into()))],
+        },
+    );
+    let app = app_with(dir).await;
+    let r = call(&app, Method::GET, "/api/v1/auth/methods", None, None).await;
+    assert_eq!(
+        r.body,
+        json!({"local": true, "jellyfin": false, "emby": false, "plex": false, "oidc": false, "oidc_label": null})
+    );
+    let login_body = json!({"username": "erin", "password": "emby-pw"});
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/auth/emby",
+        None,
+        Some(login_body.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    let admin = login(&app, "admin").await;
+    let alice = login(&app, "alice").await;
+    assert_eq!(
+        call(&app, Method::GET, "/api/v1/settings/security", Some(&alice), None)
+            .await
+            .status,
+        StatusCode::FORBIDDEN
+    );
+    let mut s = call(&app, Method::GET, "/api/v1/settings/security", Some(&admin), None)
+        .await
+        .body;
+    s["emby_login"] = json!(true);
+    s["oidc"]["enabled"] = json!(true);
+    s["oidc"]["client_id"] = json!("reelix");
+    s["oidc"]["client_secret"] = json!("shh");
+    s["oidc"]["issuer_url"] = json!("not a url");
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/security",
+        Some(&admin),
+        Some(s.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+
+    let idp = wiremock::MockServer::start().await;
+    s["oidc"]["issuer_url"] = json!(idp.uri());
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/security",
+        Some(&admin),
+        Some(s),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["oidc"]["client_secret"], "********");
+
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/auth/emby",
+        None,
+        Some(json!({"username": "erin", "password": "x"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = call(&app, Method::POST, "/api/v1/auth/emby", None, Some(login_body)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["auth_source"], "emby");
+    let erin = cookie_of(&r);
+    let me = call(&app, Method::GET, "/api/v1/auth/me", Some(&erin), None).await;
+    assert_eq!(me.body["username"], "erin");
+
+    // OIDC: login redirects to the provider's authorize endpoint with our derived callback.
+    let base = idp.uri();
+    wiremock::Mock::given(wiremock::matchers::path("/.well-known/openid-configuration"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": base, "authorization_endpoint": format!("{base}/authorize"),
+            "token_endpoint": format!("{base}/token"), "jwks_uri": format!("{base}/jwks"),
+            "response_types_supported": ["code"], "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        })))
+        .mount(&idp)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::path("/jwks"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({"keys": []})))
+        .mount(&idp)
+        .await;
+    let r = call(&app, Method::GET, "/api/v1/auth/methods", None, None).await;
+    assert_eq!(r.body["oidc"], true);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/auth/oidc/login?redirect=/discover",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FOUND);
+    let loc = r.headers[header::LOCATION].to_str().unwrap();
+    assert!(loc.starts_with(&format!("{base}/authorize?")), "{loc}");
+    assert!(
+        loc.contains("redirect_uri=http%3A%2F%2Freelix.local%2Fapi%2Fv1%2Fauth%2Foidc%2Fcallback"),
+        "{loc}"
+    );
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/auth/oidc/callback?code=x&state=bogus",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FOUND);
+    assert!(
+        r.headers[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .starts_with("/login?error=")
+    );
+    assert!(r.headers.get(header::SET_COOKIE).is_none());
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/auth/oidc/callback?error=access_denied",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(r.headers[header::LOCATION], "/login?error=access_denied");
+
+    // Plex PIN: disabled.
+    let r = call(&app, Method::POST, "/api/v1/auth/plex/pin", None, Some(json!({}))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+#[test]
+fn openapi_has_m6_tags() {
+    let doc = serde_json::to_value(reelix_api::openapi()).unwrap();
+    for p in [
+        "/api/v1/requests",
+        "/api/v1/discover/{feed}",
+        "/api/v1/users",
+        "/api/v1/auth/oidc/login",
+    ] {
+        assert!(doc["paths"].get(p).is_some(), "{p}");
+    }
+}

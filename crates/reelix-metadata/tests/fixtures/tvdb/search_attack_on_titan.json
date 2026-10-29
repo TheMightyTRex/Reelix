@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "objectID": "series-267440", "aliases": ["AoT", "Shingeki no Kyojin"], "country": "jpn", "id": "series-267440",
+      "image_url": "https://artworks.thetvdb.com/banners/posters/267440-1.jpg", "name": "進撃の巨人", "first_air_time": "2013-04-07",
+      "overview": "人類は巨人に支配されていた。", "primary_language": "jpn", "primary_type": "series", "status": "Ended", "type": "series",
+      "tvdb_id": "267440", "year": "2013", "slug": "attack-on-titan", "network": "NHK General",
+      "overviews": { "eng": "Several hundred years ago, humans were nearly exterminated by Titans.", "jpn": "人類は巨人に支配されていた。" },
+      "translations": { "eng": "Attack on Titan", "jpn": "進撃の巨人" },
+      "remote_ids": [ { "id": "tt2560140", "type": 2, "sourceName": "IMDB" }, { "id": "1429", "type": 12, "sourceName": "TheMovieDB.com" } ]
+    },
+    {
+      "objectID": "series-301557", "name": "Attack on Titan: Junior High", "first_air_time": "2015-10-04", "type": "series",
+      "tvdb_id": "301557", "year": "2015", "primary_language": "jpn", "overview": "", "remote_ids": []
+    }
+  ],
+  "links": { "prev": null, "self": "https://api4.thetvdb.com/v4/search?query=attack%20on%20titan&type=series&page=0", "next": null, "total_items": 2, "page_size": 50 }
+}

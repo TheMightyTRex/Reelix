@@ -1,0 +1,12 @@
+{
+  "Items": [
+    { "Name": "Low Tide", "Id": "88001", "Type": "Episode", "SeriesName": "Harbor Lights", "SeriesId": "77001",
+      "ParentIndexNumber": 2, "IndexNumber": 5, "ProductionYear": 2024,
+      "ProviderIds": { "Tvdb": "9988776" },
+      "UserData": { "PlayCount": 2, "Played": true, "LastPlayedDate": "2026-10-20T21:13:45.0000000Z" } },
+    { "Name": "The Lighthouse Keeper", "Id": "66001", "Type": "Movie", "ProductionYear": 2023,
+      "ProviderIds": { "Tmdb": "912345", "Imdb": "tt9123450" },
+      "UserData": { "PlayCount": 1, "Played": true, "LastPlayedDate": "2026-10-18T19:02:11.0000000Z" } }
+  ],
+  "TotalRecordCount": 2
+}

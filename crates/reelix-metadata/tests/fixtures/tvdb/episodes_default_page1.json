@@ -1,0 +1,11 @@
+{
+  "status": "success",
+  "data": {
+    "series": { "id": 267440, "name": "Attack on Titan", "slug": "attack-on-titan" },
+    "episodes": [
+      { "id": 6062001, "seriesId": 267440, "name": "Beast Titan", "aired": "2017-04-01", "runtime": 24, "overview": "Survey Corps soldiers wait on standby.", "image": null, "isMovie": 0, "number": 1, "absoluteNumber": 26, "seasonNumber": 2, "finaleType": null, "year": "2017" },
+      { "id": 6062002, "seriesId": 267440, "name": "I'm Home", "aired": "2017-04-08", "runtime": 24, "overview": "A titan appears in Ragako.", "image": null, "isMovie": 0, "number": 2, "absoluteNumber": 27, "seasonNumber": 2, "finaleType": "midseason", "year": "2017" }
+    ]
+  },
+  "links": { "prev": "https://api4.thetvdb.com/v4/series/267440/episodes/default/eng?page=0", "self": "https://api4.thetvdb.com/v4/series/267440/episodes/default/eng?page=1", "next": null, "total_items": 5, "page_size": 3 }
+}

@@ -1,0 +1,24 @@
+{
+  "streams": [
+    {
+      "index": 0, "codec_name": "hevc", "profile": "Main 10", "codec_type": "video",
+      "width": 3840, "height": 2160, "pix_fmt": "yuv420p10le",
+      "color_transfer": "smpte2084", "color_primaries": "bt2020",
+      "r_frame_rate": "24/1", "avg_frame_rate": "24/1",
+      "side_data_list": [
+        {"side_data_type": "Mastering display metadata"},
+        {"side_data_type": "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}
+      ],
+      "disposition": {"default": 1}
+    },
+    {
+      "index": 1, "codec_name": "dts", "codec_type": "audio", "profile": "DTS-HD MA + DTS:X",
+      "channels": 8, "channel_layout": "7.1", "disposition": {"default": 1}, "tags": {"language": "eng"}
+    },
+    {
+      "index": 2, "codec_name": "dts", "codec_type": "audio", "profile": "DTS-HD MA",
+      "channels": 6, "channel_layout": "5.1(side)", "disposition": {"default": 0}, "tags": {"language": "ita"}
+    }
+  ],
+  "format": {"format_name": "matroska,webm", "duration": "6900.5", "bit_rate": 61000000}
+}

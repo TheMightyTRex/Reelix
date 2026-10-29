@@ -1,0 +1,28 @@
+{
+  "release-group-count": 3,
+  "release-group-offset": 0,
+  "release-groups": [
+    {
+      "id": "b1392450-e666-3926-a536-22c65f834433",
+      "title": "OK Computer",
+      "disambiguation": "",
+      "primary-type": "Album",
+      "secondary-types": [],
+      "first-release-date": "1997-05-21",
+      "artist-credit": [{"name": "Radiohead", "joinphrase": "", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead", "sort-name": "Radiohead"}}],
+      "genres": [{"name": "alternative rock", "count": 20}, {"name": "art rock", "count": 22}],
+      "rating": {"value": 4.6, "votes-count": 120}
+    },
+    {
+      "id": "2b81e645-a586-3af7-9aa5-5d5ee4c0f2ab",
+      "title": "Pablo Honey",
+      "disambiguation": "",
+      "primary-type": "Album",
+      "secondary-types": [],
+      "first-release-date": "1993-02-22",
+      "artist-credit": [{"name": "Radiohead", "joinphrase": "", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead", "sort-name": "Radiohead"}}],
+      "genres": [],
+      "rating": {"value": null, "votes-count": 0}
+    }
+  ]
+}

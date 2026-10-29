@@ -1,0 +1,6 @@
+{"id":"8224","name":"Weekend picks","created_by":"reelix-tester","item_count":3,"page":1,"total_pages":1,
+ "items":[
+  {"id":1399,"media_type":"tv","name":"Game of Thrones","first_air_date":"2011-04-17"},
+  {"id":157336,"media_type":"movie","title":"Interstellar","release_date":"2014-11-05"},
+  {"id":287,"media_type":"person","name":"Brad Pitt"}
+ ]}

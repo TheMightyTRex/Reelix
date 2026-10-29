@@ -1,0 +1,10 @@
+{
+  "page": 1,
+  "results": [
+    { "adult": false, "backdrop_path": "/9faGSFi5jam6pDWGNd0p8JcJgXQ.jpg", "id": 1184918, "title": "The Wild Robot", "original_title": "The Wild Robot", "overview": "After a shipwreck, an intelligent robot called Roz is stranded on an uninhabited island.", "poster_path": "/wTnV3PCVW5O92JMrFvvrRcV39RU.jpg", "media_type": "movie", "original_language": "en", "genre_ids": [16, 878, 10751], "popularity": 2400.5, "release_date": "2024-09-12", "video": false, "vote_average": 8.5, "vote_count": 2100 },
+    { "adult": false, "backdrop_path": "/rqbCbjB19amtOtFQbb3K2lgm2zv.jpg", "id": 94605, "name": "Arcane", "original_name": "Arcane", "overview": "Amid the stark discord of twin cities Piltover and Zaun...", "poster_path": "/abf8tHznhSvl9BAElD2cQeRr7do.jpg", "media_type": "tv", "original_language": "en", "genre_ids": [16, 10765, 10759, 18], "popularity": 900.1, "first_air_date": "2021-11-06", "vote_average": 8.7, "vote_count": 4500, "origin_country": ["US"] },
+    { "adult": false, "id": 1190168, "name": "Some Person", "original_name": "Some Person", "media_type": "person", "popularity": 50.0, "known_for_department": "Acting", "profile_path": null }
+  ],
+  "total_pages": 500,
+  "total_results": 10000
+}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+  <server appversion="2.1" version="0.1" title="Sample Media Index" />
+  <limits max="100" default="100" />
+  <searching>
+    <search available="yes" supportedParams="q" />
+    <tv-search available="yes" supportedParams="q,tvdbid,season,ep" />
+    <movie-search available="yes" supportedParams="q,imdbid" />
+    <book-search available="yes" supportedParams="q,author,title" />
+    <audio-search available="yes" supportedParams="q,artist,album,year" />
+  </searching>
+  <categories>
+    <category id="3000" name="Audio">
+      <subcat id="3010" name="MP3" />
+      <subcat id="3020" name="Video" />
+      <subcat id="3030" name="Audiobook" />
+      <subcat id="3040" name="Lossless" />
+    </category>
+    <category id="7000" name="Books">
+      <subcat id="7010" name="Mags" />
+      <subcat id="7020" name="EBook" />
+    </category>
+  </categories>
+</caps>

@@ -1,0 +1,12 @@
+{
+  "MediaContainer": {
+    "size": 3, "allowSync": false, "title1": "Plex Library",
+    "Directory": [
+      { "key": "1", "type": "movie", "title": "Movies", "agent": "tv.plex.agents.movie",
+        "Location": [ { "id": 1, "path": "/media/movies" } ] },
+      { "key": "2", "type": "show", "title": "TV Shows", "agent": "tv.plex.agents.series",
+        "Location": [ { "id": 2, "path": "/media/tv" }, { "id": 5, "path": "/media/anime" } ] },
+      { "key": "3", "type": "artist", "title": "Music", "Location": [ { "id": 3, "path": "/media/music" } ] }
+    ]
+  }
+}

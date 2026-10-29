@@ -1,0 +1,29 @@
+{
+  "status": "ok",
+  "data": {
+    "total": 2,
+    "results": [
+      {
+        "id": 90211,
+        "name": "Northbound Freight 2022 1080p WEB-DL DDP5.1 Atmos H.264-RAILYARD",
+        "type": "movies",
+        "hash": "C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00",
+        "size_bytes": 6012954214,
+        "file_count": 3,
+        "uploaded_at": "2026-04-25T19:02:11Z",
+        "ids": { "imdb": "tt9988776", "tmdb": 501234 },
+        "stats": { "seeders": 820, "leechers": 41, "completed": 15022 }
+      },
+      {
+        "id": 90212,
+        "name": "Northbound Freight 2022 2160p WEB-DL DV HDR DDP5.1 H.265-RAILYARD",
+        "type": "movies",
+        "hash": "D00DAD00D00DAD00D00DAD00D00DAD00D00DAD00",
+        "size_bytes": 18253611008,
+        "uploaded_at": 1777200000,
+        "ids": { "imdb": null },
+        "stats": { "seeders": 97, "leechers": 12 }
+      }
+    ]
+  }
+}

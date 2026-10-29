@@ -1,0 +1,65 @@
+{
+  "status": "success",
+  "data": {
+    "id": 267440,
+    "name": "進撃の巨人",
+    "slug": "attack-on-titan",
+    "image": "https://artworks.thetvdb.com/banners/posters/267440-1.jpg",
+    "nameTranslations": ["jpn", "eng", "deu", "fra"],
+    "overviewTranslations": ["jpn", "eng", "deu"],
+    "aliases": [
+      { "language": "eng", "name": "AoT" },
+      { "language": "jpn", "name": "Shingeki no Kyojin" }
+    ],
+    "firstAired": "2013-04-07",
+    "lastAired": "2023-11-05",
+    "nextAired": "",
+    "score": 412345,
+    "status": { "id": 2, "name": "Ended", "recordType": "series", "keepUpdated": false },
+    "originalCountry": "jpn",
+    "originalLanguage": "jpn",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2025-02-10 08:12:44",
+    "averageRuntime": 24,
+    "episodes": null,
+    "overview": null,
+    "year": "2013",
+    "artworks": [
+      { "id": 1001, "image": "https://artworks.thetvdb.com/banners/posters/267440-1.jpg", "thumbnail": "https://artworks.thetvdb.com/banners/posters/267440-1_t.jpg", "language": "eng", "type": 2, "score": 100060, "width": 680, "height": 1000, "includesText": true },
+      { "id": 1002, "image": "https://artworks.thetvdb.com/banners/posters/267440-7.jpg", "thumbnail": "https://artworks.thetvdb.com/banners/posters/267440-7_t.jpg", "language": "jpn", "type": 2, "score": 100100, "width": 680, "height": 1000, "includesText": true },
+      { "id": 1003, "image": "https://artworks.thetvdb.com/banners/fanart/original/267440-3.jpg", "thumbnail": "https://artworks.thetvdb.com/banners/fanart/original/267440-3_t.jpg", "language": null, "type": 3, "score": 100020, "width": 1920, "height": 1080, "includesText": false },
+      { "id": 1004, "image": "https://artworks.thetvdb.com/banners/v4/series/267440/clearlogo/611b6d2a.png", "thumbnail": "", "language": "eng", "type": 23, "score": 1000, "width": 800, "height": 310, "includesText": true }
+    ],
+    "genres": [
+      { "id": 19, "name": "Action", "slug": "action" },
+      { "id": 27, "name": "Anime", "slug": "anime" },
+      { "id": 17, "name": "Fantasy", "slug": "fantasy" }
+    ],
+    "latestNetwork": { "id": 1052, "name": "NHK General", "slug": "nhk-general", "abbreviation": "NHK", "country": "jpn" },
+    "originalNetwork": { "id": 239, "name": "MBS", "slug": "mbs", "abbreviation": "MBS", "country": "jpn" },
+    "remoteIds": [
+      { "id": "tt2560140", "type": 2, "sourceName": "IMDB" },
+      { "id": "1429", "type": 12, "sourceName": "TheMovieDB.com" },
+      { "id": "Q1069012", "type": 13, "sourceName": "Wikidata" }
+    ],
+    "seasons": [
+      { "id": 501001, "seriesId": 267440, "type": { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null }, "number": 0, "image": null, "name": null },
+      { "id": 501002, "seriesId": 267440, "type": { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null }, "number": 1, "image": "https://artworks.thetvdb.com/banners/seasons/267440-1.jpg", "name": "Season 1" },
+      { "id": 501003, "seriesId": 267440, "type": { "id": 1, "name": "Aired Order", "type": "official", "alternateName": null }, "number": 2, "image": "https://artworks.thetvdb.com/banners/seasons/267440-2.jpg", "name": "Season 2" },
+      { "id": 509001, "seriesId": 267440, "type": { "id": 2, "name": "Absolute Order", "type": "absolute", "alternateName": null }, "number": 1, "image": null, "name": null }
+    ],
+    "translations": {
+      "nameTranslations": [
+        { "name": "進撃の巨人", "language": "jpn", "isPrimary": true },
+        { "name": "AoT", "language": "eng", "isAlias": true },
+        { "name": "Attack on Titan", "language": "eng", "isPrimary": false },
+        { "name": "Angriff auf Titan", "language": "deu" }
+      ],
+      "overviewTranslations": [
+        { "overview": "人類は巨人に支配されていた。", "language": "jpn" },
+        { "overview": "Several hundred years ago, humans were nearly exterminated by Titans.", "language": "eng" }
+      ]
+    }
+  }
+}

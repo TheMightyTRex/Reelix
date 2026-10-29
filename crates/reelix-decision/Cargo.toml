@@ -1,0 +1,22 @@
+[package]
+name = "reelix-decision"
+description = "Quality profiles, custom formats and release decision specifications"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Pure and wasm-compatible: no tokio/sqlx/reqwest here.
+[dependencies]
+chrono.workspace = true
+reelix-core.workspace = true
+reelix-parser.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

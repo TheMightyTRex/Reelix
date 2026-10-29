@@ -1,0 +1,31 @@
+{
+  "links": {
+    "self": "/authors/OL26320A/works.json?limit=100&offset=0",
+    "author": "/authors/OL26320A",
+    "next": "/authors/OL26320A/works.json?limit=100&offset=2"
+  },
+  "size": 3,
+  "entries": [
+    {
+      "key": "/works/OL27482W",
+      "title": "The Hobbit",
+      "type": {"key": "/type/work"},
+      "authors": [{"type": {"key": "/type/author_role"}, "author": {"key": "/authors/OL26320A"}}],
+      "covers": [14627509],
+      "first_publish_date": "September 21, 1937",
+      "subjects": ["Fantasy fiction", "Middle Earth (Imaginary place)"],
+      "revision": 120
+    },
+    {
+      "key": "/works/OL27479W",
+      "title": "The Two Towers",
+      "type": {"key": "/type/work"},
+      "authors": [{"type": {"key": "/type/author_role"}, "author": {"key": "/authors/OL26320A"}}],
+      "covers": [-1, 8231856],
+      "first_publish_date": "1954",
+      "description": "The second volume of The Lord of the Rings.",
+      "series": ["The Lord of the Rings ; 2"],
+      "subjects": ["Fiction"]
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{"arguments": {"alt-speed-down": 50, "alt-speed-enabled": false, "download-dir": "/downloads/complete",
+ "download-queue-enabled": true, "download-queue-size": 5, "incomplete-dir": "/downloads/incomplete", "incomplete-dir-enabled": true,
+ "peer-port": 51413, "rpc-version": 17, "rpc-version-minimum": 14, "rpc-version-semver": "5.3.0",
+ "seedRatioLimit": 2, "seedRatioLimited": false, "idle-seeding-limit": 30, "idle-seeding-limit-enabled": false,
+ "version": "4.0.6 (38c164933e)"}, "result": "success"}

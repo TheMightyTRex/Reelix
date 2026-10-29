@@ -1,0 +1,79 @@
+# Anime: bracket groups, absolute numbering, versions, hashes, batches, specials.
+[SubsPlease] Pirate Voyage - 1052 (1080p) [A1B2C3D4].mkv => t=Pirate Voyage; kind=episode; abs=1052; g=SubsPlease; hash=A1B2C3D4; q=WEBDL-1080p
+[SubsPlease] Pirate Voyage - 1053 (720p) [B2C3D4E5].mkv => abs=1053; q=WEBDL-720p; hash=B2C3D4E5
+[SubsPlease] Pirate Voyage - 1054 (480p) [C3D4E5F6].mkv => abs=1054; q=WEBDL-480p
+[Erai-raws] Spirit Blade - 05 [1080p][Multiple Subtitle][ABCDEF12].mkv => t=Spirit Blade; abs=5; g=Erai-raws; hash=ABCDEF12
+[Erai-raws] Spirit Blade - 06 [720p].mkv => abs=6; q=WEBDL-720p; g=Erai-raws
+[Erai-raws] Spirit Blade - 07v2 [1080p].mkv => abs=7; v=2
+[HorribleSubs] Spirit Blade - 08 [1080p].mkv => abs=8; g=HorribleSubs
+[HorribleSubs] Spirit Blade - 09 [720p].mkv => abs=9
+[HorribleSubs] Spirit Blade - 10 [480p].mkv => abs=10; q=WEBDL-480p
+[Judas] Moonlit Academy - 01 [1080p][HEVC x265 10bit][Eng-Subs] => t=Moonlit Academy; abs=1; g=Judas; vc=h265
+[Judas] Moonlit Academy - 02 [1080p][HEVC x265 10bit][Eng-Subs] => abs=2
+[Judas] Moonlit Academy 03 [1080p][HEVC x265 10bit] => t=Moonlit Academy; abs=3; g=Judas
+[Judas] Moonlit Academy (Season 1) [1080p][HEVC x265 10bit][Eng-Subs] => t=Moonlit Academy; s=1; full=true
+[SubsPlease] Thunder Hero S2 - 05 (1080p) [D4E5F6A7].mkv => t=Thunder Hero; s=2; e=5; g=SubsPlease
+[SubsPlease] Thunder Hero S2 - 06 (720p) [E5F6A7B8].mkv => s=2; e=6; q=WEBDL-720p
+[SubsPlease] Thunder Hero Season 3 - 01 (1080p) => t=Thunder Hero; s=3; e=1
+[Ember] Crimson Gate - S01E05 [1080p WEB-DL HEVC] => t=Crimson Gate; s=1; e=5; g=Ember; q=WEBDL-1080p
+[Ember] Crimson Gate - S01E06 [1080p WEB-DL HEVC] => s=1; e=6
+[ASW] Crimson Gate - 07 [1080p HEVC][F6A7B8C9].mkv => abs=7; g=ASW; hash=F6A7B8C9
+[ASW] Crimson Gate - 08 [1080p HEVC x265 10Bit][A7B8C9D0].mkv => abs=8; vc=h265
+[Golumpa] Sky Lanterns - 12 (Sky Lanterns) [English Dub] [FuniDub 1080p x264 AAC] [B8C9D0E1].mkv => t=Sky Lanterns; abs=12; g=Golumpa
+[Anime Time] Sky Lanterns - 13 [1080p][HEVC 10bit x265][AAC][Multi Sub] => t=Sky Lanterns; abs=13
+[Cleo] Sky Lanterns - 14 [Dual Audio 10bit 1080p][HEVC-x265] => t=Sky Lanterns; abs=14; g=Cleo; lang=English
+[Breeze] Iron Petals - 01 [BD 1080p AV1][C9D0E1F2].mkv => t=Iron Petals; abs=1; q=Bluray-1080p; vc=av1; g=Breeze
+[Breeze] Iron Petals - 02 [BD 1080p AV1][D0E1F2A3].mkv => abs=2; q=Bluray-1080p
+[Commie] Iron Petals - 03 [E1F2A3B4].mkv => abs=3; g=Commie; hash=E1F2A3B4
+[Commie] Iron Petals - 04v2 [F2A3B4C5].mkv => abs=4; v=2
+[Commie] Iron Petals - 05v3 [A3B4C5D6].mkv => abs=5; v=3
+[GJM] Iron Petals - 06 (BD 720p) [B4C5D6E7] => abs=6; q=Bluray-720p
+[GJM] Iron Petals - 07 [720p] => abs=7; q=WEBDL-720p
+[Coalgirls] Iron Petals (1920x1080 Blu-Ray FLAC) => t=Iron Petals; q=Bluray-1080p; ac=flac
+[Kametsu] Iron Petals (01-26) [BD 1080p Hi10 FLAC] => t=Iron Petals; abs=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26; q=Bluray-1080p
+[DB] Iron Petals - 01-12 [Dual Audio 10bit 720p][HEVC-x265] => t=Iron Petals; abs=1,2,3,4,5,6,7,8,9,10,11,12
+[Hi10] Iron Petals - 01 ~ 13 [BD 1080p] => abs=1,2,3,4,5,6,7,8,9,10,11,12,13
+[SubsPlease] Iron Petals - OVA (1080p) => t=Iron Petals; special=true; s=0
+[SubsPlease] Iron Petals OVA 2 (1080p) => t=Iron Petals; special=true; e=2
+[Erai-raws] Iron Petals - SP01 [1080p] => special=true
+[Erai-raws] Iron Petals - Specials [1080p] => special=true
+[EMBER] Shadow Fox (2021) - 05 [1080p] => t=Shadow Fox; y=2021; abs=5; g=EMBER
+[EMBER] Shadow Fox (2021) (Season 1) [1080p] => t=Shadow Fox; y=2021; s=1
+[SubsPlease] Shadow Fox - 101 (1080p) [C5D6E7F8].mkv => abs=101
+[SubsPlease] Shadow Fox - 999 (1080p) => abs=999
+[SubsPlease] Shadow Fox - 1000 (1080p) => abs=1000
+[Some-Stuffs] Shadow Fox 1001 [1080p] => abs=1001; g=Some-Stuffs
+[Tsundere-Raws] Shadow Fox - 05 VOSTFR (CR) [WEB 1080p x264 AAC] => abs=5; lang=French; g=Tsundere-Raws
+[Erai-raws] Shadow Fox - 06 [1080p][MultiSub] => abs=6
+[Yameii] Shadow Fox - 07 [English Dub] [CR WEB-DL 1080p] [D6E7F8A9] => abs=7; q=WEBDL-1080p
+[Yameii] Shadow Fox - 08 [English Dub] [CR WEB-DL 720p] [E7F8A9B0] => abs=8; q=WEBDL-720p
+[Kawaiika-Raws] Shadow Fox 09 [BDRip 1920x1080 HEVC FLAC] => abs=9; q=Bluray-1080p; ac=flac
+[NC-Raws] Shadow Fox - 10 (B-Global 1920x1080 HEVC AAC MKV) => abs=10; q=WEBDL-1080p
+[Moozzi2] Shadow Fox - 11 (BD 1920x1080 x.264 FLACx2) => abs=11; q=Bluray-1080p
+Shadow.Fox.S01E12.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG => t=Shadow Fox; s=1; e=12; svc=CR; g=VARYG
+Shadow.Fox.S01E13.JAPANESE.1080p.CR.WEBRip.AAC2.0.x264-GRP => lang=Japanese; q=WEBRip-1080p
+Shadow.Fox.S01.1080p.BluRay.FLAC2.0.x264-iAHD => s=1; full=true; ac=flac; ch=2.0
+Shadow Fox - 14 [1080p] => t=Shadow Fox; abs=14; g=-
+Shadow Fox - 15 (720p) => t=Shadow Fox; abs=15
+Shadow Fox - 016 [1080p] => abs=16
+[SubsPlease] Little Witch Ren - 01 (1080p) [F8A9B0C1].mkv => t=Little Witch Ren; abs=1
+[SubsPlease] Little Witch Ren - 02 (1080p) [A9B0C1D2].mkv => abs=2
+[SubsPlease] Little Witch Ren - 03 (1080p) [B0C1D2E3].mkv => abs=3
+[SubsPlease] Little Witch Ren - 04 (1080p) [C1D2E3F4].mkv => abs=4
+[SubsPlease] Little Witch Ren - 05 (1080p) [D2E3F4A5].mkv => abs=5
+[SubsPlease] Little Witch Ren - 06 (1080p) [E3F4A5B6].mkv => abs=6
+[SubsPlease] Little Witch Ren - 07 (1080p) [F4A5B6C7].mkv => abs=7
+[SubsPlease] Little Witch Ren - 08 (1080p) [A5B6C7D8].mkv => abs=8
+[SubsPlease] Little Witch Ren - 09 (1080p) [B6C7D8E9].mkv => abs=9
+[SubsPlease] Little Witch Ren - 10 (1080p) [C7D8E9F0].mkv => abs=10
+[SubsPlease] Little Witch Ren - 11 (1080p) [D8E9F0A1].mkv => abs=11
+[SubsPlease] Little Witch Ren - 12 (1080p) [E9F0A1B2].mkv => abs=12
+[Erai-raws] Mecha Garden 2nd Season - 03 [1080p] => t=Mecha Garden 2nd Season; abs=3
+[Erai-raws] Mecha Garden: Final Act - 04 [1080p] => t=Mecha Garden: Final Act; abs=4
+[Erai-raws] Mecha Garden!! - 05 [1080p] => t=Mecha Garden!!; abs=5
+[Erai-raws] Mecha Garden - 06 END [1080p] => abs=6
+[SubsPlease] Mecha Garden - 07.5 (1080p) => t=Mecha Garden; kind=episode
+[Ohys-Raws] Mecha Garden - 08 (BS11 1280x720 x264 AAC).mp4 => abs=8; q=WEBDL-720p
+[Lilith-Raws] Mecha Garden - 09 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4] => abs=9; q=WEBDL-1080p; lang=Chinese
+[DKB] Mecha Garden - S01E10 [1080p][HEVC x265 10bit][Multi-Subs] => s=1; e=10; g=DKB
+[DKB] Mecha Garden - S01 [1080p][HEVC x265 10bit][Multi-Subs] => s=1; full=true

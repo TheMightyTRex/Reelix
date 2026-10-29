@@ -1,0 +1,144 @@
+# Movies: titles, years, qualities, groups.
+The.Quiet.Harbor.2019.1080p.BluRay.x264-SPARKS => t=The Quiet Harbor; y=2019; kind=movie; q=Bluray-1080p; g=SPARKS; vc=h264
+The.Quiet.Harbor.2019.720p.BluRay.x264-SPARKS => t=The Quiet Harbor; y=2019; q=Bluray-720p; g=SPARKS
+The.Quiet.Harbor.2019.2160p.UHD.BluRay.x265.10bit.HDR.TrueHD.7.1.Atmos-TERMiNAL => t=The Quiet Harbor; y=2019; q=Bluray-2160p; g=TERMiNAL; vc=h265; hdr=hdr10; ac=true_hd,atmos; ch=7.1
+Iron.Lantern.2008.1080p.WEB-DL.DD5.1.H.264-FGT => t=Iron Lantern; y=2008; q=WEBDL-1080p; g=FGT; ac=ac3; ch=5.1; vc=h264
+Iron.Lantern.2008.720p.WEBRip.x264.AAC-YTS => t=Iron Lantern; y=2008; q=WEBRip-720p; g=YTS; ac=aac
+Iron Lantern (2008) [1080p] [BluRay] [5.1] [YTS.MX] => t=Iron Lantern; y=2008; q=Bluray-1080p; g=YTS.MX; ch=5.1
+Iron Lantern (2008) [720p] [WEBRip] [YTS.MX] => t=Iron Lantern; y=2008; q=WEBRip-720p; g=YTS.MX
+Blade.Runner.2049.2017.1080p.BluRay.x264-SPARKS => t=Blade Runner 2049; y=2017; q=Bluray-1080p; g=SPARKS
+2001.A.Space.Odyssey.1968.2160p.UHD.BluRay.REMUX.HDR.HEVC.DTS-HD.MA.5.1-FGT => t=2001 A Space Odyssey; y=1968; q=Remux-2160p; g=FGT; hdr=hdr10; ac=dts_hd_ma; ch=5.1
+1917.2019.1080p.BluRay.x264-SPARKS => t=1917; y=2019; q=Bluray-1080p
+Wonder.Woman.1984.2020.1080p.HMAX.WEB-DL.DDP5.1.Atmos.x264-EVO => t=Wonder Woman 1984; y=2020; q=WEBDL-1080p; svc=HMAX; ac=eac3,atmos; ch=5.1; g=EVO
+2012.2009.720p.BluRay.x264-REFiNED => t=2012; y=2009; q=Bluray-720p; g=REFiNED
+The.Glass.Orchard.2021.2160p.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX => t=The Glass Orchard; y=2021; q=WEBDL-2160p; hdr=dolby_vision,hdr10; vc=h265; g=FLUX
+The.Glass.Orchard.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb => t=The Glass Orchard; y=2021; svc=AMZN; q=WEBDL-1080p; g=NTb
+The.Glass.Orchard.2021.720p.NF.WEB-DL.DDP5.1.x264-NTG => svc=NF; q=WEBDL-720p; g=NTG
+The.Glass.Orchard.2021.HDRip.XviD.AC3-EVO => t=The Glass Orchard; y=2021; q=WEBRip-480p; vc=xvid; ac=ac3
+The.Glass.Orchard.2021.DVDRip.x264-GHOULS => q=DVD; g=GHOULS
+The.Glass.Orchard.2021.BDRip.x264-GHOULS => q=Bluray-480p; g=GHOULS
+The.Glass.Orchard.2021.BRRip.XviD.MP3-RARBG => q=Bluray-480p; ac=mp3; vc=xvid
+The.Glass.Orchard.2021.576p.BluRay.x264-HANDJOB => q=Bluray-576p
+The.Glass.Orchard.2021.480p.BluRay.x264-mSD => q=Bluray-480p; g=mSD
+Paper.Moons.1999.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EPSiLON => t=Paper Moons; y=1999; q=Remux-1080p; vc=h264; ac=dts_hd_ma; ch=5.1; g=EPSiLON
+Paper.Moons.1999.COMPLETE.BLURAY-UNTOUCHED => t=Paper Moons; y=1999; q=BR-DISK; g=UNTOUCHED
+Paper.Moons.1999.1080p.Blu-ray.AVC.DTS-HD.MA.5.1-LoRD => q=BR-DISK; g=LoRD
+Paper.Moons.1999.2160p.UHD.Blu-ray.HEVC.TrueHD.7.1.Atmos-COASTER => q=BR-DISK; g=COASTER
+Paper.Moons.1999.NTSC.DVDR-VEiL => q=DVD-R; g=VEiL
+Paper.Moons.1999.PAL.DVD9-WAHOO => q=DVD-R
+Paper.Moons.1999.DVDSCR.XviD-COALiTiON => q=DVDSCR; vc=xvid
+Paper.Moons.1999.CAM.XviD-NOVA => q=CAM
+Paper.Moons.1999.HDCAM.x264-CPG => q=CAM
+Paper.Moons.1999.HDTS.x264-SHiTSoNy => q=TELESYNC
+Paper.Moons.1999.TS.XviD-AMIABLE => q=TELESYNC
+Paper.Moons.1999.TC.XviD-ViSiON => q=TELECINE
+Paper.Moons.1999.R5.LiNE.XviD-DiAMOND => q=REGIONAL
+Paper.Moons.1999.WORKPRINT.XviD-POT => q=WORKPRINT
+Northern Lights Over Oslo (2016) 1080p BluRay x265 HEVC 10bit AAC 5.1 (Tigole) => t=Northern Lights Over Oslo; y=2016; q=Bluray-1080p; vc=h265; ch=5.1
+Northern Lights Over Oslo (2016) (1080p BluRay x265 10bit AAC 5.1 Tigole) => t=Northern Lights Over Oslo; y=2016; g=Tigole; q=Bluray-1080p
+Midnight.Express.Line.1978.1080p.BluRay.x264-AMIABLE => t=Midnight Express Line; y=1978; q=Bluray-1080p; g=AMIABLE
+The.Last.Cartographer.2023.1080p.WEBRip.x265-RARBG => t=The Last Cartographer; y=2023; q=WEBRip-1080p; vc=h265; g=RARBG
+The.Last.Cartographer.2023.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.H.265-CMRG => svc=ATVP; q=WEBDL-2160p; hdr=dolby_vision; g=CMRG
+The.Last.Cartographer.2023.1080p.DSNP.WEB-DL.DDP5.1.H.264-PECULATE => svc=DSNP; q=WEBDL-1080p; g=PECULATE
+The.Last.Cartographer.2023.1080p.MA.WEB-DL.DDP5.1.H.264-FLUX => svc=MA; q=WEBDL-1080p; g=FLUX
+The.Last.Cartographer.2023.1080p.iT.WEB-DL.DD5.1.H.264-playWEB => svc=iT; q=WEBDL-1080p; g=playWEB
+The.Last.Cartographer.2023.720p.PCOK.WEB-DL.DDP5.1.H.264-SMURF => svc=PCOK; q=WEBDL-720p
+The.Last.Cartographer.2023.1080p.PMTP.WEB-DL.DDP5.1.H.264-TEPES => svc=PMTP
+The.Last.Cartographer.2023.1080p.HULU.WEB-DL.DDP5.1.H.264-NTb => svc=HULU
+The.Last.Cartographer.2023.1080p.STAN.WEB-DL.DDP5.1.H.264-NTb => svc=STAN
+The.Last.Cartographer.2023.1080p.CRAV.WEB-DL.DDP5.1.H.264-NTb => svc=CRAV
+The.Last.Cartographer.2023.1080p.WEB.H264-NAISU => q=WEBDL-1080p; svc=-; g=NAISU
+The.Last.Cartographer.2023.WEB-DL.x264-ION10 => q=WEBDL-480p
+Spider-Verse.Tales.2018.1080p.BluRay.x264-SPARKS => t=Spider-Verse Tales; y=2018; g=SPARKS
+Spider-Verse Tales (2018) => t=Spider-Verse Tales; y=2018; g=-; kind=movie; q=Unknown
+The.Hollow.Crown.Returns.2015.1080p.BluRay.x264-D-Z0N3 => t=The Hollow Crown Returns; y=2015; g=D-Z0N3
+The.Hollow.Crown.Returns.2015.720p.BluRay.DD5.1.x264-EbP => g=EbP; ac=ac3; ch=5.1
+The.Hollow.Crown.Returns.2015.1080p.BluRay.DTS.x264-CtrlHD => g=CtrlHD; ac=dts
+The.Hollow.Crown.Returns.2015.1080p.BluRay.DTS-ES.x264-HDMaNiAcS => ac=dts
+The.Hollow.Crown.Returns.2015.1080p.BluRay.DTS-X.7.1.x264-HiDt => ac=dts_x; ch=7.1
+The.Hollow.Crown.Returns.2015.1080p.BluRay.FLAC.2.0.x264-HiFi => ac=flac; ch=2.0
+The.Hollow.Crown.Returns.2015.1080p.BluRay.LPCM.2.0.x264-HiFi => ac=pcm; ch=2.0
+The.Hollow.Crown.Returns.2015.1080p.WEB-DL.Opus.5.1.AV1-GRP => ac=opus; vc=av1; ch=5.1
+The.Hollow.Crown.Returns.2015.1080p.WEB-DL.AAC2.0.VP9-GRP => ac=aac; vc=vp9; ch=2.0
+The.Hollow.Crown.Returns.2015.1080i.Blu-ray.VC-1.DTS-HD.MA.5.1-GRP => q=BR-DISK; vc=vc1
+Ocean.Drifters.2004.1080p.BluRay.x264.DTS-HD.MA.5.1-SWTYBLZ => t=Ocean Drifters; y=2004; ac=dts_hd_ma; ch=5.1; g=SWTYBLZ
+Ocean.Drifters.2004.MULTi.1080p.BluRay.x264-LOST => lang=English; q=Bluray-1080p; g=LOST
+Ocean.Drifters.2004.FRENCH.1080p.BluRay.x264-LOST => lang=French
+Ocean.Drifters.2004.TRUEFRENCH.720p.BluRay.x264-LOST => lang=French
+Ocean.Drifters.2004.MULTi.VFF.2160p.WEB-DL.H265-SEL => lang=French,English; q=WEBDL-2160p
+Ocean.Drifters.2004.GERMAN.DL.1080p.BluRay.x264-DETAiLS => lang=German,English
+Ocean.Drifters.2004.German.1080p.BluRay.x264-DETAiLS => lang=German
+Ocean.Drifters.2004.iTALiAN.1080p.BluRay.x264-HDi => lang=Italian
+Ocean.Drifters.2004.SPANiSH.1080p.BluRay.x264-HDZ => lang=Spanish
+Ocean.Drifters.2004.1080p.BluRay.x264.LATINO-HDZ => lang=Spanish (Latino)
+Ocean.Drifters.2004.DUTCH.1080p.BluRay.x264-NLU => lang=Dutch
+Ocean.Drifters.2004.SWEDiSH.1080p.BluRay.x264-SWE => lang=Swedish
+Ocean.Drifters.2004.NORWEGiAN.1080p.BluRay.x264-NOR => lang=Norwegian
+Ocean.Drifters.2004.DANiSH.1080p.BluRay.x264-DKiDS => lang=Danish
+Ocean.Drifters.2004.FiNNiSH.1080p.BluRay.x264-FiN => lang=Finnish
+Ocean.Drifters.2004.POLiSH.1080p.BluRay.x264-PLSUB => lang=Polish
+Ocean.Drifters.2004.PL.1080p.BluRay.x264-KiT => lang=Polish
+Ocean.Drifters.2004.RUSSiAN.1080p.BluRay.x264-RUS => lang=Russian
+Ocean.Drifters.2004.KOREAN.1080p.BluRay.x264-KORE => lang=Korean
+Ocean.Drifters.2004.JAPANESE.1080p.BluRay.x264-WiKi => lang=Japanese
+Ocean.Drifters.2004.CHINESE.1080p.BluRay.x264-CMCT => lang=Chinese
+Ocean.Drifters.2004.HINDI.1080p.WEB-DL.x264-DTR => lang=Hindi
+Ocean.Drifters.2004.TAMIL.1080p.WEB-DL.x264-DTR => lang=Tamil
+Ocean.Drifters.2004.TELUGU.1080p.WEB-DL.x264-DTR => lang=Telugu
+Ocean.Drifters.2004.TURKiSH.1080p.WEB-DL.x264-TR => lang=Turkish
+Ocean.Drifters.2004.PORTUGUESE.1080p.WEB-DL.x264-PT => lang=Portuguese
+Ocean.Drifters.2004.1080p.WEB-DL.DUBLADO.x264-BR => lang=Portuguese (Brazil)
+Ocean.Drifters.2004.HUNGARiAN.1080p.WEB-DL.x264-HUN => lang=Hungarian
+Ocean.Drifters.2004.CZECH.1080p.WEB-DL.x264-CZ => lang=Czech
+Ocean.Drifters.2004.GREEK.1080p.WEB-DL.x264-GR => lang=Greek
+Ocean.Drifters.2004.HEBREW.1080p.WEB-DL.x264-HEB => lang=Hebrew
+Ocean.Drifters.2004.ARABiC.1080p.WEB-DL.x264-ARA => lang=Arabic
+Ocean.Drifters.2004.UKRAiNiAN.1080p.WEB-DL.x264-UKR => lang=Ukrainian
+Ocean.Drifters.2004.THAI.1080p.WEB-DL.x264-TH => lang=Thai
+Ocean.Drifters.2004.VIETNAMESE.1080p.WEB-DL.x264-VN => lang=Vietnamese
+Ocean.Drifters.2004.ROMANIAN.1080p.WEB-DL.x264-RO => lang=Romanian
+Ocean.Drifters.2004.BULGARiAN.1080p.WEB-DL.x264-BG => lang=Bulgarian
+Ocean.Drifters.2004.FLEMISH.1080p.WEB-DL.x264-BE => lang=Flemish
+Ocean.Drifters.2004.PERSIAN.1080p.WEB-DL.x264-IR => lang=Persian
+Ocean.Drifters.2004.iTA.ENG.1080p.BluRay.x264-HDi => lang=Italian,English
+Ocean.Drifters.2004.1080p.BluRay.x264.ENG.SUBS-GRP => lang=English
+The.French.Dispatch.Review.2021.1080p.BluRay.x264-GRP => t=The French Dispatch Review; y=2021; lang=English
+German.Shepherd.Days.2010.720p.HDTV.x264-GRP => t=German Shepherd Days; y=2010; lang=English
+Amélie.Revisited.2001.1080p.BluRay.x264-GRP => t=Amélie Revisited; y=2001
+Mr.Holloway.2014.1080p.BluRay.x264-GRP => t=Mr Holloway; y=2014
+A.I.Dreams.2001.1080p.BluRay.x264-GRP => t=A.I. Dreams; y=2001
+The.Meridian.AKA.Southbound.2012.1080p.BluRay.x264-GRP => t=The Meridian; y=2012
+Harbor.Lights.Part.1.2010.1080p.BluRay.x264-GRP => t=Harbor Lights Part 1; y=2010; kind=movie
+Harbor.Lights.Part.2.2011.720p.BluRay.x264-GRP => t=Harbor Lights Part 2; y=2011; kind=movie
+Episode.4.The.Return.1977.1080p.BluRay.x264-GRP => t=Episode 4 The Return; y=1977; kind=movie
+The_Underground_Railway_2016_720p_BluRay_x264-GRP => t=The Underground Railway; y=2016; q=Bluray-720p; g=GRP
+The Underground Railway 2016 1080p WEB-DL H264 AC3-EVO => t=The Underground Railway; y=2016; q=WEBDL-1080p; g=EVO
+The Underground Railway (2016) 2160p HDR => t=The Underground Railway; y=2016; q=WEBDL-2160p; hdr=hdr10
+Copper.Canyon.1080p.BluRay.x264-GRP => t=Copper Canyon; y=-; q=Bluray-1080p; kind=movie
+Copper.Canyon.2005.mkv => t=Copper Canyon; y=2005; q=Unknown; kind=movie
+copper.canyon.2005.1080p.bluray.x264-grp.mkv => t=copper canyon; y=2005; q=Bluray-1080p; g=grp
+Copper.Canyon.2005.1080p.BluRay.x264-GRP[rarbg] => g=GRP
+Copper.Canyon.2005.1080p.BluRay.x264-GRP-Obfuscated => g=GRP
+Copper.Canyon.2005.1080p.BluRay.x264-GRP-xpost => g=GRP
+Copper.Canyon.2005.1080p.BluRay.x264-GRP.nzb => g=GRP
+www.Torrenting.com - Copper.Canyon.2005.1080p.BluRay.x264-GRP => t=Copper Canyon; y=2005; g=GRP
+[ www.UsaBit.com ] - Copper.Canyon.2005.720p.BluRay.x264-GRP => t=Copper Canyon; q=Bluray-720p
+Copper.Canyon.2005.1920x1080.BluRay.x264-GRP => q=Bluray-1080p
+Copper.Canyon.2005.1280x720.WEB-DL.x264-GRP => q=WEBDL-720p
+Copper.Canyon.2005.4K.WEB-DL.x265-GRP => q=WEBDL-2160p
+Copper.Canyon.2005.UHD.BluRay.x265-GRP => q=Bluray-2160p
+Copper.Canyon.2005.1080p.BluRay.x264.Hybrid-GRP => q=Bluray-1080p
+Copper.Canyon.2005.1080p.BluRay.10bit.x265-GRP => vc=h265
+Copper.Canyon.2005.1080p.BluRay.HEVC.x265-GRP => vc=h265
+Copper.Canyon.2005.720p.HDTV.x264-GRP => q=HDTV-720p
+Copper.Canyon.2005.1080p.HDTV.x264-GRP => q=HDTV-1080p
+Copper.Canyon.2005.PDTV.XviD-GRP => q=SDTV
+Copper.Canyon.2005.HDTV.XviD-GRP => q=SDTV
+Copper.Canyon.2005.SDTV.x264-GRP => q=SDTV
+Copper.Canyon.2005.DVD.x264-GRP => q=DVD
+Copper.Canyon.2005.480p.DVDRip.x264-GRP => q=DVD
+Copper.Canyon.2005.DVD5-GRP => q=DVD-R
+Copper.Canyon.2005.HDDVD.1080p.x264-GRP => q=Bluray-1080p
+Copper.Canyon.2005.SCREENER.XviD-GRP => q=DVDSCR
+Copper.Canyon.2005.TELESYNC.x264-GRP => q=TELESYNC
+Copper.Canyon.2005.TELECINE.x264-GRP => q=TELECINE

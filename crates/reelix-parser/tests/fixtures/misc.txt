@@ -1,0 +1,111 @@
+# Mixed real-world styles: P2P naming, spaces, brackets, odd groups, foreign titles.
+Crossing Lines (2015) [1080p] [WEBRip] [5.1] [YTS.MX] => t=Crossing Lines; y=2015; q=WEBRip-1080p; g=YTS.MX
+Crossing Lines (2015) [2160p] [4K] [WEB] [5.1] [YTS.MX] => q=WEBDL-2160p; g=YTS.MX
+Crossing Lines (2015) [720p] [BluRay] [YTS.MX] => q=Bluray-720p
+Crossing Lines 2015 1080p BluRay x264 DTS-HD MA 5.1-FGT => t=Crossing Lines; y=2015; ac=dts_hd_ma; ch=5.1; g=FGT
+Crossing.Lines.2015.1080p.BluRay.x264-[YTS.AG] => t=Crossing Lines; y=2015; q=Bluray-1080p
+Crossing Lines (2015) Bluray-1080p.mkv => t=Crossing Lines; y=2015; q=Bluray-1080p
+Crossing Lines (2015) WEBDL-1080p.mkv => q=WEBDL-1080p
+Crossing Lines (2015) Remux-2160p.mkv => q=Remux-2160p
+Crossing Lines (2015) [Bluray-2160p Proper][DV HDR10][TrueHD 7.1 Atmos][x265]-GRP => q=Bluray-2160p; v=2; hdr=dolby_vision,hdr10; ac=true_hd,atmos; ch=7.1; vc=h265
+Crossing Lines (2015) [imdb-tt1234567][WEBDL-1080p][EAC3 5.1][h264]-NTb => t=Crossing Lines; q=WEBDL-1080p; ac=eac3; ch=5.1; g=NTb
+Show Name (2010) - S02E03 - Episode Title [HDTV-720p] => t=Show Name; y=2010; s=2; e=3; q=HDTV-720p
+Show Name (2010) - S02E04 - Episode Title [WEBDL-1080p][EAC3 5.1][h264]-NTb => s=2; e=4; q=WEBDL-1080p; g=NTb
+Show Name (2010) - S02E05-E06 - Two Parts [Bluray-1080p] => s=2; e=5,6; q=Bluray-1080p
+Show Name - 2024-03-15 - Daily Title [WEBDL-720p] => t=Show Name; date=2024-03-15; q=WEBDL-720p
+The.Kingdom.Beneath.2018.MULTi.TRUEFRENCH.1080p.BluRay.x264-FRATERNiTY => t=The Kingdom Beneath; lang=French,English; g=FRATERNiTY
+The.Kingdom.Beneath.2018.VFQ.1080p.WEB-DL.x264-GRP => lang=French
+The.Kingdom.Beneath.2018.VF2.1080p.WEB-DL.x264-GRP => lang=French
+The.Kingdom.Beneath.2018.FRENCH.HDRip.XviD-GRP => lang=French; q=WEBRip-480p
+La.Casa.Del.Sol.2017.SPANISH.1080p.WEB-DL.x264-GRP => t=La Casa Del Sol; y=2017; lang=Spanish
+Der.Lange.Weg.2019.German.DL.1080p.BluRay.x264-GRP => t=Der Lange Weg; y=2019; lang=German,English
+Il.Grande.Viaggio.2016.iTALiAN.BRRip.XviD-GRP => t=Il Grande Viaggio; lang=Italian; q=Bluray-480p
+Het.Verloren.Huis.2015.DUTCH.1080p.BluRay.x264-GRP => t=Het Verloren Huis; lang=Dutch
+Den.Tysta.Skogen.2014.SWEDiSH.1080p.BluRay.x264-GRP => t=Den Tysta Skogen; lang=Swedish
+Ciemna.Noc.2013.PL.1080p.WEB-DL.x264-GRP => t=Ciemna Noc; lang=Polish
+Темная.Ночь.2013.1080p.WEB-DL.x264-GRP => t=Темная Ночь; y=2013; q=WEBDL-1080p
+千と千尋.2001.1080p.BluRay.x264-GRP => t=千と千尋; y=2001
+Pokémon.Adventures.2000.720p.BluRay.x264-GRP => t=Pokémon Adventures; y=2000
+The.Gentleman's.Wager.2009.1080p.BluRay.x264-GRP => t=The Gentleman's Wager; y=2009
+Ocean's.Fourteen.2025.1080p.WEB-DL.x264-GRP => t=Ocean's Fourteen; y=2025
+Fast.&.Loud.2011.720p.BluRay.x264-GRP => t=Fast & Loud; y=2011
+Back.to.the.Moon.Part.II.1989.1080p.BluRay.x264-GRP => t=Back to the Moon Part II; y=1989
+Rogue.Planet.Episode.III.2005.1080p.BluRay.x264-GRP => t=Rogue Planet Episode III; y=2005
+Alien.vs.Robot.2004.1080p.BluRay.x264-GRP => t=Alien vs Robot; y=2004
+Mission.Possible.Dead.Reckoning.Part.One.2023.1080p.WEB-DL.x264-GRP => t=Mission Possible Dead Reckoning Part One; y=2023
+The.Number.23.2007.1080p.BluRay.x264-GRP => t=The Number 23; y=2007
+Apollo.13.1995.1080p.BluRay.x264-GRP => t=Apollo 13; y=1995
+District.9.2009.720p.BluRay.x264-GRP => t=District 9; y=2009
+Se7en.Shadows.1995.1080p.BluRay.x264-GRP => t=Se7en Shadows; y=1995
+The.Year.2000.Party.1999.1080p.BluRay.x264-GRP => t=The Year 2000 Party; y=1999
+Into.the.Night.(2020).1080p.WEB-DL.x264-GRP => t=Into the Night; y=2020
+Into the Night [2020] 1080p WEB-DL x264-GRP => t=Into the Night; y=2020
+Into.The.Night.2020.1080p.WEB-DL.H264.AC3-EVO => t=Into The Night; y=2020; g=EVO
+Into.The.Night.2020.1080p.BluRay.x264.AC3-ETRG => g=ETRG
+Into.The.Night.2020.720p.BluRay.x264.AAC-ETRG => g=ETRG; ac=aac
+Into.The.Night.2020.1080p.BluRay.x265-RARBG => g=RARBG; vc=h265
+Into.The.Night.2020.1080p.WEBRip.x264.AAC5.1-YTS.MX => g=YTS.MX; ac=aac; ch=5.1
+Into.The.Night.2020.1080p.BluRay.x264-AMIABLE.mkv => g=AMIABLE
+Into.The.Night.2020.1080p.BluRay.x264-Grp.With.Dots => g=-
+Into.The.Night.2020.1080p.BluRay.x264-GROUP 1 => g=-
+Into.The.Night.2020.1080p.BluRay.x264-HiFi => g=HiFi
+Into.The.Night.2020.1080p.BluRay.x264-W4NK3R => g=W4NK3R
+Into.The.Night.2020.1080p.BluRay.x264-c0kE => g=c0kE
+Into.The.Night.2020.1080p.BluRay.x264-iFT => g=iFT
+Into.The.Night.2020.1080p.BluRay.x264-de[42] => g=de[42]
+Into.The.Night.2020.1080p.BluRay.x264-NCmt => g=NCmt
+Into.The.Night.2020.1080p.BluRay.DDP5.1.x264-HiDt => g=HiDt; ac=eac3
+Into.The.Night.2020.1080p.BluRay.x264-VietHD => g=VietHD
+Into.The.Night.2020.1080p.BluRay.x264-E1 => g=E1
+Into.The.Night.2020.2160p.BluRay.x265.10bit.SDR.DTS-HD.MA.TrueHD.7.1.Atmos-SWTYBLZ => ac=dts_hd_ma,true_hd,atmos; ch=7.1; hdr=
+Into.The.Night.2020.1080p.NF.WEBRip.DDP5.1.x264-NTG => svc=NF; q=WEBRip-1080p
+Into.The.Night.2020.1080p.AMZN.WEBRip.DDP5.1.x264-NTb => svc=AMZN; q=WEBRip-1080p
+Into.The.Night.2020.AMZN.WEB-DL.x264-GRP => svc=AMZN; q=WEBDL-480p
+Into.The.Night.2020.1080p.AMZN.x264-GRP => svc=AMZN; q=WEBDL-1080p
+Into.The.Night.2020.1080p.iTunes.WEB-DL.x264-GRP => svc=iT
+Into.The.Night.2020.1080p.NFLX.WEB-DL.x264-GRP => svc=NF
+Into.The.Night.2020.1080p.BluRay.x264-GRP => svc=-
+Into.The.Night.2020.1080p.BluRay.DTS-HD.MA.5.1.x264-GRP => svc=-
+Into.The.Night.2020.1080p.UHD.BluRay.x264-GRP => q=Bluray-1080p
+Into.The.Night.2020.BluRay.1080p.DTS-HD.MA.5.1.AVC.REMUX-FraMeSToR => q=Remux-1080p
+Into.The.Night.2020.BDRemux.1080p.x264-GRP => q=Remux-1080p
+Into.The.Night.2020.UHD.BDRemux.2160p.HDR.x265-GRP => q=Remux-2160p
+Into.The.Night.2020.1080p.BluRay.AVC.DTS-HD.MA.5.1-GRP => q=BR-DISK
+Into.The.Night.2020.BD50.1080p.AVC.DTS-HD.MA.5.1-GRP => q=BR-DISK
+Into.The.Night.2020.BD25.1080p-GRP => q=BR-DISK
+Into.The.Night.2020.COMPLETE.UHD.BLURAY-GRP => q=BR-DISK
+Into.The.Night.2020.1080p.BDMV-GRP => q=BR-DISK
+Into.The.Night.2020.iSO-GRP => q=Unknown; t=Into The Night
+Into.The.Night.2020.DVD9.NTSC-GRP => q=DVD-R
+Into.The.Night.2020.PAL.DVDR-GRP => q=DVD-R
+Into.The.Night.2020.DVDSCR.x264-GRP => q=DVDSCR
+Into.The.Night.2020.BDSCR.x264-GRP => q=DVDSCR
+Into.The.Night.2020.HD-TS.x264-GRP => q=TELESYNC
+Into.The.Night.2020.TSRip.x264-GRP => q=TELESYNC
+Into.The.Night.2020.HDTC.x264-GRP => q=TELECINE
+Into.The.Night.2020.CAMRip.x264-GRP => q=CAM
+Into.The.Night.2020.720p.HDCAM.x264-GRP => q=CAM
+Into.The.Night.2020.R5.XviD-GRP => q=REGIONAL
+Into.The.Night.2020.WP.XviD-GRP => q=WORKPRINT
+Into.The.Night.2020.1080p.WEB-HD.x264-GRP => q=WEBDL-1080p
+Into.The.Night.2020.720p.WEBCap.x264-GRP => q=WEBRip-720p
+Into.The.Night.2020.540p.WEB-DL.x264-GRP => q=WEBDL-480p
+Into.The.Night.2020.1080p.WEB.H264-GRP.mkv => q=WEBDL-1080p; g=GRP
+Into.The.Night.2020.1080p.WEB.H264-GRP.mkv.part => g=-
+Into.The.Night.2020 => t=Into The Night; y=2020; kind=movie; q=Unknown; g=-
+Into The Night => t=Into The Night; y=-; kind=unknown
+Into.The.Night.1080p => t=Into The Night; kind=movie; q=WEBDL-1080p
+1080p.WEB.H264-GRP => t=1080p; g=GRP
+S01E01.mkv => t=; s=1; e=1; kind=episode
+Show.Name.S01E01.mkv => t=Show Name; s=1; e=1; q=Unknown
+Show.Name.S01E01.Pilot.mkv => t=Show Name; s=1; e=1
+Show.Name.S01E01.SD.TV.mkv => s=1; e=1
+show.name.s01e01.hdtv.lol.mp4 => t=show name; s=1; e=1; q=SDTV
+Show Name - 101 - Pilot.mkv => t=Show Name; abs=101
+The.Movie.Name.2019.1080p.BluRay.x264-GRP.torrent => t=The Movie Name; g=GRP
+The.Movie.Name.2019.1080p.BluRay.x264-GRP.sample.mkv => t=The Movie Name; y=2019
+The.Movie.Name.2019.1080p.BluRay.x264-GRP.ts => g=GRP
+The.Movie.Name.2019.TS => q=TELESYNC
+f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0 => hash=f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0
+[TGx] The.Movie.Name.2019.1080p.WEB.H264-GRP => t=The Movie Name; y=2019; g=GRP
+[YTS.MX] The Movie Name (2019) [1080p] => t=The Movie Name; y=2019

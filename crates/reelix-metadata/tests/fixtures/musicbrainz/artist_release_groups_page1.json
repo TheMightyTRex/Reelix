@@ -1,0 +1,15 @@
+{
+  "release-group-count": 3,
+  "release-group-offset": 2,
+  "release-groups": [
+    {
+      "id": "c3e6f1a2-5b4d-4e8f-9a7b-1d2c3e4f5a6b",
+      "title": "I Might Be Wrong: Live Recordings",
+      "disambiguation": "",
+      "primary-type": "Album",
+      "secondary-types": ["Live"],
+      "first-release-date": "2001-11-12",
+      "artist-credit": [{"name": "Radiohead", "joinphrase": "", "artist": {"id": "a74b1b7f-71a5-4011-9441-d0b5e4122711", "name": "Radiohead", "sort-name": "Radiohead"}}]
+    }
+  ]
+}

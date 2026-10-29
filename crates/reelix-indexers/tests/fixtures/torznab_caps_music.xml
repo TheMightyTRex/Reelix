@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+  <searching>
+    <search available="yes" supportedParams="q" />
+    <book-search available="yes" supportedParams="q,author" />
+    <music-search available="yes" supportedParams="q,album,artist" />
+  </searching>
+  <categories>
+    <category id="3000" name="Audio" />
+    <category id="7000" name="Books" />
+  </categories>
+</caps>

@@ -1,0 +1,132 @@
+{
+  "adult": false,
+  "backdrop_path": "/fNG7i7RqMErkcqhohV2a6cV1Ehy.jpg",
+  "belongs_to_collection": {
+    "id": 2344,
+    "name": "The Matrix Collection",
+    "poster_path": "/bV9qTVHTVf0gkW0j7p7M0ILD4pG.jpg",
+    "backdrop_path": "/bRm2DEgUiYciDw3myHuYFInD7la.jpg"
+  },
+  "budget": 63000000,
+  "genres": [
+    { "id": 28, "name": "Action" },
+    { "id": 878, "name": "Science Fiction" }
+  ],
+  "homepage": "http://www.warnerbros.com/matrix",
+  "id": 603,
+  "imdb_id": "tt0133093",
+  "origin_country": ["US"],
+  "original_language": "en",
+  "original_title": "The Matrix",
+  "overview": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth.",
+  "popularity": 78.412,
+  "poster_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+  "production_companies": [
+    { "id": 79, "logo_path": "/at4uYdwAAgNRKhZuuFX8ShKSybw.png", "name": "Village Roadshow Pictures", "origin_country": "US" },
+    { "id": 372, "logo_path": null, "name": "Groucho II Film Partnership", "origin_country": "" },
+    { "id": 1885, "logo_path": "/xlvoOZr4s1PygosrwZyolIFe5xs.png", "name": "Silver Pictures", "origin_country": "US" }
+  ],
+  "production_countries": [{ "iso_3166_1": "US", "name": "United States of America" }],
+  "release_date": "1999-03-31",
+  "revenue": 463517383,
+  "runtime": 136,
+  "spoken_languages": [{ "english_name": "English", "iso_639_1": "en", "name": "English" }],
+  "status": "Released",
+  "tagline": "Welcome to the Real World.",
+  "title": "The Matrix",
+  "video": false,
+  "vote_average": 8.2,
+  "vote_count": 26314,
+  "release_dates": {
+    "results": [
+      {
+        "iso_3166_1": "US",
+        "release_dates": [
+          { "certification": "", "descriptors": [], "iso_639_1": "", "note": "Westwood premiere", "release_date": "1999-03-24T00:00:00.000Z", "type": 1 },
+          { "certification": "R", "descriptors": [], "iso_639_1": "", "note": "", "release_date": "1999-03-31T00:00:00.000Z", "type": 3 },
+          { "certification": "R", "descriptors": [], "iso_639_1": "", "note": "DVD", "release_date": "1999-09-21T00:00:00.000Z", "type": 5 }
+        ]
+      },
+      {
+        "iso_3166_1": "DE",
+        "release_dates": [
+          { "certification": "16", "descriptors": [], "iso_639_1": "de", "note": "", "release_date": "1999-06-17T00:00:00.000Z", "type": 3 },
+          { "certification": "16", "descriptors": [], "iso_639_1": "de", "note": "", "release_date": "2008-05-15T00:00:00.000Z", "type": 4 }
+        ]
+      },
+      {
+        "iso_3166_1": "GB",
+        "release_dates": [
+          { "certification": "15", "descriptors": [], "iso_639_1": "", "note": "", "release_date": "1999-06-11T00:00:00.000Z", "type": 3 }
+        ]
+      }
+    ]
+  },
+  "alternative_titles": {
+    "titles": [
+      { "iso_3166_1": "BR", "title": "Matrix", "type": "" },
+      { "iso_3166_1": "JP", "title": "マトリックス", "type": "" },
+      { "iso_3166_1": "US", "title": "The Matrix 1", "type": "sequel numbering" }
+    ]
+  },
+  "external_ids": {
+    "imdb_id": "tt0133093",
+    "wikidata_id": "Q83495",
+    "facebook_id": "TheMatrixMovie",
+    "instagram_id": null,
+    "twitter_id": null
+  },
+  "credits": {
+    "cast": [
+      { "adult": false, "gender": 2, "id": 2975, "known_for_department": "Acting", "name": "Laurence Fishburne", "original_name": "Laurence Fishburne", "popularity": 22.1, "profile_path": "/iwx7h0AfuUiGBW1sNV7PZRZQLWv.jpg", "cast_id": 35, "character": "Morpheus", "credit_id": "52fe425bc3a36847f80181c1", "order": 1 },
+      { "adult": false, "gender": 2, "id": 6384, "known_for_department": "Acting", "name": "Keanu Reeves", "original_name": "Keanu Reeves", "popularity": 48.6, "profile_path": "/4D0PpNI0kmP58hgrwGC3wCjxhnm.jpg", "cast_id": 34, "character": "Thomas A. Anderson / Neo", "credit_id": "52fe425bc3a36847f80181c5", "order": 0 },
+      { "adult": false, "gender": 1, "id": 530, "known_for_department": "Acting", "name": "Carrie-Anne Moss", "original_name": "Carrie-Anne Moss", "popularity": 20.3, "profile_path": null, "cast_id": 36, "character": "Trinity", "credit_id": "52fe425bc3a36847f80181c9", "order": 2 }
+    ],
+    "crew": [
+      { "adult": false, "gender": 1, "id": 9339, "known_for_department": "Directing", "name": "Lilly Wachowski", "original_name": "Lilly Wachowski", "popularity": 3.2, "profile_path": "/dj5RIsmTvPmmlKSr1dIy5sHh9yN.jpg", "credit_id": "52fe425bc3a36847f8018133", "department": "Directing", "job": "Director" },
+      { "adult": false, "gender": 1, "id": 9340, "known_for_department": "Directing", "name": "Lana Wachowski", "original_name": "Lana Wachowski", "popularity": 4.1, "profile_path": null, "credit_id": "52fe425bc3a36847f801813b", "department": "Directing", "job": "Director" },
+      { "adult": false, "gender": 2, "id": 1091, "known_for_department": "Sound", "name": "Don Davis", "original_name": "Don Davis", "popularity": 1.9, "profile_path": null, "credit_id": "52fe425bc3a36847f801815d", "department": "Sound", "job": "Original Music Composer" }
+    ]
+  },
+  "images": {
+    "backdrops": [
+      { "aspect_ratio": 1.778, "height": 2160, "iso_639_1": null, "file_path": "/ncEsesgOJDNrTUED89hYbA117wo.jpg", "vote_average": 5.522, "vote_count": 12, "width": 3840 }
+    ],
+    "logos": [
+      { "aspect_ratio": 4.36, "height": 344, "iso_639_1": "en", "file_path": "/2ABqoQqlKUk1jOJvTk2Ql6AVQZb.png", "vote_average": 5.39, "vote_count": 6, "width": 1500 }
+    ],
+    "posters": [
+      { "aspect_ratio": 0.667, "height": 3000, "iso_639_1": "en", "file_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", "vote_average": 5.6, "vote_count": 20, "width": 2000 },
+      { "aspect_ratio": 0.667, "height": 1500, "iso_639_1": null, "file_path": "/aOIuZAjPaRIE6CMzbazvcHuHXDc.jpg", "vote_average": 5.3, "vote_count": 4, "width": 1000 }
+    ]
+  },
+  "videos": {
+    "results": [
+      { "iso_639_1": "en", "iso_3166_1": "US", "name": "The Matrix (1999) Official Trailer", "key": "vKQi3bBA1y8", "site": "YouTube", "size": 1080, "type": "Trailer", "official": true, "published_at": "2021-08-21T16:00:12.000Z", "id": "612165a7d4b9d90045d6b6ab" },
+      { "iso_639_1": "en", "iso_3166_1": "US", "name": "Behind the bullet time", "key": "123456789", "site": "Vimeo", "size": 720, "type": "Featurette", "official": false, "published_at": "2019-03-31T10:00:00.000Z", "id": "5c9f7f6d9251416a7e2a1b23" }
+    ]
+  },
+  "keywords": {
+    "keywords": [
+      { "id": 310, "name": "artificial intelligence (a.i.)" },
+      { "id": 4565, "name": "dystopia" },
+      { "id": 4563, "name": "virtual reality" }
+    ]
+  },
+  "recommendations": {
+    "page": 1,
+    "results": [
+      { "backdrop_path": "/pxK1iK6anS6erGg4QePmMKbB1E7.jpg", "id": 604, "title": "The Matrix Reloaded", "original_title": "The Matrix Reloaded", "overview": "Six months after the events depicted in The Matrix, Neo has proved to be a good omen for the free humans.", "poster_path": "/9TGHDvWrqKBzwDxDodHYXEmOE6J.jpg", "media_type": "movie", "adult": false, "original_language": "en", "genre_ids": [12, 28, 53, 878], "popularity": 45.2, "release_date": "2003-05-15", "video": false, "vote_average": 7.0, "vote_count": 10870 }
+    ],
+    "total_pages": 2,
+    "total_results": 40
+  },
+  "similar": {
+    "page": 1,
+    "results": [
+      { "backdrop_path": null, "id": 1858, "title": "Transformers", "original_title": "Transformers", "overview": "Young teenager Sam Witwicky becomes involved in the ancient struggle between two extraterrestrial factions.", "poster_path": "/lplPOv3jO2Q0nRQ8bmz8QhxIXhH.jpg", "adult": false, "original_language": "en", "genre_ids": [878, 28, 12], "popularity": 41.0, "release_date": "2007-06-27", "video": false, "vote_average": 6.8, "vote_count": 11000 }
+    ],
+    "total_pages": 1,
+    "total_results": 1
+  }
+}

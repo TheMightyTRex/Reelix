@@ -1,0 +1,23 @@
+{
+  "key": "/works/OL27482W",
+  "title": "The Hobbit",
+  "subtitle": "or There and Back Again",
+  "description": {
+    "type": "/type/text",
+    "value": "Bilbo Baggins is a hobbit who enjoys a comfortable, unambitious life."
+  },
+  "authors": [
+    {"type": {"key": "/type/author_role"}, "author": {"key": "/authors/OL26320A"}}
+  ],
+  "covers": [14627509, 6979861],
+  "first_publish_date": "September 21, 1937",
+  "subjects": ["Fantasy fiction", "Middle Earth (Imaginary place)", "Dragons", "Hobbits (Fictitious characters)"],
+  "subject_places": ["Middle Earth"],
+  "subject_people": ["Bilbo Baggins", "Gandalf"],
+  "links": [{"title": "Wikipedia", "url": "https://en.wikipedia.org/wiki/The_Hobbit", "type": {"key": "/type/link"}}],
+  "type": {"key": "/type/work"},
+  "latest_revision": 120,
+  "revision": 120,
+  "created": {"type": "/type/datetime", "value": "2009-10-15T11:35:24.526738"},
+  "last_modified": {"type": "/type/datetime", "value": "2024-09-20T12:00:31.101829"}
+}

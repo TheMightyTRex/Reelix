@@ -1,0 +1,31 @@
+{"history": {
+  "total_size": "1.2 T", "month_size": "301.0 G", "week_size": "80.3 G", "day_size": "11.7 G",
+  "noofslots": 5, "last_history_update": 1730199999, "version": "4.3.3",
+  "slots": [
+    {"id": 901, "completed": 1730190000, "name": "Prisoners.2013.1080p.BluRay.x264-SPARKS",
+     "nzb_name": "Prisoners.2013.1080p.BluRay.x264-SPARKS.nzb", "category": "movies", "pp": "D",
+     "script": "None", "report": "", "url": "", "status": "Completed",
+     "nzo_id": "SABnzbd_nzo_h1", "storage": "/downloads/complete/movies/Prisoners.2013.1080p.BluRay.x264-SPARKS",
+     "path": "/downloads/incomplete/Prisoners.2013.1080p.BluRay.x264-SPARKS",
+     "script_line": "", "download_time": 151, "postproc_time": 38, "stage_log": [],
+     "downloaded": 9876543210, "completeness": null, "fail_message": "", "url_info": "",
+     "bytes": 9876543210, "meta": null, "series": "", "md5sum": "4b0c0f5e1a", "password": "",
+     "duplicate_key": "prisoners/2013", "archive": false, "time_added": 1730189000, "size": "9.2 GB",
+     "loaded": false, "retry": 0, "action_line": ""},
+    {"id": 902, "completed": 1730191000, "name": "Incendies.2010.1080p.BluRay.x264-CiNEFiLE",
+     "category": "movies", "status": "Failed", "nzo_id": "SABnzbd_nzo_h2", "storage": "",
+     "fail_message": "Aborted, cannot be completed - https://sabnzbd.org/not-complete",
+     "bytes": 0, "action_line": "", "size": "0 B", "retry": 1},
+    {"id": 903, "completed": 1730192000, "name": "Polytechnique.2009.720p.BluRay.x264-HANDJOB",
+     "category": "movies", "status": "Failed", "nzo_id": "SABnzbd_nzo_h3", "storage": "/downloads/incomplete/Polytechnique",
+     "fail_message": "Unpacking failed, archive requires a password",
+     "bytes": 4400000000, "action_line": "", "size": "4.1 GB", "retry": 1},
+    {"id": 904, "completed": 1730193000, "name": "Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX",
+     "category": "movies", "status": "Failed", "nzo_id": "SABnzbd_nzo_h4", "storage": "",
+     "fail_message": "Unpacking failed, write error or disk is full?",
+     "bytes": 21000000000, "action_line": "", "size": "19.6 GB", "retry": 1},
+    {"id": 905, "completed": 0, "name": "Blade.Runner.2049.2017.1080p.BluRay.x264-SPARKS",
+     "category": "movies", "status": "Extracting", "nzo_id": "SABnzbd_nzo_h5", "storage": "",
+     "fail_message": "", "bytes": 12000000000, "action_line": "Unpacking: 03/07", "size": "11.2 GB", "retry": 0}
+  ]
+}}

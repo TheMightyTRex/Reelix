@@ -1,0 +1,46 @@
+# Original example definition for a FICTIONAL movie API with several files per entry
+# (tests only). Exercises: rows.multiple with parent (`..`) fields.
+id: dovenest
+name: Dove Nest
+description: Fictional movie API listing several encodes per film
+language: en-US
+type: public
+links:
+  - https://dovenest.invalid/
+caps:
+  categorymappings:
+    - { id: movie, cat: Movies, desc: Movies }
+  modes:
+    search: [q]
+search:
+  paths:
+    - path: api/list.json
+      response:
+        type: json
+  inputs:
+    query_term: "{{ .Keywords }}"
+  rows:
+    selector: data.movies
+    attribute: encodes
+    multiple: true
+  fields:
+    category:
+      text: movie
+    _title:
+      selector: ..title
+    _year:
+      selector: ..year
+    _quality:
+      selector: quality
+    title:
+      text: "{{ .Result._title }} {{ .Result._year }} {{ .Result._quality }}"
+    details:
+      selector: ..url
+    download:
+      selector: url
+    infohash:
+      selector: hash
+    size:
+      selector: size_bytes
+    seeders:
+      selector: seeds

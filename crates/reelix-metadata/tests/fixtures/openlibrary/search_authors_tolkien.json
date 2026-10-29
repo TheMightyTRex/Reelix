@@ -1,0 +1,28 @@
+{
+  "numFound": 2,
+  "start": 0,
+  "numFoundExact": true,
+  "docs": [
+    {
+      "key": "OL26320A",
+      "type": "author",
+      "name": "J.R.R. Tolkien",
+      "alternate_names": ["John Ronald Reuel Tolkien", "J. R. R. Tolkien", "Tolkien"],
+      "birth_date": "3 January 1892",
+      "death_date": "2 September 1973",
+      "top_work": "The Hobbit",
+      "work_count": 627,
+      "top_subjects": ["Fiction", "Middle Earth (Imaginary place)", "Fantasy fiction"],
+      "_version_": 1796000000000000000
+    },
+    {
+      "key": "OL1394246A",
+      "type": "author",
+      "name": "Christopher Tolkien",
+      "birth_date": "21 November 1924",
+      "top_work": "The Silmarillion",
+      "work_count": 89,
+      "_version_": 1796000000000000001
+    }
+  ]
+}

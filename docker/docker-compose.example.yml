@@ -1,0 +1,24 @@
+# Example deployment. Copy to docker-compose.yml and adjust paths/IDs.
+services:
+  reelix:
+    image: ghcr.io/reelix/reelix:latest
+    # Or build from source:
+    # build:
+    #   context: ..
+    #   dockerfile: docker/Dockerfile
+    container_name: reelix
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - TZ=America/New_York
+      # - REELIX_URL_BASE=/reelix       # when served under a sub-path
+      # - REELIX_LOG_LEVEL=info
+      # - REELIX_LOG_FORMAT=json
+    volumes:
+      - ./config:/config
+      # Single mount containing torrents/, usenet/ and media/ so hardlinks and atomic moves work.
+      - /data:/data
+    ports:
+      - "7700:7700"
+    restart: unless-stopped

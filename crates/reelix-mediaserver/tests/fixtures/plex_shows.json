@@ -1,0 +1,10 @@
+{
+  "MediaContainer": {
+    "size": 1, "totalSize": 1, "librarySectionID": 2,
+    "Metadata": [
+      { "ratingKey": "6100", "type": "show", "title": "Harbor Lights", "year": 2021, "addedAt": 1685692800,
+        "childCount": 2, "leafCount": 18,
+        "Guid": [ { "id": "imdb://tt1200010" }, { "id": "tmdb://120001" }, { "id": "tvdb://380001" } ] }
+    ]
+  }
+}

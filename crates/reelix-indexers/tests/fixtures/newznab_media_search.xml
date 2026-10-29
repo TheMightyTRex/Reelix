@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <title>Sample Media Index</title>
+    <item>
+      <title>Frank Herbert - Dune (1965) [EPUB]</title>
+      <guid>book-epub</guid>
+      <link>https://usenet.example/getnzb/book-epub.nzb</link>
+      <newznab:attr name="category" value="7000" />
+      <newznab:attr name="category" value="7020" />
+      <newznab:attr name="size" value="1048576" />
+    </item>
+    <item>
+      <title>Dune Fan Magazine Issue 42 [PDF]</title>
+      <guid>mag</guid>
+      <link>https://usenet.example/getnzb/mag.nzb</link>
+      <newznab:attr name="category" value="7000" />
+      <newznab:attr name="category" value="7010" />
+    </item>
+    <item>
+      <title>Frank Herbert - Dune (Unabridged) [M4B]</title>
+      <guid>book-m4b</guid>
+      <link>https://usenet.example/getnzb/book-m4b.nzb</link>
+      <newznab:attr name="category" value="3030" />
+    </item>
+    <item>
+      <title>Radiohead - OK Computer (1997) [FLAC]</title>
+      <guid>album-flac</guid>
+      <link>https://usenet.example/getnzb/album-flac.nzb</link>
+      <newznab:attr name="category" value="3000" />
+      <newznab:attr name="category" value="3040" />
+    </item>
+    <item>
+      <title>Radiohead - OK Computer Live (1998) [1080p Concert]</title>
+      <guid>album-video</guid>
+      <link>https://usenet.example/getnzb/album-video.nzb</link>
+      <newznab:attr name="category" value="3020" />
+    </item>
+  </channel>
+</rss>

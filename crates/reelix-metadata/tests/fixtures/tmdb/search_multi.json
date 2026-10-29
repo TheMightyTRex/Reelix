@@ -1,0 +1,10 @@
+{
+  "page": 1,
+  "results": [
+    { "adult": false, "backdrop_path": "/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg", "id": 1396, "name": "Breaking Bad", "original_name": "Breaking Bad", "overview": "Walter White...", "poster_path": "/ztkUQFLlC19CCMYHW9o1zWhJRNq.jpg", "media_type": "tv", "original_language": "en", "genre_ids": [18, 80], "popularity": 352.1, "first_air_date": "2008-01-20", "vote_average": 8.9, "vote_count": 14500, "origin_country": ["US"] },
+    { "adult": false, "backdrop_path": "/3xbx4pXg11yHETBtnEtvsHuG2K.jpg", "id": 559969, "title": "El Camino: A Breaking Bad Movie", "original_title": "El Camino: A Breaking Bad Movie", "overview": "In the wake of his dramatic escape from captivity...", "poster_path": "/ePXuKdXZuJx8hHMNr2yM4jY2L7Z.jpg", "media_type": "movie", "original_language": "en", "genre_ids": [80, 18, 53], "popularity": 30.0, "release_date": "2019-10-11", "video": false, "vote_average": 6.9, "vote_count": 5100 },
+    { "adult": false, "id": 17419, "name": "Bryan Cranston", "original_name": "Bryan Cranston", "media_type": "person", "popularity": 30.2, "gender": 2, "known_for_department": "Acting", "profile_path": "/7Jahy5LZX2Fo8fGJltMreAI49hC.jpg", "known_for": [] }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

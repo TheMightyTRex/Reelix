@@ -1,0 +1,51 @@
+{
+  "links": {
+    "self": "/works/OL27482W/editions.json?limit=100&offset=0",
+    "work": "/works/OL27482W"
+  },
+  "size": 3,
+  "entries": [
+    {
+      "key": "/books/OL7353617M",
+      "title": "The Hobbit",
+      "subtitle": "or There and Back Again",
+      "isbn_13": ["9780261102217"],
+      "isbn_10": ["0261102214"],
+      "identifiers": {"goodreads": ["1540236"], "amazon": ["0261102214"]},
+      "publishers": ["HarperCollins"],
+      "publish_date": "1999",
+      "languages": [{"key": "/languages/eng"}],
+      "number_of_pages": 310,
+      "physical_format": "Paperback",
+      "covers": [6979861],
+      "works": [{"key": "/works/OL27482W"}],
+      "type": {"key": "/type/edition"}
+    },
+    {
+      "key": "/books/OL24382006M",
+      "title": "The Hobbit",
+      "isbn_13": ["978-0-307-96962-7"],
+      "identifiers": {"amazon": ["B0099RKRTY"]},
+      "publishers": ["Random House Audio"],
+      "publish_date": "September 18, 2012",
+      "languages": [{"key": "/languages/eng"}],
+      "physical_format": "Audio CD",
+      "series": ["Middle-earth Universe ; 1"],
+      "contributions": ["Rob Inglis (Narrator)"],
+      "works": [{"key": "/works/OL27482W"}],
+      "type": {"key": "/type/edition"}
+    },
+    {
+      "key": "/books/OL51694024M",
+      "title": "Der Hobbit",
+      "publishers": ["Klett-Cotta"],
+      "publish_date": "2013",
+      "languages": [{"key": "/languages/ger"}],
+      "number_of_pages": 0,
+      "physical_format": "MP3",
+      "contributors": [{"role": "Translator", "name": "Wolfgang Krege"}, {"role": "Narrator", "name": "Gert Heidenreich"}],
+      "works": [{"key": "/works/OL27482W"}],
+      "type": {"key": "/type/edition"}
+    }
+  ]
+}

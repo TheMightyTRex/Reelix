@@ -1,0 +1,15 @@
+[build]
+target = "index.html"
+dist = "dist"
+public_url = "./"
+
+[serve]
+port = 8080
+
+# WebSocket first: Trunk matches proxies in order.
+[[proxy]]
+backend = "http://127.0.0.1:7700/api/v1/ws"
+ws = true
+
+[[proxy]]
+backend = "http://127.0.0.1:7700/api/"

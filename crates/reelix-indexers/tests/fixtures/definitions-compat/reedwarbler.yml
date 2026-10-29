@@ -1,0 +1,86 @@
+# Original example definition for a FICTIONAL semi-private tracker (tests only).
+# Exercises: form login with `selectors: true`, selectorinputs, getselectorinputs, captcha
+# detection, dropped empty inputs, `:has()`/`:not()` rows, download.before and download.infohash.
+id: reedwarbler
+name: Reed Warbler
+description: Fictional tracker whose downloads are magnets on the details page
+language: en-US
+type: semi-private
+links:
+  - https://reedwarbler.invalid/
+caps:
+  categories:
+    films: Movies
+  modes:
+    search: [q]
+settings:
+  - { name: username, type: text, label: Username }
+  - { name: password, type: password, label: Password }
+login:
+  path: signin
+  method: form
+  form: form#login
+  selectors: true
+  inputs:
+    'input[placeholder="Username"]': "{{ .Config.username }}"
+    'input[placeholder="Password"]': "{{ .Config.password }}"
+  selectorinputs:
+    token:
+      selector: 'script:contains("csrfToken")'
+      filters:
+        - name: regexp
+          args: 'csrfToken = "(.+?)"'
+  getselectorinputs:
+    nonce:
+      selector: 'meta[name="nonce"]'
+      attribute: content
+  captcha:
+    type: image
+    selector: img.captcha
+    input: captcha_code
+  error:
+    - selector: 'div.alert:contains("Wrong")'
+  test:
+    path: my
+    selector: 'a[href="logout"]'
+search:
+  paths:
+    - path: torrents
+  inputs:
+    q: "{{ .Keywords }}"
+    genre: "{{ .Config.genre }}"
+  rows:
+    selector: 'div.card:has(a.more):not(:has(span.nuked))'
+  fields:
+    title:
+      selector: h4
+    details:
+      selector: a.more
+      attribute: href
+    download:
+      selector: a.more
+      attribute: href
+    category:
+      text: films
+    size:
+      selector: 'li:containsOwn("Size")'
+      filters:
+        - name: split
+          args: [":", 1]
+download:
+  before:
+    path: thanks
+    method: post
+    inputs:
+      id: "{{ .DownloadUri.Query.id }}"
+  infohash:
+    hash:
+      selector: 'a[href^="magnet:?xt"]'
+      attribute: href
+      filters:
+        - name: regexp
+          args: "([A-Fa-f0-9]{40})"
+    title:
+      selector: h1
+      filters:
+        - name: validfilename

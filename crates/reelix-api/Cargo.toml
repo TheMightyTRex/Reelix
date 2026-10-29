@@ -1,0 +1,49 @@
+[package]
+name = "reelix-api"
+description = "Reelix HTTP API: axum handlers, auth, WebSocket and OpenAPI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+argon2.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+base64.workspace = true
+chrono.workspace = true
+futures.workspace = true
+hex.workspace = true
+rand.workspace = true
+reelix-api-types = { workspace = true, features = ["openapi"] }
+reelix-books.workspace = true
+reelix-core = { workspace = true, features = ["bus"] }
+reelix-db.workspace = true
+reelix-decision.workspace = true
+reelix-parser.workspace = true
+reelix-jobs.workspace = true
+reelix-library.workspace = true
+reelix-music.workspace = true
+reelix-pipeline.workspace = true
+reelix-requests.workspace = true
+reelix-indexers.workspace = true
+reelix-providers.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+utoipa-scalar.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+reqwest.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+tower.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

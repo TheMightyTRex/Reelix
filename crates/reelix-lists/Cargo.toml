@@ -1,0 +1,24 @@
+[package]
+name = "reelix-lists"
+description = "Import list adapters: TMDB, Trakt, IMDb, MDBList, Plex/Jellyfin watchlists"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+regex.workspace = true
+reelix-core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+
+[lints]
+workspace = true

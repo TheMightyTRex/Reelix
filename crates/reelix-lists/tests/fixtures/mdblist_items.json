@@ -1,0 +1,6 @@
+{"movies":[
+ {"id":438631,"rank":1,"adult":0,"title":"Dune","imdb_id":"tt1160419","tvdb_id":null,"language":"en","mediatype":"movie","release_year":2021,"spoken_language":"en"},
+ {"id":335984,"rank":2,"adult":0,"title":"Blade Runner 2049","imdb_id":"tt1856101","mediatype":"movie","release_year":2017}
+],"shows":[
+ {"id":93405,"rank":3,"adult":0,"title":"Squid Game","imdb_id":"tt10919420","tvdb_id":383275,"mediatype":"show","release_year":2021}
+]}

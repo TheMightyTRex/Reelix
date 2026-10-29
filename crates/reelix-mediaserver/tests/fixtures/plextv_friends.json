@@ -1,0 +1,5 @@
+[
+  { "id": 2, "uuid": "fa11ba11fa11ba11", "title": "Alice", "username": "alice_watches", "email": "alice@example.com", "restricted": false,
+    "thumb": "https://plex.tv/users/fa11ba11fa11ba11/avatar?c=1700000001", "home": false, "status": "accepted" },
+  { "id": 3, "uuid": "b0bb0bb0bb0bb0bb", "title": "Kids", "username": null, "email": null, "restricted": true, "home": true, "status": "accepted" }
+]

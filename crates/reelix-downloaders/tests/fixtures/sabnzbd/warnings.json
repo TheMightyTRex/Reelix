@@ -1,0 +1,4 @@
+{"warnings": [
+  {"text": "Too little diskspace forcing PAUSE", "type": "WARNING", "time": 1730100000},
+  {"text": "Failed to connect to news.example.net:563 (timed out)", "type": "ERROR", "time": 1730100100}
+]}

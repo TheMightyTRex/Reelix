@@ -1,0 +1,69 @@
+# Original example definition for a FICTIONAL JSON API tracker (tests only).
+# Exercises: bearer header, JSON rows with a templated :has()/:contains() filter,
+# rows.attribute, rows.count, noResultsMessage, bool case keys, .True/.False and arrays.
+id: marshlark
+name: Marsh Lark
+description: Fictional JSON API tracker
+language: en-US
+type: private
+links:
+  - https://marshlark.invalid/
+caps:
+  categorymappings:
+    - { id: 1, cat: Movies, desc: Movies }
+    - { id: 2, cat: TV, desc: TV }
+  modes:
+    search: [q]
+settings:
+  - { name: apikey, type: text, label: API key }
+  - { name: freeleech, type: checkbox, label: Freeleech only, default: false }
+search:
+  headers:
+    Authorization: ["Bearer {{ .Config.apikey }}"]
+  paths:
+    - path: api/torrents
+      response:
+        type: json
+        noResultsMessage: ""
+  inputs:
+    name: "{{ .Keywords }}"
+  rows:
+    selector: "data{{ if .Config.freeleech }}:has(attributes.free:contains(True)){{ else }}{{ end }}"
+    attribute: attributes
+    count:
+      selector: meta.total
+  fields:
+    category:
+      selector: category_id
+    title:
+      selector: name
+    details:
+      selector: details_link
+    download:
+      selector: download_link
+    size:
+      selector: size
+    seeders:
+      selector: seeders
+    leechers:
+      selector: leechers
+    date:
+      selector: created_at
+    _featured:
+      selector: featured
+      case:
+        True: "{{ .True }}"
+        False: "{{ .False }}"
+    genre:
+      selector: genres
+    description:
+      text: "{{ .Result.genre }}"
+    downloadvolumefactor:
+      selector: free
+      case:
+        True: 0
+        False: 1
+    uploadvolumefactor:
+      text: "{{ if .Result._featured }}2{{ else }}1{{ end }}"
+    imdbid:
+      selector: meta.imdb

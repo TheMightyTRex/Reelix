@@ -1,0 +1,19 @@
+{
+  "key": "/books/OL7353617M",
+  "title": "The Hobbit",
+  "subtitle": "or There and Back Again",
+  "authors": [{"key": "/authors/OL26320A"}],
+  "isbn_10": ["0261102214"],
+  "identifiers": {"goodreads": ["1540236"], "librarything": ["3090"]},
+  "publishers": ["HarperCollins"],
+  "publish_date": "1999",
+  "languages": [{"key": "/languages/eng"}],
+  "number_of_pages": 310,
+  "physical_format": "Paperback",
+  "covers": [6979861],
+  "series": ["Tolkien's Middle-earth"],
+  "works": [{"key": "/works/OL27482W"}],
+  "type": {"key": "/type/edition"},
+  "latest_revision": 14,
+  "revision": 14
+}

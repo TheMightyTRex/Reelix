@@ -1,0 +1,12 @@
+{
+  "MediaContainer": {
+    "librarySectionID": "watchlist", "offset": 0, "totalSize": 2, "size": 2,
+    "Metadata": [
+      { "ratingKey": "5d77683f6f4521001ea9dc53", "key": "/library/metadata/5d77683f6f4521001ea9dc53/children", "guid": "plex://show/5d77683f6f4521001ea9dc53",
+        "type": "show", "title": "Tidewater", "year": 2025,
+        "Guid": [ { "id": "imdb://tt3300440" }, { "id": "tmdb://230044" }, { "id": "tvdb://440044" } ] },
+      { "ratingKey": "5d776b59ad5437001f79c6f8", "key": "/library/metadata/5d776b59ad5437001f79c6f8", "guid": "plex://movie/5d776b59ad5437001f79c6f8",
+        "type": "movie", "title": "Signal Fires", "year": 2024 }
+    ]
+  }
+}

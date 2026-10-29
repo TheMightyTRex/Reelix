@@ -1,0 +1,25 @@
+{
+  "key": "/authors/OL26320A",
+  "name": "J.R.R. Tolkien",
+  "personal_name": "John Ronald Reuel Tolkien",
+  "fuller_name": "John Ronald Reuel Tolkien",
+  "alternate_names": ["J. R. R. Tolkien", "Tolkien"],
+  "bio": {
+    "type": "/type/text",
+    "value": "John Ronald Reuel Tolkien was an English writer, poet, philologist and academic, best known as the author of The Hobbit and The Lord of the Rings."
+  },
+  "birth_date": "3 January 1892",
+  "death_date": "2 September 1973",
+  "photos": [6155606, -1, 6433524],
+  "links": [
+    {"title": "Tolkien Estate", "url": "https://www.tolkienestate.com/", "type": {"key": "/type/link"}}
+  ],
+  "wikipedia": "http://en.wikipedia.org/wiki/J._R._R._Tolkien",
+  "remote_ids": {"wikidata": "Q892", "viaf": "95218067", "isni": "0000000121441970"},
+  "source_records": ["amazon:0261102214"],
+  "type": {"key": "/type/author"},
+  "revision": 61,
+  "latest_revision": 61,
+  "created": {"type": "/type/datetime", "value": "2008-04-01T03:28:50.625462"},
+  "last_modified": {"type": "/type/datetime", "value": "2024-08-25T17:32:07.317404"}
+}

@@ -1,0 +1,43 @@
+# Original example definition for a FICTIONAL public JSON API with books and music (tests only).
+id: quillfeed
+name: Quillfeed
+description: Fictional public JSON torrent API with book and music categories
+language: en-US
+type: public
+links:
+  - https://quillfeed.invalid/
+caps:
+  categorymappings:
+    - { id: ebooks, cat: Books/EBook }
+    - { id: mags, cat: Books/Mags }
+    - { id: audiobooks, cat: Audio/Audiobook }
+    - { id: flac, cat: Audio/Lossless }
+    - { id: mp3, cat: Audio/MP3 }
+    - { id: films, cat: Movies }
+  modes:
+    search: [q]
+    book-search: [q, author, title]
+settings: []
+search:
+  paths:
+    - path: api/search
+      response:
+        type: json
+  inputs:
+    q: "{{ .Keywords }}"
+    type: "{{ .Query.Type }}"
+    author: "{{ .Query.Author }}"
+    title: "{{ .Query.Title }}"
+    artist: "{{ .Query.Artist }}"
+    cats: '{{ join .Categories "," }}'
+  rows:
+    selector: results
+  fields:
+    category:
+      selector: cat
+    title:
+      selector: name
+    download:
+      selector: link
+    size:
+      selector: size

@@ -1,0 +1,25 @@
+[package]
+name = "reelix-import"
+description = "Media info (ffprobe), naming engine, file matching and safe filesystem operations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+filetime = "0.2"
+fs4 = "1.1"
+reelix-parser.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

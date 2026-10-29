@@ -1,0 +1,28 @@
+{
+  "created": "2026-10-01T12:00:00.000Z",
+  "count": 2,
+  "offset": 0,
+  "artists": [
+    {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "type": "Group",
+      "type-id": "e431f5f6-b5d2-343d-8b36-72607fffb74b",
+      "score": 100,
+      "name": "Radiohead",
+      "sort-name": "Radiohead",
+      "country": "GB",
+      "area": {"id": "8a754a16-0027-3a29-b6d7-2b40ea0481ed", "type": "Country", "name": "United Kingdom", "sort-name": "United Kingdom"},
+      "life-span": {"begin": "1991", "ended": null},
+      "tags": [{"count": 15, "name": "alternative rock"}]
+    },
+    {
+      "id": "1a2b3c4d-0000-4000-8000-00000000abcd",
+      "type": "Group",
+      "score": "62",
+      "name": "Radiohead Tribute Band",
+      "sort-name": "Radiohead Tribute Band",
+      "disambiguation": "Polish tribute act",
+      "life-span": {"ended": null}
+    }
+  ]
+}

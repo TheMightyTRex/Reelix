@@ -1,0 +1,425 @@
+//! In-memory fakes of every gateway trait, for tests here and in `reelix-api`.
+
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use reelix_api_types::requests::{AvailabilityStatus, RootFolderOptionDto};
+use reelix_core::MediaKind;
+use reelix_mediaserver::plextv::PlexTv;
+use reelix_mediaserver::{
+    BuildContext, ExternalUser, MediaServer, MediaServerKind, MsError, MsItem, ServerInfo, WatchedItem,
+};
+use reelix_metadata::{
+    Credits, DiscoverFeed, ExternalIds, Genre, Images, MetaError, MovieMetadata, MovieStatus, MultiHit, Page,
+    Ratings, ReleaseDates, SearchHit, SeasonMetadata, SeriesMetadata, SeriesStatus, TmdbId,
+};
+use reelix_notify::NotificationEvent;
+
+use crate::gateway::{
+    AddMovieRequest, AddSeriesRequest, Availability, DiscoverySource, LibraryGateway, MediaServerDirectory,
+    MediaServerEntry, NotificationSink,
+};
+
+// ------------------------------------------------------------------ library
+
+#[derive(Default)]
+pub struct LibraryState {
+    pub movies: HashMap<TmdbId, Availability>,
+    pub series: HashMap<TmdbId, Availability>,
+    pub added_movies: Vec<AddMovieRequest>,
+    pub added_series: Vec<AddSeriesRequest>,
+    pub searches: Vec<(MediaKind, Vec<i64>)>,
+    pub root_folders: Vec<RootFolderOptionDto>,
+    /// When set, add_* fail with this message.
+    pub fail_adds: Option<String>,
+    next_id: i64,
+}
+
+/// Fake library: records adds/searches; availability is set by the test.
+#[derive(Default, Clone)]
+pub struct FakeLibrary(pub Arc<Mutex<LibraryState>>);
+
+impl FakeLibrary {
+    pub fn set(&self, kind: MediaKind, tmdb: TmdbId, a: Availability) {
+        let mut s = self.0.lock().unwrap();
+        match kind {
+            MediaKind::Movie => s.movies.insert(tmdb, a),
+            MediaKind::Series => s.series.insert(tmdb, a),
+        };
+    }
+
+    pub fn state(&self) -> std::sync::MutexGuard<'_, LibraryState> {
+        self.0.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl LibraryGateway for FakeLibrary {
+    async fn availability(
+        &self,
+        kind: MediaKind,
+        ids: &[TmdbId],
+    ) -> anyhow::Result<HashMap<TmdbId, Availability>> {
+        let s = self.0.lock().unwrap();
+        let map = match kind {
+            MediaKind::Movie => &s.movies,
+            MediaKind::Series => &s.series,
+        };
+        Ok(ids
+            .iter()
+            .filter_map(|i| map.get(i).map(|a| (*i, a.clone())))
+            .collect())
+    }
+
+    async fn add_movie(&self, req: AddMovieRequest) -> anyhow::Result<i64> {
+        let mut s = self.0.lock().unwrap();
+        if let Some(m) = &s.fail_adds {
+            anyhow::bail!("{m}");
+        }
+        s.next_id += 1;
+        let id = s.next_id;
+        s.movies.entry(req.tmdb_id).or_insert(Availability {
+            status: AvailabilityStatus::Monitored,
+            library_id: Some(id),
+            seasons: BTreeMap::new(),
+        });
+        s.added_movies.push(req);
+        Ok(id)
+    }
+
+    async fn add_series(&self, req: AddSeriesRequest) -> anyhow::Result<i64> {
+        let mut s = self.0.lock().unwrap();
+        if let Some(m) = &s.fail_adds {
+            anyhow::bail!("{m}");
+        }
+        s.next_id += 1;
+        let id = s.next_id;
+        let entry = s.series.entry(req.tmdb_id).or_insert(Availability {
+            status: AvailabilityStatus::Monitored,
+            library_id: Some(id),
+            seasons: BTreeMap::new(),
+        });
+        for n in &req.seasons {
+            entry.seasons.entry(*n).or_insert(AvailabilityStatus::Monitored);
+        }
+        let id = entry.library_id.unwrap_or(id);
+        s.added_series.push(req);
+        Ok(id)
+    }
+
+    async fn request_search(&self, kind: MediaKind, ids: &[i64]) -> anyhow::Result<()> {
+        self.0.lock().unwrap().searches.push((kind, ids.to_vec()));
+        Ok(())
+    }
+
+    async fn root_folders(&self, _: MediaKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
+        Ok(self.0.lock().unwrap().root_folders.clone())
+    }
+}
+
+// ------------------------------------------------------------------ metadata
+
+/// Minimal movie metadata.
+pub fn movie(tmdb_id: TmdbId, title: &str, year: i32) -> MovieMetadata {
+    MovieMetadata {
+        tmdb_id,
+        imdb_id: Some(format!("tt{tmdb_id:07}")),
+        title: title.into(),
+        original_title: title.into(),
+        original_language: Some("en".into()),
+        sort_title: title.to_lowercase(),
+        overview: Some(format!("{title} overview")),
+        tagline: None,
+        year: Some(year),
+        release_date: chrono::NaiveDate::from_ymd_opt(year, 1, 1),
+        release_dates: ReleaseDates::default(),
+        certification: None,
+        status: MovieStatus::Released,
+        runtime_minutes: Some(120),
+        genres: vec![Genre {
+            id: 28,
+            name: "Action".into(),
+        }],
+        keywords: Vec::new(),
+        studios: Vec::new(),
+        collection: None,
+        alternative_titles: Vec::new(),
+        external_ids: ExternalIds::default(),
+        credits: Credits::default(),
+        images: Images {
+            poster: Some(format!("https://image.tmdb.org/t/p/w500/{tmdb_id}.jpg")),
+            ..Default::default()
+        },
+        videos: Vec::new(),
+        ratings: Ratings::default(),
+        adult: false,
+        homepage: None,
+        recommendations: Vec::new(),
+        similar: Vec::new(),
+    }
+}
+
+/// Minimal series metadata with `seasons` regular seasons (plus specials).
+pub fn series(tmdb_id: TmdbId, title: &str, seasons: u32) -> SeriesMetadata {
+    let season = |n: u32| SeasonMetadata {
+        season_number: n,
+        name: Some(format!("Season {n}")),
+        overview: None,
+        air_date: None,
+        poster: None,
+        episode_count: 10,
+        episodes: Vec::new(),
+        tmdb_id: None,
+        tvdb_id: None,
+    };
+    SeriesMetadata {
+        tmdb_id: Some(tmdb_id),
+        tvdb_id: Some(tmdb_id + 70000),
+        imdb_id: None,
+        title: title.into(),
+        original_title: None,
+        sort_title: title.to_lowercase(),
+        overview: None,
+        year: Some(2020),
+        first_air_date: None,
+        last_air_date: None,
+        next_air_date: None,
+        status: SeriesStatus::Continuing,
+        show_type: None,
+        network: None,
+        networks: Vec::new(),
+        genres: Vec::new(),
+        keywords: Vec::new(),
+        runtime_minutes: None,
+        certification: None,
+        original_language: None,
+        origin_country: Vec::new(),
+        alternative_titles: Vec::new(),
+        external_ids: ExternalIds::default(),
+        credits: Credits::default(),
+        images: Images::default(),
+        videos: Vec::new(),
+        ratings: Ratings::default(),
+        seasons: (0..=seasons).map(season).collect(),
+        recommendations: Vec::new(),
+        similar: Vec::new(),
+    }
+}
+
+/// A search hit for a movie or series.
+pub fn hit(kind: MediaKind, tmdb_id: TmdbId, title: &str) -> SearchHit {
+    SearchHit {
+        kind,
+        tmdb_id: Some(tmdb_id),
+        tvdb_id: None,
+        imdb_id: None,
+        title: title.into(),
+        original_title: None,
+        year: Some(2020),
+        release_date: None,
+        overview: None,
+        poster: None,
+        backdrop: None,
+        genre_ids: Vec::new(),
+        original_language: None,
+        vote_average: 7.0,
+        vote_count: 100,
+        popularity: 1.0,
+        adult: false,
+    }
+}
+
+/// Fake metadata: titles registered by the test; every feed returns `feed_hits`.
+#[derive(Default)]
+pub struct FakeMetadata {
+    pub movies: Mutex<HashMap<TmdbId, MovieMetadata>>,
+    pub series: Mutex<HashMap<TmdbId, SeriesMetadata>>,
+    pub feed_hits: Mutex<Vec<SearchHit>>,
+}
+
+impl FakeMetadata {
+    pub fn with_movie(self, m: MovieMetadata) -> Self {
+        self.movies.lock().unwrap().insert(m.tmdb_id, m);
+        self
+    }
+    pub fn with_series(self, s: SeriesMetadata) -> Self {
+        self.series
+            .lock()
+            .unwrap()
+            .insert(s.tmdb_id.unwrap_or_default(), s);
+        self
+    }
+    pub fn with_hits(self, hits: Vec<SearchHit>) -> Self {
+        *self.feed_hits.lock().unwrap() = hits;
+        self
+    }
+    fn page(&self) -> Page<SearchHit> {
+        let results = self.feed_hits.lock().unwrap().clone();
+        Page {
+            page: 1,
+            total_pages: 1,
+            total_results: results.len() as u32,
+            results,
+        }
+    }
+}
+
+#[async_trait]
+impl DiscoverySource for FakeMetadata {
+    async fn discover(&self, _: &DiscoverFeed, _: u32) -> Result<Page<SearchHit>, MetaError> {
+        Ok(self.page())
+    }
+    async fn search(&self, q: &str, _: u32) -> Result<Page<MultiHit>, MetaError> {
+        let q = q.to_lowercase();
+        Ok(self.page().map(MultiHit::Media)).map(|mut p| {
+            p.results
+                .retain(|h| matches!(h, MultiHit::Media(m) if m.title.to_lowercase().contains(&q)));
+            p.total_results = p.results.len() as u32;
+            p
+        })
+    }
+    async fn movie(&self, id: TmdbId) -> Result<MovieMetadata, MetaError> {
+        self.movies
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or(MetaError::NotFound)
+    }
+    async fn series(&self, id: TmdbId) -> Result<SeriesMetadata, MetaError> {
+        self.series
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or(MetaError::NotFound)
+    }
+    async fn related(&self, _: MediaKind, _: TmdbId, _: bool, _: u32) -> Result<Page<SearchHit>, MetaError> {
+        Ok(self.page())
+    }
+    async fn genres(&self, _: MediaKind) -> Result<Vec<Genre>, MetaError> {
+        Ok(vec![Genre {
+            id: 28,
+            name: "Action".into(),
+        }])
+    }
+}
+
+// ------------------------------------------------------------------ media servers
+
+/// A fake media server with fixed users and passwords.
+pub struct FakeMediaServer {
+    pub kind: MediaServerKind,
+    /// `(user, password)`; password `None` = cannot log in with a password.
+    pub users: Vec<(ExternalUser, Option<String>)>,
+}
+
+impl FakeMediaServer {
+    pub fn user(id: &str, name: &str) -> ExternalUser {
+        ExternalUser {
+            id: id.into(),
+            username: name.into(),
+            email: Some(format!("{name}@example.com")),
+            is_admin: false,
+            avatar_url: None,
+            access_token: None,
+        }
+    }
+}
+
+#[async_trait]
+impl MediaServer for FakeMediaServer {
+    fn kind(&self) -> MediaServerKind {
+        self.kind
+    }
+    async fn test(&self) -> Result<ServerInfo, MsError> {
+        Ok(ServerInfo {
+            kind: self.kind,
+            id: "fake".into(),
+            name: "Fake".into(),
+            version: "1".into(),
+        })
+    }
+    async fn authenticate(&self, username: &str, password: &str) -> Result<ExternalUser, MsError> {
+        self.users
+            .iter()
+            .find(|(u, p)| u.username.eq_ignore_ascii_case(username) && p.as_deref() == Some(password))
+            .map(|(u, _)| ExternalUser {
+                access_token: Some("token".into()),
+                ..u.clone()
+            })
+            .ok_or(MsError::InvalidCredentials)
+    }
+    async fn users(&self) -> Result<Vec<ExternalUser>, MsError> {
+        Ok(self.users.iter().map(|(u, _)| u.clone()).collect())
+    }
+    async fn refresh_library(&self, _: &[PathBuf]) -> Result<(), MsError> {
+        Ok(())
+    }
+    async fn library_items(&self) -> Result<Vec<MsItem>, MsError> {
+        Ok(Vec::new())
+    }
+    async fn watch_history(&self, _: &str) -> Result<Vec<WatchedItem>, MsError> {
+        Ok(Vec::new())
+    }
+}
+
+/// Fixed list of servers plus a plex.tv client pointed at `plex_tv_url`.
+pub struct FakeDirectory {
+    pub servers: Vec<MediaServerEntry>,
+    pub plex_tv_url: String,
+}
+
+impl FakeDirectory {
+    pub fn new(plex_tv_url: &str) -> Self {
+        Self {
+            servers: Vec::new(),
+            plex_tv_url: plex_tv_url.into(),
+        }
+    }
+
+    pub fn with(mut self, id: i64, name: &str, server: FakeMediaServer) -> Self {
+        self.servers.push(MediaServerEntry {
+            id,
+            name: name.into(),
+            kind: server.kind,
+            server: Arc::new(server),
+        });
+        self
+    }
+}
+
+#[async_trait]
+impl MediaServerDirectory for FakeDirectory {
+    async fn servers(&self) -> Vec<MediaServerEntry> {
+        self.servers.clone()
+    }
+    fn plex_tv(&self) -> PlexTv {
+        PlexTv::new(&BuildContext::new(reqwest::Client::new(), "reelix-test"))
+            .with_base_urls(&self.plex_tv_url, &self.plex_tv_url)
+    }
+}
+
+// ------------------------------------------------------------------ notifications
+
+/// A recorded notification and its recipients.
+pub type Sent = (NotificationEvent, Vec<i64>);
+
+/// Records every notification.
+#[derive(Default, Clone)]
+pub struct FakeNotifications(pub Arc<Mutex<Vec<Sent>>>);
+
+impl FakeNotifications {
+    pub fn take(&self) -> Vec<Sent> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+#[async_trait]
+impl NotificationSink for FakeNotifications {
+    async fn notify(&self, event: NotificationEvent, recipients: Vec<i64>) {
+        self.0.lock().unwrap().push((event, recipients));
+    }
+}

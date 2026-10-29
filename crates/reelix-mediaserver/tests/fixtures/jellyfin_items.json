@@ -1,0 +1,15 @@
+{
+  "Items": [
+    { "Name": "The Lighthouse Keeper", "Id": "f0e1d2c3b4a5968778695a4b3c2d1e0f", "Type": "Movie",
+      "ProductionYear": 2023, "DateCreated": "2024-01-15T20:41:07.1234567Z",
+      "Path": "/media/movies/The Lighthouse Keeper (2023)/The Lighthouse Keeper (2023) Bluray-1080p.mkv",
+      "ProviderIds": { "Tmdb": "912345", "Imdb": "tt9123450" } },
+    { "Name": "Harbor Lights", "Id": "1a2b3c4d5e6f708192a3b4c5d6e7f809", "Type": "Series",
+      "ProductionYear": 2021, "DateCreated": "2023-06-02T08:00:00.0000000Z",
+      "Path": "/media/tv/Harbor Lights",
+      "ProviderIds": { "Tvdb": "380001", "Tmdb": "120001", "Imdb": "tt1200010", "TvRage": "" } },
+    { "Name": "Concert Bootleg", "Id": "ffffffffffffffffffffffffffffffff", "Type": "MusicVideo" }
+  ],
+  "TotalRecordCount": 3,
+  "StartIndex": 0
+}

@@ -1,0 +1,40 @@
+[package]
+name = "reelix-web"
+description = "The Reelix web UI (Leptos, client-side rendered, built with Trunk)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+console_error_panic_hook = "0.1"
+gloo-net = { version = "0.6", features = ["http", "json", "websocket"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+futures.workspace = true
+leptos = { version = "0.8", features = ["csr"] }
+leptos_router = "0.8"
+reelix-api-types.workspace = true
+reelix-core.workspace = true
+reelix-decision.workspace = true
+reelix-parser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Clipboard",
+    "Document",
+    "Element",
+    "EventTarget",
+    "HtmlElement",
+    "HtmlInputElement",
+    "KeyboardEvent",
+    "Location",
+    "Navigator",
+    "Node",
+    "Storage",
+    "Url",
+    "Window",
+] }
+
+[lints]
+workspace = true
