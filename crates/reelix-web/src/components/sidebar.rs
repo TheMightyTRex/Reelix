@@ -172,8 +172,6 @@ pub const NAV: &[&[NavItem]] = &[
                 ("UI", "/settings/ui"),
                 ("Media Management", "/settings/mediamanagement"),
                 ("Naming", "/settings/naming"),
-                ("Books", "/settings/books"),
-                ("Music", "/settings/music"),
                 ("Metadata Profiles", "/settings/metadataprofiles"),
                 ("Profiles", "/settings/profiles"),
                 ("Quality", "/settings/quality"),

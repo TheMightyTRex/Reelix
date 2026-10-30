@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_router::components::{ParentRoute, Route, Router, Routes};
+use leptos_router::components::{ParentRoute, Redirect, Route, Router, Routes};
 use leptos_router::path;
 
 use crate::api;
@@ -99,13 +99,13 @@ pub fn App() -> impl IntoView {
                             <Route path=path!("books/import") view=pages::books::ImportAuthorsPage />
                             <Route path=path!("books/authors/:id") view=pages::books::AuthorDetailPage />
                             <Route path=path!("books/book/:id") view=pages::books::BookDetailPage />
-                            <Route path=path!("settings/books") view=pages::books::BookSettingsPage />
+                            <Route path=path!("settings/books") view=|| view! { <Redirect path="/settings/mediamanagement" /> } />
                             <Route path=path!("music") view=pages::music::ArtistsPage />
                             <Route path=path!("music/add") view=pages::music::AddArtistPage />
                             <Route path=path!("music/import") view=pages::music::ImportArtistsPage />
                             <Route path=path!("music/artists/:id") view=pages::music::ArtistDetailPage />
                             <Route path=path!("music/albums/:id") view=pages::music::AlbumDetailPage />
-                            <Route path=path!("settings/music") view=pages::music::MusicSettingsPage />
+                            <Route path=path!("settings/music") view=|| view! { <Redirect path="/settings/metadata" /> } />
                             <Route path=path!("settings/metadataprofiles") view=pages::music::MetadataProfilesPage />
                             <Route path=path!("*any") view=pages::PlaceholderPage />
                         </ParentRoute>

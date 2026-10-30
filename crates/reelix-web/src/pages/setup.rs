@@ -37,7 +37,7 @@ const STEPS: &[Step] = &[
     },
     Step {
         title: "Root folders",
-        blurb: "Tell Reelix where your movies and series live on disk. Add at least one folder for each type you plan to manage.",
+        blurb: "Tell Reelix where your movies, series, books and music live on disk. Add at least one folder for each type you plan to manage.",
     },
     Step {
         title: "Download client",

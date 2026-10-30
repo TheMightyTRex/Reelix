@@ -12,4 +12,4 @@ pub use author_detail::AuthorDetailPage;
 pub use authors::AuthorsPage;
 pub use book_detail::BookDetailPage;
 pub use import::ImportAuthorsPage;
-pub use settings::BookSettingsPage;
+pub use settings::{BookCalibreCard, BookMetadataCard, BookNamingCard};

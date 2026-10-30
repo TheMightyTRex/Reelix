@@ -23,6 +23,7 @@ pub mod provider_form;
 pub mod request_drawer;
 pub mod request_modal;
 pub mod request_status;
+pub mod settings_draft;
 pub mod sidebar;
 pub mod toast;
 pub mod topbar;

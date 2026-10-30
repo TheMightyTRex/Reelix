@@ -96,7 +96,7 @@ pub fn FormatFields(opts: BookOptions, choice: FormatChoice, #[prop(into)] prefi
                     {move || (profile.get() != 0 && opts.roots(format).is_empty()).then(|| view! {
                         <p class="field-hint text-danger">
                             {format!("No {} root folders yet. ", label.to_lowercase())}
-                            <A href="/settings/books">"Add one in Book settings"</A>
+                            <A href="/settings/mediamanagement">"Add one in Media Management"</A>
                         </p>
                     })}
                 </div>

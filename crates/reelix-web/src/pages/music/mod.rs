@@ -14,4 +14,4 @@ pub use artist_detail::ArtistDetailPage;
 pub use artists::ArtistsPage;
 pub use import::ImportArtistsPage;
 pub use metadata_profiles::MetadataProfilesPage;
-pub use settings::MusicSettingsPage;
+pub use settings::{MusicMetadataCard, MusicNamingCard};

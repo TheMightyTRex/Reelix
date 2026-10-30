@@ -1,4 +1,5 @@
-//! `/settings/metadata` — TMDB / TVDB keys, language and region.
+//! `/settings/metadata` — TMDB / TVDB keys, language and region, plus book and music
+//! metadata / tag writing.
 
 use leptos::ev;
 use leptos::prelude::*;
@@ -8,6 +9,8 @@ use reelix_api_types::providers::{MetadataSettingsDto, TestResultDto};
 use crate::api;
 use crate::components::provider_form::TestResultView;
 use crate::components::{Card, ErrorBox, PageHeader, Skeleton};
+use crate::pages::books::BookMetadataCard;
+use crate::pages::music::MusicMetadataCard;
 use crate::pages::system::require_admin;
 use crate::state::Toasts;
 
@@ -16,12 +19,16 @@ pub fn MetadataPage() -> impl IntoView {
     require_admin();
     let settings = LocalResource::new(|| api::get::<MetadataSettingsDto>("/settings/metadata"));
     view! {
-        <PageHeader title="Metadata" subtitle="Where titles, artwork, release dates and episode lists come from." />
+        <PageHeader title="Metadata" subtitle="Where titles, artwork, release dates and episode lists come from, and what Reelix writes into imported books and music." />
         {move || match settings.get() {
             None => view! { <Skeleton lines=5 /> }.into_any(),
             Some(Err(e)) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| settings.refetch()) /> }.into_any(),
             Some(Ok(s)) => view! { <MetadataForm initial=s /> }.into_any(),
         }}
+        <div class="stack">
+            <BookMetadataCard />
+            <MusicMetadataCard />
+        </div>
     }
 }
 

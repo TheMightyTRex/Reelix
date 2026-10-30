@@ -1,8 +1,9 @@
-//! `/settings/mediamanagement` — root folders (with free space) and import / file handling settings.
+//! `/settings/mediamanagement` — root folders of every library (with free space) and import / file handling settings.
 
 use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use reelix_api_types::content::{ContentKind, ContentRootFolderDto, CreateContentRootFolderRequest};
 use reelix_api_types::library::{
     CreateRootFolderRequest, ImportMode, MediaKind, MediaManagementSettings, RescanAfterRefresh,
     RootFolderDto,
@@ -14,6 +15,7 @@ use crate::components::library_forms::EnumSelect;
 use crate::components::{
     Card, ConfirmDialog, EmptyState, ErrorBox, Icon, PageHeader, Skeleton, Spinner, StatusBadge, Tone,
 };
+use crate::pages::books::BookCalibreCard;
 use crate::pages::system::require_admin;
 use crate::state::Toasts;
 
@@ -45,19 +47,140 @@ pub fn MediaManagementPage() -> impl IntoView {
         <div class="stack">
             <RootFoldersCard />
             <SettingsCard />
+            <BookCalibreCard />
         </div>
     }
+}
+
+/// Which library a root folder belongs to; movie / series roots and book / music roots are
+/// separate API resources, but they're managed together here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootKind {
+    Movie,
+    Series,
+    Ebook,
+    Audiobook,
+    Music,
+}
+
+const ROOT_KINDS: [(RootKind, &str, &str, &str); 5] = [
+    (RootKind::Movie, "movie", "Movies", "/media/movies"),
+    (RootKind::Series, "series", "Series", "/media/tv"),
+    (RootKind::Ebook, "ebook", "Ebooks", "/media/books"),
+    (
+        RootKind::Audiobook,
+        "audiobook",
+        "Audiobooks",
+        "/media/audiobooks",
+    ),
+    (RootKind::Music, "music", "Music", "/media/music"),
+];
+
+impl RootKind {
+    fn label(self) -> &'static str {
+        ROOT_KINDS.iter().find(|k| k.0 == self).map_or("", |k| k.2)
+    }
+
+    fn placeholder(self) -> &'static str {
+        ROOT_KINDS.iter().find(|k| k.0 == self).map_or("", |k| k.3)
+    }
+
+    /// API collection for this kind's root folders.
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::Movie | Self::Series => "/rootfolders",
+            Self::Ebook | Self::Audiobook => "/bookrootfolders",
+            Self::Music => "/musicrootfolders",
+        }
+    }
+
+    /// Library section whose import page lists unmapped folders.
+    fn section(self) -> &'static str {
+        match self {
+            Self::Movie => "movies",
+            Self::Series => "series",
+            Self::Ebook | Self::Audiobook => "books",
+            Self::Music => "music",
+        }
+    }
+
+    fn from_content(k: ContentKind) -> Self {
+        match k {
+            ContentKind::Ebook => Self::Ebook,
+            ContentKind::Audiobook => Self::Audiobook,
+            ContentKind::Music => Self::Music,
+            ContentKind::Movie => Self::Movie,
+            ContentKind::Series => Self::Series,
+        }
+    }
+}
+
+/// A root folder of any library, flattened for display.
+#[derive(Debug, Clone, PartialEq)]
+struct Root {
+    id: i64,
+    path: String,
+    kind: RootKind,
+    accessible: bool,
+    free_space: Option<u64>,
+    total_space: Option<u64>,
+    unmapped: usize,
+}
+
+impl From<RootFolderDto> for Root {
+    fn from(r: RootFolderDto) -> Self {
+        Self {
+            id: r.id,
+            path: r.path,
+            kind: if r.media_kind == MediaKind::Movie {
+                RootKind::Movie
+            } else {
+                RootKind::Series
+            },
+            accessible: r.accessible,
+            free_space: r.free_space,
+            total_space: r.total_space,
+            unmapped: r.unmapped_folders.len(),
+        }
+    }
+}
+
+impl From<ContentRootFolderDto> for Root {
+    fn from(r: ContentRootFolderDto) -> Self {
+        Self {
+            id: r.id,
+            path: r.path,
+            kind: RootKind::from_content(r.kind),
+            accessible: r.accessible,
+            free_space: r.free_space,
+            total_space: r.total_space,
+            unmapped: r.unmapped_folders.len(),
+        }
+    }
+}
+
+/// Every root folder: movies and series, then books, then music.
+async fn load_roots() -> Result<Vec<Root>, api::ApiError> {
+    let (media, books, music) = futures::join!(
+        api::get::<Vec<RootFolderDto>>("/rootfolders"),
+        api::get::<Vec<ContentRootFolderDto>>("/bookrootfolders"),
+        api::get::<Vec<ContentRootFolderDto>>("/musicrootfolders"),
+    );
+    let mut roots: Vec<Root> = media?.into_iter().map(Root::from).collect();
+    roots.extend(books?.into_iter().map(Root::from));
+    roots.extend(music?.into_iter().map(Root::from));
+    Ok(roots)
 }
 
 #[component]
 pub fn RootFoldersCard() -> impl IntoView {
     let toasts = Toasts::expect();
-    let roots = LocalResource::new(|| api::get::<Vec<RootFolderDto>>("/rootfolders"));
+    let roots = LocalResource::new(load_roots);
     on_entity_changed(&["root_folder", "rootfolder"], false, move || roots.refetch());
     let path = RwSignal::new(String::new());
-    let kind = RwSignal::new(MediaKind::Movie);
+    let kind = RwSignal::new(RootKind::Movie);
     let busy = RwSignal::new(false);
-    let delete_target = RwSignal::new(None::<RootFolderDto>);
+    let delete_target = RwSignal::new(None::<Root>);
     let delete_open = RwSignal::new(false);
 
     let add = move |e: ev::SubmitEvent| {
@@ -66,15 +189,40 @@ pub fn RootFoldersCard() -> impl IntoView {
         if p.is_empty() {
             return;
         }
+        let k = kind.get_untracked();
         busy.set(true);
-        let req = CreateRootFolderRequest {
-            path: p,
-            media_kind: kind.get_untracked(),
-        };
         spawn_local(async move {
-            match api::post::<_, RootFolderDto>("/rootfolders", &req).await {
-                Ok(r) => {
-                    toasts.success(format!("Added root folder {}.", r.path));
+            let res = match k {
+                RootKind::Movie | RootKind::Series => {
+                    let req = CreateRootFolderRequest {
+                        path: p,
+                        media_kind: if k == RootKind::Movie {
+                            MediaKind::Movie
+                        } else {
+                            MediaKind::Series
+                        },
+                    };
+                    api::post::<_, RootFolderDto>(k.endpoint(), &req)
+                        .await
+                        .map(|r| r.path)
+                }
+                RootKind::Ebook | RootKind::Audiobook | RootKind::Music => {
+                    let req = CreateContentRootFolderRequest {
+                        path: p,
+                        kind: match k {
+                            RootKind::Ebook => ContentKind::Ebook,
+                            RootKind::Audiobook => ContentKind::Audiobook,
+                            _ => ContentKind::Music,
+                        },
+                    };
+                    api::post::<_, ContentRootFolderDto>(k.endpoint(), &req)
+                        .await
+                        .map(|r| r.path)
+                }
+            };
+            match res {
+                Ok(p) => {
+                    toasts.success(format!("Added root folder {p}."));
                     path.set(String::new());
                     roots.refetch();
                 }
@@ -88,7 +236,7 @@ pub fn RootFoldersCard() -> impl IntoView {
             return;
         };
         spawn_local(async move {
-            match api::delete(&format!("/rootfolders/{}", r.id)).await {
+            match api::delete(&format!("{}/{}", r.kind.endpoint(), r.id)).await {
                 Ok(()) => {
                     toasts.success("Root folder removed.");
                     roots.refetch();
@@ -103,7 +251,7 @@ pub fn RootFoldersCard() -> impl IntoView {
         None => view! { <Skeleton lines=3 /> }.into_any(),
         Some(Err(e)) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| roots.refetch()) /> }.into_any(),
         Some(Ok(l)) if l.is_empty() => view! {
-            <EmptyState icon="folder" title="No root folders" description="Add the folders where your movies and series live (e.g. /media/movies)." compact=true />
+            <EmptyState icon="folder" title="No root folders" description="Add the folders where your library lives (e.g. /media/movies, /media/music)." compact=true />
         }
         .into_any(),
         Some(Ok(l)) => view! {
@@ -114,21 +262,20 @@ pub fn RootFoldersCard() -> impl IntoView {
                         (Some(f), Some(t)) if t > 0 => Some(((t - f.min(t)) * 100 / t, f, t)),
                         _ => None,
                     };
-                    let unmapped = r.unmapped_folders.len();
                     view! {
                         <div class="root-row">
                             <div>
                                 <span class="root-path">{r.path.clone()}</span>
                                 <div class="meta-line">
-                                    <span class="chip">{if r.media_kind == MediaKind::Movie { "Movies" } else { "Series" }}</span>
+                                    <span class="chip">{r.kind.label()}</span>
                                     {if r.accessible {
                                         view! { <StatusBadge tone=Tone::Success label="Accessible" /> }.into_any()
                                     } else {
                                         view! { <StatusBadge tone=Tone::Danger label="Not accessible" dot=true /> }.into_any()
                                     }}
-                                    {(unmapped > 0).then(|| view! {
-                                        <a href=format!("{}/{}/import", api::base_path(), if r.media_kind == MediaKind::Movie { "movies" } else { "series" })>
-                                            {format!("{unmapped} unmapped folder(s)")}
+                                    {(r.unmapped > 0).then(|| view! {
+                                        <a href=format!("{}/{}/import", api::base_path(), r.kind.section())>
+                                            {format!("{} unmapped folder(s)", r.unmapped)}
                                         </a>
                                     })}
                                 </div>
@@ -159,16 +306,20 @@ pub fn RootFoldersCard() -> impl IntoView {
     };
 
     view! {
-        <Card title="Root folders" subtitle="Top-level folders that hold movie and series folders.">
+        <Card title="Root folders" subtitle="Top-level folders for every library. Folders of different libraries may not overlap.">
             {list}
             <form class="lib-toolbar root-add" on:submit=add>
-                <input class="input grow mono" type="text" placeholder="/media/movies" aria-label="Root folder path" required
+                <input class="input grow mono" type="text" placeholder=move || kind.get().placeholder() aria-label="Root folder path" required
                     prop:value=move || path.get() on:input=move |e| path.set(event_target_value(&e)) />
                 <select class="input" aria-label="Media type" on:change=move |e| {
-                    kind.set(if event_target_value(&e) == "series" { MediaKind::Series } else { MediaKind::Movie })
+                    let v = event_target_value(&e);
+                    if let Some(k) = ROOT_KINDS.iter().find(|k| k.1 == v) {
+                        kind.set(k.0);
+                    }
                 }>
-                    <option value="movie" selected=move || kind.get() == MediaKind::Movie>"Movies"</option>
-                    <option value="series" selected=move || kind.get() == MediaKind::Series>"Series"</option>
+                    {ROOT_KINDS.iter().map(|&(k, value, label, _)| view! {
+                        <option value=value selected=move || kind.get() == k>{label}</option>
+                    }).collect_view()}
                 </select>
                 <button type="submit" class="btn btn-primary" disabled=move || busy.get()>
                     <Icon name="plus" />

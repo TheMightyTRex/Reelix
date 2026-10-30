@@ -1,4 +1,5 @@
-//! `/settings/naming` — file and folder naming templates with a token cheat-sheet and live preview.
+//! `/settings/naming` — file and folder naming templates with a token cheat-sheet and live preview,
+//! followed by the book and music templates.
 
 use std::time::Duration;
 
@@ -10,6 +11,8 @@ use reelix_api_types::library::{ColonReplacement, MultiEpisodeStyle, NamingPrevi
 use crate::api;
 use crate::components::library_forms::EnumSelect;
 use crate::components::{Card, ErrorBox, Icon, PageHeader, Skeleton, Spinner};
+use crate::pages::books::BookNamingCard;
+use crate::pages::music::MusicNamingCard;
 use crate::pages::system::require_admin;
 use crate::state::Toasts;
 
@@ -353,7 +356,7 @@ pub fn NamingPage() -> impl IntoView {
     view! {
         <PageHeader title="Naming" subtitle="How Reelix names files and folders. The preview uses sample data and updates as you type." />
         <div class="split-grid naming-grid">
-            <Card title="Templates">{form}</Card>
+            <Card title="Movies and series">{form}</Card>
             <Card title="Tokens" subtitle="Click a token to add it to the last field you edited.">
                 <div class="stack">
                     {TOKENS.iter().map(|(group, toks)| view! {
@@ -371,5 +374,7 @@ pub fn NamingPage() -> impl IntoView {
                 </div>
             </Card>
         </div>
+        <BookNamingCard />
+        <MusicNamingCard />
     }
 }

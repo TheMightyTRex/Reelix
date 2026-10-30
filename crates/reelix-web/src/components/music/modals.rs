@@ -87,7 +87,7 @@ fn ProfileFields(
             <label for=rid.clone()>"Root folder"</label>
             <IdSelect items=root_items(opts) value=root id=rid />
             {move || opts.root_list().is_empty().then(|| view! {
-                <p class="field-hint text-danger">"No music root folders yet. " <A href="/settings/music">"Add one in Music settings"</A></p>
+                <p class="field-hint text-danger">"No music root folders yet. " <A href="/settings/mediamanagement">"Add one in Media Management"</A></p>
             })}
         </div>
         <div class="field-row">
