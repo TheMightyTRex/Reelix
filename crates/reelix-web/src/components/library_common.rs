@@ -223,12 +223,12 @@ pub fn Pager(page: RwSignal<u32>, page_size: u32, #[prop(into)] total: Signal<u6
         <nav class="pager" aria-label="Pagination">
             <span class="pager-summary">{summary}</span>
             <div class="pager-buttons">
-                <button type="button" class="btn btn-sm btn-secondary" disabled=move || page.get() <= 1
+                <button type="button" class="btn btn-sm btn-secondary" disabled=move || { page.get() <= 1 }
                     on:click=move |_| page.update(|p| *p = p.saturating_sub(1).max(1))>
                     "‹ Prev"
                 </button>
                 <span class="pager-page">{move || format!("Page {} of {}", page.get(), pages())}</span>
-                <button type="button" class="btn btn-sm btn-secondary" disabled=move || page.get() >= pages()
+                <button type="button" class="btn btn-sm btn-secondary" disabled=move || { page.get() >= pages() }
                     on:click=move |_| page.update(|p| *p += 1)>
                     "Next ›"
                 </button>

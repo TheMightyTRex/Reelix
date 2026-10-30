@@ -561,10 +561,10 @@ pub fn Pager(total: u64, page: RwSignal<u32>) -> impl IntoView {
     (pages > 1).then(|| {
         view! {
             <nav class="pager" aria-label="Pagination">
-                <button type="button" class="btn btn-sm btn-ghost" disabled=move || page.get() <= 1
+                <button type="button" class="btn btn-sm btn-ghost" disabled=move || { page.get() <= 1 }
                     on:click=move |_| page.update(|p| *p = p.saturating_sub(1).max(1))>"Previous"</button>
                 <span class="muted">{move || format!("Page {} of {pages} · {total} total", page.get())}</span>
-                <button type="button" class="btn btn-sm btn-ghost" disabled=move || page.get() >= pages
+                <button type="button" class="btn btn-sm btn-ghost" disabled=move || { page.get() >= pages }
                     on:click=move |_| page.update(|p| *p += 1)>"Next"</button>
             </nav>
         }

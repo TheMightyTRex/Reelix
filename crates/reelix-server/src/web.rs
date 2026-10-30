@@ -297,7 +297,12 @@ mod tests {
         assert!(csp.contains("script-src 'self' 'wasm-unsafe-eval' 'sha256-abc';"));
         assert!(csp.contains("frame-ancestors 'none'"));
         assert!(csp.contains("img-src 'self' data: https://image.tmdb.org"));
-        for host in ["https://artworks.thetvdb.com", "https://covers.openlibrary.org", "https://coverartarchive.org", "https://*.archive.org"] {
+        for host in [
+            "https://artworks.thetvdb.com",
+            "https://covers.openlibrary.org",
+            "https://coverartarchive.org",
+            "https://*.archive.org",
+        ] {
             assert!(csp.contains(host), "{host}");
         }
         assert!(csp.starts_with("default-src 'self';"));

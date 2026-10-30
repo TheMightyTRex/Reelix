@@ -7,7 +7,8 @@
 //! then disc/track numbers (tags, else the file name), then title, then position.
 //!
 //! The best release is accepted when its distance is ≤ [`ACCEPT_DISTANCE`] and the best
-//! release with a *different* tracklist is at least [`MIN_LEAD`] further away; releases with
+//! release with a *different* tracklist is at least [`MIN_LEAD`] further away (a release that
+//! only differs in durations the files clearly settle is not a rival); releases with
 //! the same tracklist (e.g. the US and UK CD) are interchangeable, and the album's selected
 //! release (then the preferred country/format) wins among them.
 
@@ -350,6 +351,44 @@ fn same_tracklist(a: &CandidateRelease, b: &CandidateRelease) -> bool {
         })
 }
 
+/// `b` only differs from `a` in track durations (same discs, numbers and titles), and the
+/// files mapped by `best` (a match against `a`) clearly fit `a`'s duration wherever the two
+/// differ, e.g. the explicit and the edited version of an album.
+fn files_settle(
+    files: &[AudioInfo],
+    best: &ReleaseScore,
+    a: &CandidateRelease,
+    b: &CandidateRelease,
+) -> bool {
+    let same_layout = a.tracks.len() == b.tracks.len()
+        && a.tracks.iter().zip(&b.tracks).all(|(x, y)| {
+            x.disc_number == y.disc_number
+                && x.track_number == y.track_number
+                && similarity(&x.title, &y.title) >= 0.9
+        });
+    same_layout
+        && a.tracks.iter().zip(&b.tracks).all(|(x, y)| {
+            let (Some(p), Some(q)) = (x.duration_ms, y.duration_ms) else {
+                return true;
+            };
+            let gap = p.abs_diff(q);
+            if gap <= 3000 {
+                return true;
+            }
+            // A track missing from the download cannot tell the releases apart, but then the
+            // choice does not change any imported file either.
+            let Some(f) = best
+                .mapping
+                .iter()
+                .find(|(_, id)| *id == x.id)
+                .and_then(|(fi, _)| files[*fi].duration_ms)
+            else {
+                return true;
+            };
+            f.abs_diff(q).saturating_sub(f.abs_diff(p)) >= (gap / 2).min(3000)
+        })
+}
+
 /// Scores every candidate and decides; `accept` is the maximum accepted distance.
 pub fn decide(
     files: &[AudioInfo],
@@ -375,7 +414,9 @@ pub fn decide(
         return MatchDecision::NoMatch(scored.into_iter().map(|s| s.0).collect());
     }
     if require_lead
-        && let Some((rival, _)) = scored.iter().find(|(_, c)| !same_tracklist(c, best_c))
+        && let Some((rival, _)) = scored
+            .iter()
+            .find(|(_, c)| !same_tracklist(c, best_c) && !files_settle(files, &best, best_c, c))
         && rival.distance - best.distance < MIN_LEAD
     {
         return MatchDecision::Ambiguous(scored.into_iter().map(|s| s.0).collect());
@@ -507,6 +548,37 @@ mod tests {
                 ACCEPT_DISTANCE,
                 true
             ),
+            MatchDecision::Ambiguous(_)
+        ));
+    }
+
+    #[test]
+    fn edited_version_with_other_durations_is_not_a_rival() {
+        // Same titles and numbers; the edited release has a shorter track 2.
+        let explicit = release(1, vec![track(1, 1, 1, "One", 200), track(2, 1, 2, "Two", 223)]);
+        let edited = release(2, vec![track(11, 1, 1, "One", 200), track(12, 1, 2, "Two", 195)]);
+        let files = vec![
+            file("01 - One.flac", FileTags::default(), 201),
+            file("02 - Two.flac", FileTags::default(), 223),
+        ];
+        let prefs = Preferences::default();
+        match decide(
+            &files,
+            &[edited.clone(), explicit.clone()],
+            &prefs,
+            ACCEPT_DISTANCE,
+            true,
+        ) {
+            MatchDecision::Matched(s) => assert_eq!(s.release_id, 1),
+            other => panic!("{other:?}"),
+        }
+        // Files in between the two durations still need a choice.
+        let between = vec![
+            file("01 - One.flac", FileTags::default(), 201),
+            file("02 - Two.flac", FileTags::default(), 209),
+        ];
+        assert!(matches!(
+            decide(&between, &[edited, explicit], &prefs, ACCEPT_DISTANCE, true),
             MatchDecision::Ambiguous(_)
         ));
     }
