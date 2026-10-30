@@ -67,16 +67,14 @@ impl Modules {
                 std::sync::Arc::new(metadata),
             ))
         };
-        // books (Open Library metadata, no API key)
+        // books (Open Library metadata, no API key); the client is shared with book Discover rows
+        let open_library = reelix_metadata::OpenLibrary::new(deps.http.clone(), Default::default());
         let books = std::sync::Arc::new(reelix_books::BooksService::new(reelix_books::BooksDeps {
             db: deps.db.clone(),
             events: deps.events.clone(),
             http: deps.http.clone(),
             library: library.clone(),
-            metadata: std::sync::Arc::new(reelix_metadata::OpenLibrary::new(
-                deps.http.clone(),
-                Default::default(),
-            )),
+            metadata: std::sync::Arc::new(open_library.clone()),
         }));
         // music (MusicBrainz + Cover Art Archive metadata, no API key)
         let music = std::sync::Arc::new(reelix_music::MusicService::new(reelix_music::MusicDeps {
@@ -145,6 +143,11 @@ impl Modules {
                         db: deps.db.clone(),
                         books: books.clone(),
                         music: music.clone(),
+                        open_library: open_library.clone(),
+                        listenbrainz: reelix_metadata::ListenBrainz::new(
+                            deps.http.clone(),
+                            Default::default(),
+                        ),
                     }),
                     media_servers: Arc::new(media_servers),
                     metadata: Arc::new(metadata),

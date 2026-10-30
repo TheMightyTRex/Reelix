@@ -209,6 +209,22 @@ impl Message {
                 m.url = u.release_notes_url.clone();
             }
         }
+        // Books and music: say what was grabbed / imported first.
+        if matches!(
+            event,
+            NotificationEvent::Grab { .. }
+                | NotificationEvent::Import { .. }
+                | NotificationEvent::ManualInteractionRequired { .. }
+        ) && let Some(label) = media.and_then(|x| x.content_label())
+        {
+            m.fields.insert(
+                0,
+                Field {
+                    name: "Type".into(),
+                    value: label.into(),
+                },
+            );
+        }
         m
     }
 
@@ -380,6 +396,40 @@ mod tests {
         let html = m.html(true);
         assert!(html.starts_with("<b>Grabbed: Tom &amp; Jerry &lt;Remastered&gt; (1999)</b>"));
         assert!(escape_markdown("a*b_c").contains("a\\*b\\_c"));
+    }
+
+    #[test]
+    fn book_and_album_messages_name_the_content() {
+        use reelix_core::ContentKind;
+        let mut book = MediaSummary::content(ContentKind::Audiobook, "Frank Herbert - Dune");
+        book.year = Some(1965);
+        book.tmdb_id = Some(1);
+        let m = Message::from_event(&NotificationEvent::Grab {
+            media: book,
+            release: ReleaseSummary {
+                title: "Frank Herbert - Dune (1965) [M4B]".into(),
+                quality: Some("M4B".into()),
+                ..Default::default()
+            },
+        });
+        assert_eq!(m.title, "Grabbed: Frank Herbert - Dune (1965)");
+        assert_eq!(m.fields[0].value, "Audiobook");
+        assert!(m.url.is_none(), "no TMDB link for books");
+        let album = MediaSummary::content(ContentKind::Music, "Radiohead - OK Computer");
+        let m = Message::from_event(&NotificationEvent::Import {
+            media: album,
+            release: None,
+            file: FileSummary {
+                path: "/music/Radiohead/OK Computer (1997)".into(),
+                quality: Some("FLAC".into()),
+                ..Default::default()
+            },
+            is_upgrade: true,
+            replaced_files: vec![],
+        });
+        assert_eq!(m.title, "Upgraded: Radiohead - OK Computer");
+        assert!(m.text().contains("Type: Album"));
+        assert!(m.text().contains("Quality: FLAC"));
     }
 
     #[test]

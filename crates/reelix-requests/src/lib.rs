@@ -4,6 +4,9 @@
 //! servers, metadata and notifiers only through the traits in [`gateway`], so this crate
 //! doesn't depend on `reelix-library` or `reelix-providers`.
 
+pub mod content;
+pub mod content_discovery;
+pub mod content_repo;
 pub mod discovery;
 pub mod external;
 pub mod fakes;
@@ -25,8 +28,9 @@ use reelix_db::secrets::SecretBox;
 use reelix_jobs::JobQueue;
 
 pub use gateway::{
-    AddMovieRequest, AddSeriesRequest, Availability, DiscoverySource, LibraryGateway, MediaServerDirectory,
-    MediaServerEntry, NotificationSink, ResolvingSource,
+    AddAlbumRequest, AddBookRequest, AddMovieRequest, AddSeriesRequest, ArtistHit, Availability,
+    ContentAdded, ContentHit, DiscoverySource, LibraryGateway, MediaServerDirectory, MediaServerEntry,
+    NotificationSink, ResolvingSource,
 };
 pub use jobs::{REQUEST_STATUS_SYNC, RequestStatusSyncJob, WATCHLIST_SYNC, WatchlistSyncJob, tasks};
 pub use reelix_mediaserver::MediaServerKind;
@@ -119,8 +123,11 @@ impl RequestService {
     }
 
     /// Gives the service the job queue (server `attach` phase).
+    /// Also starts watching book/music library changes (prompt request status updates).
     pub fn set_queue(&self, queue: JobQueue) {
-        let _ = self.queue.set(queue);
+        if self.queue.set(queue.clone()).is_ok() {
+            jobs::spawn_content_watch(&self.events, queue);
+        }
     }
 
     pub fn queue(&self) -> Option<&JobQueue> {

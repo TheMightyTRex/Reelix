@@ -12,6 +12,7 @@ use crate::api;
 use crate::components::books::{
     file_of, format_label, format_status, monitored, set_book_monitored, start_book_search, wants,
 };
+use crate::components::interactive_search::{InteractiveSearchModal, SearchTarget};
 use crate::components::library_common::{LibIcon, bytes, on_entity_changed, runtime};
 use crate::components::library_forms::require_library;
 use crate::components::poster::Poster;
@@ -43,6 +44,8 @@ fn BookDetail(id: i64) -> impl IntoView {
         api::get::<Vec<EditionDto>>(&format!("/books/{id}/editions")).await
     });
     on_entity_changed(&["book", "book_file", "bookfile"], true, move || book.refetch());
+    let isearch_open = RwSignal::new(false);
+    let isearch_target = RwSignal::new(None::<SearchTarget>);
 
     let file_delete = RwSignal::new(None::<i64>);
     let file_delete_open = RwSignal::new(false);
@@ -141,7 +144,25 @@ fn BookDetail(id: i64) -> impl IntoView {
                                 <Icon name="search" />
                                 "Search"
                             </button>
-                            // INTERACTIVE_SEARCH
+                            // INTERACTIVE_SEARCH: one button per format the author has a profile for.
+                            {move || {
+                                let wanted: Vec<BookFormat> = match author.get() {
+                                    Some(Some(Ok(a))) => BookFormat::ALL.into_iter().filter(|f| wants(&a, *f)).collect(),
+                                    _ => Vec::new(),
+                                };
+                                let single = wanted.len() == 1;
+                                wanted.into_iter().map(|f| {
+                                    let t = format!("{} ({})", b.title, format_label(f).to_lowercase());
+                                    let label = if single { "Interactive".to_string() } else { format!("Interactive ({})", format_label(f).to_lowercase()) };
+                                    view! {
+                                        <button type="button" class="btn btn-secondary"
+                                            on:click=move |_| { isearch_target.set(Some(SearchTarget::book(id, Some(f), t.clone()))); isearch_open.set(true); }>
+                                            <Icon name="list" />
+                                            {label}
+                                        </button>
+                                    }
+                                }).collect_view()
+                            }}
                         </div>
                     </div>
                 </div>
@@ -230,6 +251,7 @@ fn BookDetail(id: i64) -> impl IntoView {
             </header>
             <div class="card-body">{edition_list}</div>
         </section>
+        <InteractiveSearchModal open=isearch_open target=isearch_target />
         <ConfirmDialog open=file_delete_open title="Delete file?"
             message=Signal::derive(|| "The file (or audiobook folder) is removed from disk or moved to the recycle bin.".to_string())
             confirm_label="Delete file" on_confirm=delete_file />

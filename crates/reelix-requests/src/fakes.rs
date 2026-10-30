@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use reelix_api_types::requests::{AvailabilityStatus, RootFolderOptionDto};
-use reelix_core::MediaKind;
+use reelix_api_types::requests::{AvailabilityStatus, ContentRequestKind, NamedIdDto, RootFolderOptionDto};
+use reelix_core::{BookFormat, ContentKind, MediaKind};
 use reelix_mediaserver::plextv::PlexTv;
 use reelix_mediaserver::{
     BuildContext, ExternalUser, MediaServer, MediaServerKind, MsError, MsItem, ServerInfo, WatchedItem,
@@ -18,8 +18,9 @@ use reelix_metadata::{
 use reelix_notify::NotificationEvent;
 
 use crate::gateway::{
-    AddMovieRequest, AddSeriesRequest, Availability, DiscoverySource, LibraryGateway, MediaServerDirectory,
-    MediaServerEntry, NotificationSink,
+    AddAlbumRequest, AddBookRequest, AddMovieRequest, AddSeriesRequest, ArtistHit, Availability,
+    ContentAdded, ContentHit, DiscoverySource, LibraryGateway, MediaServerDirectory, MediaServerEntry,
+    NotificationSink,
 };
 
 // ------------------------------------------------------------------ library
@@ -34,6 +35,19 @@ pub struct LibraryState {
     pub root_folders: Vec<RootFolderOptionDto>,
     /// When set, add_* fail with this message.
     pub fail_adds: Option<String>,
+    /// Book availability per Open Library work id.
+    pub books: HashMap<String, Availability>,
+    /// Album availability per MusicBrainz release-group id.
+    pub albums: HashMap<String, Availability>,
+    /// Known works / release groups (lookups search their titles).
+    pub book_hits: Vec<ContentHit>,
+    pub album_hits: Vec<ContentHit>,
+    pub artist_hits: Vec<ArtistHit>,
+    /// Discover rows: `(kind, row id)` → hits.
+    pub content_rows: HashMap<(ContentRequestKind, String), Vec<ContentHit>>,
+    pub added_books: Vec<AddBookRequest>,
+    pub added_albums: Vec<AddAlbumRequest>,
+    pub content_searches: Vec<(ContentRequestKind, Vec<i64>, Vec<BookFormat>)>,
     next_id: i64,
 }
 
@@ -53,6 +67,63 @@ impl FakeLibrary {
     pub fn state(&self) -> std::sync::MutexGuard<'_, LibraryState> {
         self.0.lock().unwrap()
     }
+
+    /// Sets the availability of a book (work id) or album (release-group id).
+    pub fn set_content(&self, kind: ContentRequestKind, id: &str, a: Availability) {
+        let mut s = self.0.lock().unwrap();
+        match kind {
+            ContentRequestKind::Book => s.books.insert(id.into(), a),
+            ContentRequestKind::Music => s.albums.insert(id.into(), a),
+        };
+    }
+
+    /// Registers a work / release group for lookups.
+    pub fn with_content(self, kind: ContentRequestKind, hit: ContentHit) -> Self {
+        {
+            let mut s = self.0.lock().unwrap();
+            match kind {
+                ContentRequestKind::Book => s.book_hits.push(hit),
+                ContentRequestKind::Music => s.album_hits.push(hit),
+            }
+        }
+        self
+    }
+}
+
+/// A book (Open Library work) for [`FakeLibrary::with_content`].
+pub fn book(work_id: &str, title: &str, author: &str) -> ContentHit {
+    ContentHit {
+        foreign_id: work_id.into(),
+        title: title.into(),
+        subtitle: Some(author.into()),
+        subtitle_id: Some(format!("{work_id}-author")),
+        year: Some(1965),
+        cover: Some(format!("https://covers.openlibrary.org/w/{work_id}.jpg")),
+        album_type: None,
+        overview: Some(format!("{title} overview")),
+    }
+}
+
+/// An album (MusicBrainz release group) for [`FakeLibrary::with_content`].
+pub fn album(rg_id: &str, title: &str, artist: &str) -> ContentHit {
+    ContentHit {
+        foreign_id: rg_id.into(),
+        title: title.into(),
+        subtitle: Some(artist.into()),
+        subtitle_id: Some(format!("{rg_id}-artist")),
+        year: Some(1997),
+        cover: None,
+        album_type: Some("Album".into()),
+        overview: None,
+    }
+}
+
+fn matching(hits: &[ContentHit], term: &str) -> Vec<ContentHit> {
+    let t = term.to_lowercase();
+    hits.iter()
+        .filter(|h| h.title.to_lowercase().contains(&t) || h.foreign_id == term)
+        .cloned()
+        .collect()
 }
 
 #[async_trait]
@@ -115,6 +186,133 @@ impl LibraryGateway for FakeLibrary {
     }
 
     async fn root_folders(&self, _: MediaKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
+        Ok(self.0.lock().unwrap().root_folders.clone())
+    }
+
+    async fn content_availability(
+        &self,
+        kind: ContentRequestKind,
+        ids: &[String],
+    ) -> anyhow::Result<HashMap<String, Availability>> {
+        let s = self.0.lock().unwrap();
+        let map = match kind {
+            ContentRequestKind::Book => &s.books,
+            ContentRequestKind::Music => &s.albums,
+        };
+        Ok(ids
+            .iter()
+            .filter_map(|i| map.get(i).map(|a| (i.clone(), a.clone())))
+            .collect())
+    }
+
+    async fn lookup_books(&self, term: &str) -> anyhow::Result<Vec<ContentHit>> {
+        Ok(matching(&self.0.lock().unwrap().book_hits, term))
+    }
+
+    async fn lookup_albums(&self, term: &str) -> anyhow::Result<Vec<ContentHit>> {
+        Ok(matching(&self.0.lock().unwrap().album_hits, term))
+    }
+
+    async fn lookup_artists(&self, term: &str) -> anyhow::Result<Vec<ArtistHit>> {
+        let t = term.to_lowercase();
+        Ok(self
+            .0
+            .lock()
+            .unwrap()
+            .artist_hits
+            .iter()
+            .filter(|a| a.name.to_lowercase().contains(&t))
+            .cloned()
+            .collect())
+    }
+
+    async fn discover_content(&self, kind: ContentRequestKind, row: &str) -> anyhow::Result<Vec<ContentHit>> {
+        let s = self.0.lock().unwrap();
+        Ok(s.content_rows
+            .get(&(kind, row.to_string()))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn content(&self, kind: ContentRequestKind, id: &str) -> anyhow::Result<Option<ContentHit>> {
+        let s = self.0.lock().unwrap();
+        let hits = match kind {
+            ContentRequestKind::Book => &s.book_hits,
+            ContentRequestKind::Music => &s.album_hits,
+        };
+        Ok(hits.iter().find(|h| h.foreign_id == id).cloned())
+    }
+
+    async fn add_book(&self, req: AddBookRequest) -> anyhow::Result<ContentAdded> {
+        let mut s = self.0.lock().unwrap();
+        if let Some(m) = &s.fail_adds {
+            anyhow::bail!("{m}");
+        }
+        s.next_id += 1;
+        let id = s.next_id;
+        let id = s
+            .books
+            .entry(req.work_id.clone())
+            .or_insert(Availability {
+                status: AvailabilityStatus::Monitored,
+                library_id: Some(id),
+                seasons: BTreeMap::new(),
+            })
+            .library_id
+            .unwrap_or(id);
+        s.added_books.push(req);
+        Ok(ContentAdded {
+            item_id: id,
+            parent_id: Some(1000 + id),
+        })
+    }
+
+    async fn add_album(&self, req: AddAlbumRequest) -> anyhow::Result<ContentAdded> {
+        let mut s = self.0.lock().unwrap();
+        if let Some(m) = &s.fail_adds {
+            anyhow::bail!("{m}");
+        }
+        s.next_id += 1;
+        let id = s.next_id;
+        let id = s
+            .albums
+            .entry(req.release_group_id.clone())
+            .or_insert(Availability {
+                status: AvailabilityStatus::Monitored,
+                library_id: Some(id),
+                seasons: BTreeMap::new(),
+            })
+            .library_id
+            .unwrap_or(id);
+        s.added_albums.push(req);
+        Ok(ContentAdded {
+            item_id: id,
+            parent_id: Some(2000 + id),
+        })
+    }
+
+    async fn content_search(
+        &self,
+        kind: ContentRequestKind,
+        ids: &[i64],
+        formats: &[BookFormat],
+    ) -> anyhow::Result<()> {
+        self.0
+            .lock()
+            .unwrap()
+            .content_searches
+            .push((kind, ids.to_vec(), formats.to_vec()));
+        Ok(())
+    }
+
+    async fn content_profiles(&self, kind: ContentKind) -> anyhow::Result<Vec<NamedIdDto>> {
+        Ok(vec![NamedIdDto {
+            id: 100,
+            name: format!("{kind:?} default"),
+        }])
+    }
+
+    async fn content_root_folders(&self, _: ContentKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
         Ok(self.0.lock().unwrap().root_folders.clone())
     }
 }

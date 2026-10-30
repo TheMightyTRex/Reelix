@@ -1,9 +1,11 @@
 //! `/settings/requests` — defaults for approved requests (profiles / root folders per kind and
-//! for 4K), auto-approve, partial requests, default permissions and quotas, discovery region.
+//! for 4K), auto-approve, partial requests, default permissions and quotas, discovery region,
+//! and the book (per format) / album request defaults.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use reelix_api_types::requests::{RequestDefaultsDto, RequestOptionsDto, RequestSettingsDto, RolesDto};
+use reelix_core::BookFormat;
 
 use crate::api;
 use crate::components::{Card, ErrorBox, PageHeader, Skeleton};
@@ -20,7 +22,8 @@ fn opt_str(s: &str) -> Option<String> {
     (!t.is_empty()).then(|| t.to_string())
 }
 
-/// Profile + root folder selects for one kind / quality.
+/// Profile + root folder selects for one kind / quality. `kind`: `movie`, `series`, or
+/// `ebook` / `audiobook` / `music` (book and album request defaults).
 #[component]
 pub(crate) fn DefaultsEditor(
     #[prop(into)] label: String,
@@ -29,7 +32,11 @@ pub(crate) fn DefaultsEditor(
     value: RwSignal<RequestDefaultsDto>,
 ) -> impl IntoView {
     let options = LocalResource::new(move || async move {
-        api::get::<RequestOptionsDto>(&format!("/requests/options?kind={kind}&is_4k={is_4k}")).await
+        let url = match kind {
+            "ebook" | "audiobook" | "music" => format!("/requests/media/options?kind={kind}"),
+            _ => format!("/requests/options?kind={kind}&is_4k={is_4k}"),
+        };
+        api::get::<RequestOptionsDto>(&url).await
     });
     let id = format!("defaults-{kind}-{is_4k}");
     view! {
@@ -126,6 +133,17 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
     let region = RwSignal::new(s.discover_region.clone().unwrap_or_default());
     let language = RwSignal::new(s.discover_language.clone().unwrap_or_default());
     let hide_available = RwSignal::new(s.hide_available);
+    let book_ebook = RwSignal::new(s.book_ebook.clone());
+    let book_audiobook = RwSignal::new(s.book_audiobook.clone());
+    let book_formats = RwSignal::new(s.book_default_formats.clone());
+    let music = RwSignal::new(s.music.clone());
+    let music_meta = RwSignal::new(s.music_metadata_profile_id);
+    let auto_book = RwSignal::new(s.auto_approve_book);
+    let auto_music = RwSignal::new(s.auto_approve_music);
+    let bq_limit = RwSignal::new(s.book_quota_limit.map(|v| v.to_string()).unwrap_or_default());
+    let bq_days = RwSignal::new(s.book_quota_days.to_string());
+    let uq_limit = RwSignal::new(s.music_quota_limit.map(|v| v.to_string()).unwrap_or_default());
+    let uq_days = RwSignal::new(s.music_quota_days.to_string());
     let saving = RwSignal::new(false);
 
     let save = move |_| {
@@ -151,6 +169,17 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
             discover_region: opt_str(&region.get_untracked()).map(|r| r.to_uppercase()),
             discover_language: opt_str(&language.get_untracked()),
             hide_available: hide_available.get_untracked(),
+            book_ebook: book_ebook.get_untracked(),
+            book_audiobook: book_audiobook.get_untracked(),
+            book_default_formats: book_formats.get_untracked(),
+            music: music.get_untracked(),
+            music_metadata_profile_id: music_meta.get_untracked(),
+            auto_approve_book: auto_book.get_untracked(),
+            auto_approve_music: auto_music.get_untracked(),
+            book_quota_limit: opt_u32(&bq_limit.get_untracked()),
+            book_quota_days: opt_u32(&bq_days.get_untracked()).unwrap_or(7).max(1),
+            music_quota_limit: opt_u32(&uq_limit.get_untracked()),
+            music_quota_days: opt_u32(&uq_days.get_untracked()).unwrap_or(7).max(1),
         };
         saving.set(true);
         spawn_local(async move {
@@ -200,10 +229,38 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
                     <Toggle value=partial label="Allow partial requests" hint="Users can pick individual seasons instead of the whole series." />
                 </div>
             </Card>
+            <Card title="Books" subtitle="Where approved book requests go, per format. New authors get these profiles.">
+                <div class="form">
+                    <DefaultsEditor label="Ebook" kind="ebook" is_4k=false value=book_ebook />
+                    <DefaultsEditor label="Audiobook" kind="audiobook" is_4k=false value=book_audiobook />
+                    <fieldset class="field">
+                        <legend class="field-label">"Formats preselected in the request dialog"</legend>
+                        {BookFormat::ALL.into_iter().map(|f| view! {
+                            <label class="checkbox">
+                                <input type="checkbox" prop:checked=move || book_formats.with(|v| v.contains(&f))
+                                    on:change=move |e| {
+                                        let on = event_target_checked(&e);
+                                        book_formats.update(|v| { v.retain(|x| *x != f); if on { v.push(f); v.sort(); } });
+                                    } />
+                                {match f { BookFormat::Ebook => "Ebook", BookFormat::Audiobook => "Audiobook" }}
+                            </label>
+                        }).collect_view()}
+                        <p class="field-hint">"None checked = both formats."</p>
+                    </fieldset>
+                </div>
+            </Card>
+            <Card title="Music" subtitle="Where approved album requests go. New artists get this profile and root folder.">
+                <div class="form">
+                    <DefaultsEditor label="Albums" kind="music" is_4k=false value=music />
+                    <MetadataProfileSelect value=music_meta />
+                </div>
+            </Card>
             <Card title="Approval">
                 <div class="form">
                     <Toggle value=auto_movie label="Auto-approve every movie request" hint="Otherwise only users with the auto-approve permission skip review." />
                     <Toggle value=auto_series label="Auto-approve every series request" />
+                    <Toggle value=auto_book label="Auto-approve every book request" />
+                    <Toggle value=auto_music label="Auto-approve every album request" />
                     <Toggle value=search label="Search as soon as a request is approved" />
                 </div>
             </Card>
@@ -216,6 +273,10 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
                     <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || mq_days.get() on:input=move |e| mq_days.set(event_target_value(&e)) /></label>
                     <label>"Seasons"<input class="input input-sm" type="number" min="0" placeholder="unlimited" prop:value=move || tq_limit.get() on:input=move |e| tq_limit.set(event_target_value(&e)) /></label>
                     <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || tq_days.get() on:input=move |e| tq_days.set(event_target_value(&e)) /></label>
+                    <label>"Books"<input class="input input-sm" type="number" min="0" placeholder="unlimited" prop:value=move || bq_limit.get() on:input=move |e| bq_limit.set(event_target_value(&e)) /></label>
+                    <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || bq_days.get() on:input=move |e| bq_days.set(event_target_value(&e)) /></label>
+                    <label>"Albums"<input class="input input-sm" type="number" min="0" placeholder="unlimited" prop:value=move || uq_limit.get() on:input=move |e| uq_limit.set(event_target_value(&e)) /></label>
+                    <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || uq_days.get() on:input=move |e| uq_days.set(event_target_value(&e)) /></label>
                 </div>
             </Card>
             <Card title="Discovery">
@@ -238,6 +299,29 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
                     {move || if saving.get() { "Saving…" } else { "Save changes" }}
                 </button>
             </div>
+        </div>
+    }
+}
+
+/// Metadata profile for artists added by album requests (`GET /metadataprofiles`).
+#[component]
+fn MetadataProfileSelect(value: RwSignal<Option<i64>>) -> impl IntoView {
+    let profiles = LocalResource::new(|| {
+        api::get::<Vec<reelix_api_types::music::MetadataProfileDto>>("/metadataprofiles")
+    });
+    view! {
+        <div class="field">
+            <label for="rs-music-meta">"Metadata profile for new artists"</label>
+            <select id="rs-music-meta" class="input"
+                prop:value=move || value.get().map(|v| v.to_string()).unwrap_or_default()
+                on:change=move |e| value.set(event_target_value(&e).parse().ok())>
+                <option value="">"First profile"</option>
+                {move || profiles.get().and_then(Result::ok).unwrap_or_default().into_iter().map(|p| {
+                    let v = p.id.to_string();
+                    let sel = value.get_untracked() == Some(p.id);
+                    view! { <option value=v selected=sel>{p.name}</option> }
+                }).collect_view()}
+            </select>
         </div>
     }
 }

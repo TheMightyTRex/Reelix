@@ -155,8 +155,21 @@ impl MediaSummary {
         s
     }
 
-    /// A public link for the media (TMDB, falling back to IMDb).
+    /// `Ebook`, `Audiobook` or `Album` for books and music (`None` for movies and series).
+    pub fn content_label(&self) -> Option<&'static str> {
+        Some(match self.content? {
+            ContentKind::Ebook => "Ebook",
+            ContentKind::Audiobook => "Audiobook",
+            ContentKind::Music => "Album",
+            ContentKind::Movie | ContentKind::Series => return None,
+        })
+    }
+
+    /// A public link for the media (TMDB, falling back to IMDb; none for books and music).
     pub fn link(&self) -> Option<String> {
+        if self.content_label().is_some() {
+            return None;
+        }
         let kind = match self.kind {
             MediaKind::Movie => "movie",
             MediaKind::Series => "tv",

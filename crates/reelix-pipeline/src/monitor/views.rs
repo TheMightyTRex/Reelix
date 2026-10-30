@@ -11,6 +11,8 @@ use reelix_downloaders::DownloadState;
 use reelix_library::import_api::TitleMap;
 
 use super::{ActivityError, ActivityService, Result};
+use crate::search::dto::{album_ref, book_ref, content_ids};
+use crate::store::ContentRef;
 use crate::store::history::{self, HistoryEvent, HistoryFilter};
 use crate::store::tracked::{self, TrackedState};
 
@@ -33,6 +35,8 @@ pub(crate) struct Refs {
     movies: TitleMap,
     series: TitleMap,
     episodes: HashMap<i64, EpisodeDto>,
+    books: HashMap<i64, MediaRefDto>,
+    albums: HashMap<i64, MediaRefDto>,
 }
 
 impl Refs {
@@ -60,7 +64,51 @@ impl Refs {
             movies,
             series,
             episodes,
+            books: HashMap::new(),
+            albums: HashMap::new(),
         })
+    }
+
+    /// Adds book / album titles (deleted media is skipped).
+    pub(crate) async fn load_content(
+        &mut self,
+        svc: &ActivityService,
+        items: impl Iterator<Item = ContentRef>,
+    ) {
+        let (books, albums) = content_ids(items);
+        if let Some(b) = svc.books.get() {
+            for id in books {
+                if let Ok(x) = b.get_book(id).await {
+                    self.books.insert(id, book_ref(&x));
+                }
+            }
+        }
+        if let Some(m) = svc.music.get() {
+            for id in albums {
+                if let Ok(x) = m.get_album(id).await {
+                    self.albums.insert(id, album_ref(&x));
+                }
+            }
+        }
+    }
+
+    /// Movie / series reference, else the book (with format) / album.
+    pub(crate) fn media_or_content(
+        &self,
+        movie_id: Option<i64>,
+        series_id: Option<i64>,
+        c: &ContentRef,
+    ) -> Option<MediaRefDto> {
+        if movie_id.is_some() || series_id.is_some() {
+            return self.media(movie_id, series_id);
+        }
+        if let Some(id) = c.book_id {
+            return self.books.get(&id).cloned().map(|mut m| {
+                m.book_format = c.book_format;
+                m
+            });
+        }
+        c.album_id.and_then(|id| self.albums.get(&id).cloned())
     }
 
     pub(crate) fn media(&self, movie_id: Option<i64>, series_id: Option<i64>) -> Option<MediaRefDto> {
@@ -74,6 +122,8 @@ impl Refs {
             id,
             title: title.clone(),
             year: *year,
+            subtitle: None,
+            book_format: None,
         })
     }
 
@@ -112,13 +162,14 @@ impl ActivityService {
         let total = rows.len();
         let (start, end, page, size) = page_bounds(page, page_size, total);
         let rows = &rows[start..end];
-        let refs = Refs::load(
+        let mut refs = Refs::load(
             self,
             rows.iter().filter_map(|t| t.movie_id).collect(),
             rows.iter().filter_map(|t| t.series_id).collect(),
             rows.iter().flat_map(|t| t.episode_ids.iter().copied()).collect(),
         )
         .await?;
+        refs.load_content(self, rows.iter().map(|t| t.content)).await;
         let names: HashMap<i64, String> = self
             .providers
             .clients()
@@ -164,7 +215,7 @@ impl ActivityService {
                         .or_else(|| rel.and_then(|r| r.size)),
                     remaining: snap.as_ref().map(|s| s.remaining),
                     eta_secs: snap.as_ref().and_then(|s| s.eta_secs),
-                    media: refs.media(t.movie_id, t.series_id),
+                    media: refs.media_or_content(t.movie_id, t.series_id, &t.content),
                     episodes: refs.episodes(&t.episode_ids),
                     quality: rel.map(|r| r.quality),
                     custom_formats: rel
@@ -182,8 +233,10 @@ impl ActivityService {
                     indexer: rel.map(|r| r.indexer.clone()).filter(|i| !i.is_empty()),
                     messages,
                     output_path: t.output_path.clone(),
-                    can_manual_import: t.state == TrackedState::ImportPending
-                        || (t.state == TrackedState::Downloading && client_completed),
+                    // Manual import maps video files; book / album downloads are retried instead.
+                    can_manual_import: t.content.is_empty()
+                        && (t.state == TrackedState::ImportPending
+                            || (t.state == TrackedState::Downloading && client_completed)),
                     added: t.added,
                 }
             })
@@ -213,6 +266,10 @@ impl ActivityService {
             episode_id: q.episode_id,
             event,
             download_id: None,
+            book_id: q.book_id,
+            author_id: q.author_id,
+            album_id: q.album_id,
+            artist_id: q.artist_id,
         };
         let (rows, total) = history::list(
             &self.db,
@@ -221,20 +278,21 @@ impl ActivityService {
             i64::from(size),
         )
         .await?;
-        let refs = Refs::load(
+        let mut refs = Refs::load(
             self,
             rows.iter().filter_map(|h| h.movie_id).collect(),
             rows.iter().filter_map(|h| h.series_id).collect(),
             rows.iter().filter_map(|h| h.episode_id).collect(),
         )
         .await?;
+        refs.load_content(self, rows.iter().map(|h| h.content)).await;
         let items = rows
             .into_iter()
             .map(|h| HistoryDto {
                 id: h.id,
                 event_type: h.event.as_str().to_owned(),
                 date: h.date,
-                media: refs.media(h.movie_id, h.series_id),
+                media: refs.media_or_content(h.movie_id, h.series_id, &h.content),
                 episode: h.episode_id.and_then(|e| refs.episode(e)),
                 source_title: h.source_title,
                 quality: h.quality,

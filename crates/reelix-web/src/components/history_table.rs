@@ -68,12 +68,33 @@ pub fn episodes_label(eps: &[EpisodeRefDto]) -> Option<String> {
     }
 }
 
-/// Library link for a media ref: `/movies/{id}` or `/series/{id}`.
+/// Library link for a media ref: `/movies/{id}`, `/series/{id}`, `/books/book/{id}` or
+/// `/music/albums/{id}`.
 pub fn media_href(m: &MediaRefDto) -> String {
-    if m.kind == "series" {
-        format!("/series/{}", m.id)
-    } else {
-        format!("/movies/{}", m.id)
+    match m.kind.as_str() {
+        "series" => format!("/series/{}", m.id),
+        "book" => format!("/books/book/{}", m.id),
+        "album" => format!("/music/albums/{}", m.id),
+        _ => format!("/movies/{}", m.id),
+    }
+}
+
+/// `by Author · Ebook` / `by Artist` line for books and albums.
+pub fn media_subtitle(m: &MediaRefDto) -> Option<String> {
+    let format = m.book_format.map(|f| match f {
+        reelix_core::BookFormat::Ebook => "Ebook",
+        reelix_core::BookFormat::Audiobook => "Audiobook",
+    });
+    let by = m
+        .subtitle
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("by {s}"));
+    match (by, format) {
+        (None, None) => None,
+        (Some(b), None) => Some(b),
+        (None, Some(f)) => Some(f.to_string()),
+        (Some(b), Some(f)) => Some(format!("{b} · {f}")),
     }
 }
 
@@ -95,13 +116,17 @@ pub fn MediaCell(
     let ep_title = (episodes.len() == 1).then(|| episodes[0].title.clone()).flatten();
     match media {
         None => view! { <span class="muted">"Unknown"</span> }.into_any(),
-        Some(m) => view! {
-            <A href=media_href(&m) attr:class="cell-strong">{media_title(&m)}</A>
-            {eps.map(|e| view! {
-                <span class="cell-sub">{e}{ep_title.map(|t| format!(" · {t}"))}</span>
-            })}
+        Some(m) => {
+            let sub = media_subtitle(&m);
+            view! {
+                <A href=media_href(&m) attr:class="cell-strong">{media_title(&m)}</A>
+                {sub.map(|s| view! { <span class="cell-sub">{s}</span> })}
+                {eps.map(|e| view! {
+                    <span class="cell-sub">{e}{ep_title.map(|t| format!(" · {t}"))}</span>
+                })}
+            }
+            .into_any()
         }
-        .into_any(),
     }
 }
 
@@ -426,6 +451,31 @@ mod tests {
             episode_number: e,
             title: None,
         }
+    }
+
+    #[test]
+    fn links_books_and_albums() {
+        let mut m = MediaRefDto {
+            kind: "book".into(),
+            id: 4,
+            title: "Dune".into(),
+            year: Some(1965),
+            subtitle: Some("Frank Herbert".into()),
+            book_format: Some(reelix_core::BookFormat::Audiobook),
+        };
+        assert_eq!(media_href(&m), "/books/book/4");
+        assert_eq!(
+            media_subtitle(&m).as_deref(),
+            Some("by Frank Herbert · Audiobook")
+        );
+        m.kind = "album".into();
+        m.book_format = None;
+        assert_eq!(media_href(&m), "/music/albums/4");
+        assert_eq!(media_subtitle(&m).as_deref(), Some("by Frank Herbert"));
+        m.kind = "series".into();
+        m.subtitle = None;
+        assert_eq!(media_href(&m), "/series/4");
+        assert_eq!(media_subtitle(&m), None);
     }
 
     #[test]

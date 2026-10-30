@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use reelix_db::{Db, Result, from_ms, now_ms};
 
-use super::{GrabbedRelease, from_json, json};
+use super::{ContentRef, GrabbedRelease, from_json, json};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingRelease {
@@ -15,6 +15,8 @@ pub struct PendingRelease {
     pub reason: String,
     pub added: DateTime<Utc>,
     pub release_at: DateTime<Utc>,
+    /// Book (format) / album.
+    pub content: ContentRef,
 }
 
 #[derive(sqlx::FromRow)]
@@ -28,6 +30,9 @@ struct Row {
     reason: String,
     added: i64,
     release_at: i64,
+    book_id: Option<i64>,
+    book_format: Option<String>,
+    album_id: Option<i64>,
 }
 
 impl TryFrom<Row> for PendingRelease {
@@ -43,11 +48,12 @@ impl TryFrom<Row> for PendingRelease {
             reason: r.reason,
             added: from_ms(r.added),
             release_at: from_ms(r.release_at),
+            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
         })
     }
 }
 
-const COLS: &str = "id, movie_id, series_id, episode_ids, title, release, reason, added, release_at";
+const COLS: &str = "id, movie_id, series_id, episode_ids, title, release, reason, added, release_at, book_id, book_format, album_id";
 
 #[allow(clippy::too_many_arguments)]
 pub async fn insert(
@@ -71,6 +77,31 @@ pub async fn insert(
     .bind(reason)
     .bind(now_ms())
     .bind(release_at_ms)
+    .fetch_one(db.pool())
+    .await?;
+    Ok(id)
+}
+
+/// Inserts a delayed book / album release.
+pub async fn insert_content(
+    db: &Db,
+    content: &ContentRef,
+    release: &GrabbedRelease,
+    reason: &str,
+    release_at_ms: i64,
+) -> Result<i64> {
+    let id = sqlx::query_scalar(
+        "INSERT INTO pending_releases (movie_id, series_id, episode_ids, title, release, reason, added, release_at, \
+         book_id, book_format, album_id) VALUES (NULL, NULL, '[]', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+    )
+    .bind(&release.title)
+    .bind(json(release))
+    .bind(reason)
+    .bind(now_ms())
+    .bind(release_at_ms)
+    .bind(content.book_id)
+    .bind(content.format_str())
+    .bind(content.album_id)
     .fetch_one(db.pool())
     .await?;
     Ok(id)

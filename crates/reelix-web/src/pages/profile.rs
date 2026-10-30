@@ -127,6 +127,8 @@ fn QuotaCard() -> impl IntoView {
                     <div class="split-grid">
                         {meter("Movies", "movie requests", q.movie)}
                         {meter("Series", "season requests", q.tv)}
+                        {auth.has(Permissions::REQUEST_BOOK).then(|| meter("Books", "book requests", q.book))}
+                        {auth.has(Permissions::REQUEST_MUSIC).then(|| meter("Music", "album requests", q.music))}
                     </div>
                 }
                 .into_any(),

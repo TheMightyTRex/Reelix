@@ -1,11 +1,11 @@
 //! DTOs for the search → grab → download → import pipeline (M4).
 //!
 //! Routes (all `/api/v1`):
-//! - `GET /releases?movie_id=|series_id=&season=|episode_id=` → `Vec<ReleaseDto>` (interactive search; MANAGE_LIBRARY)
+//! - `GET /releases?movie_id=|series_id=&season=|episode_id=|book_id=[&book_format=]|album_id=` → `Vec<ReleaseDto>` (interactive search; MANAGE_LIBRARY)
 //! - `POST /releases/grab` `GrabRequest` → `GrabResponse`
 //! - `GET /queue?page&page_size` → `Paged<QueueItemDto>`; `DELETE /queue/{id}?remove_from_client&blocklist&skip_redownload`
 //! - `POST /queue/{id}/import` (retry import) · `POST /queue/{id}/ignore`
-//! - `GET /history?page&page_size&movie_id&series_id&episode_id&event_type` → `Paged<HistoryDto>`; `POST /history/{id}/failed` (mark failed → blocklist + re-search)
+//! - `GET /history?page&page_size&movie_id&series_id&episode_id&book_id&author_id&album_id&artist_id&event_type` → `Paged<HistoryDto>`; `POST /history/{id}/failed` (mark failed → blocklist + re-search)
 //! - `GET /blocklist?page&page_size` → `Paged<BlocklistDto>`; `DELETE /blocklist/{id}`; `DELETE /blocklist` (bulk `{ids}` or all)
 //! - `GET /pending` → `Vec<PendingReleaseDto>`; `DELETE /pending/{id}`; `POST /pending/{id}/grab`
 //! - `GET /manualimport?folder=|download_id=` → `Vec<ManualImportItemDto>`; `POST /manualimport` `ManualImportRequest` → 202 `EnqueuedJob`
@@ -13,7 +13,7 @@
 //! Live updates: `entity.changed` with entity `queue`, `history`, `blocklist`, `pending`.
 
 use chrono::{DateTime, Utc};
-use reelix_core::Protocol;
+use reelix_core::{BookFormat, Protocol};
 use reelix_parser::{Language, QualityModel};
 use serde::{Deserialize, Serialize};
 
@@ -32,11 +32,19 @@ pub struct FormatRefDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MediaRefDto {
-    /// `movie` or `series`.
+    /// `movie`, `series`, `book` or `album`.
     pub kind: String,
+    /// Movie / series / book / album id.
     pub id: i64,
     pub title: String,
     pub year: Option<i32>,
+    /// Author (book) or artist (album).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    /// Book format the row is about (`ebook` / `audiobook`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub book_format: Option<BookFormat>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +66,11 @@ pub struct ReleaseQuery {
     pub series_id: Option<i64>,
     pub season: Option<u32>,
     pub episode_id: Option<i64>,
+    /// Book search (one format; defaults to the first format the author has a profile for).
+    pub book_id: Option<i64>,
+    #[cfg_attr(feature = "openapi", param(value_type = Option<String>))]
+    pub book_format: Option<BookFormat>,
+    pub album_id: Option<i64>,
 }
 
 /// A release found by an interactive search, with the decision for the target media.
@@ -93,6 +106,13 @@ pub struct ReleaseDto {
     pub series_id: Option<i64>,
     pub episodes: Vec<EpisodeRefDto>,
     pub full_season: bool,
+    #[serde(default)]
+    pub book_id: Option<i64>,
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub book_format: Option<BookFormat>,
+    #[serde(default)]
+    pub album_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,6 +209,10 @@ pub struct HistoryQuery {
     pub movie_id: Option<i64>,
     pub series_id: Option<i64>,
     pub episode_id: Option<i64>,
+    pub book_id: Option<i64>,
+    pub author_id: Option<i64>,
+    pub album_id: Option<i64>,
+    pub artist_id: Option<i64>,
     /// grabbed, imported, download_failed, import_failed, file_deleted, renamed, ignored
     pub event_type: Option<String>,
 }

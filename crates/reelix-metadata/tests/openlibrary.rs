@@ -414,3 +414,60 @@ async fn persistent_store_is_written_and_reused() {
     second.set_store(store);
     assert_eq!(second.author("OL26320A").await.unwrap(), a);
 }
+
+#[tokio::test]
+async fn trending_works_maps_docs_and_skips_non_works() {
+    let server = MockServer::start().await;
+    Mock::given(path("/trending/weekly.json"))
+        .and(query_param("limit", "40"))
+        .respond_with(ok("trending_weekly.json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let ol = client(&server);
+    let works = ol.trending_works(40).await.unwrap();
+    assert_eq!(works.len(), 2, "the /books/ edition is skipped");
+    assert_eq!(works[0].id, "OL17930368W");
+    assert_eq!(works[0].title, "Atomic Habits");
+    assert_eq!(works[0].author_names, vec!["James Clear"]);
+    assert_eq!(works[0].author_ids, vec!["OL7422948A"]);
+    assert_eq!(works[0].first_publish_year, Some(2016));
+    assert_eq!(
+        works[0].cover_url.as_deref(),
+        Some("https://covers.test/b/id/12539702-M.jpg")
+    );
+    assert_eq!(works[1].cover_url, None);
+    // Cached: the second call doesn't hit the server (expect(1) above).
+    assert_eq!(ol.trending_works(40).await.unwrap(), works);
+}
+
+#[tokio::test]
+async fn subject_works_searches_the_subject_by_trending() {
+    let server = MockServer::start().await;
+    Mock::given(path("/search.json"))
+        .and(query_param("q", "subject_key:fantasy"))
+        .and(query_param("sort", "trending"))
+        .and(query_param("limit", "40"))
+        .respond_with(ok("subject_fantasy.json"))
+        .mount(&server)
+        .await;
+    let ol = client(&server);
+    let works = ol.subject_works("fantasy", 40).await.unwrap();
+    let titles: Vec<_> = works.iter().map(|w| w.title.as_str()).collect();
+    assert_eq!(titles, ["The Mark of Athena", "The Two Towers"]);
+    assert_eq!(works[1].id, "OL27479W");
+    assert_eq!(works[1].author_names, vec!["J.R.R. Tolkien"]);
+}
+
+#[tokio::test]
+async fn subject_works_rejects_subjects_that_would_change_the_query() {
+    let server = MockServer::start().await;
+    let ol = client(&server);
+    for bad in ["", "fantasy OR author:x", "a:b", "sci-fi"] {
+        assert!(
+            matches!(ol.subject_works(bad, 10).await, Err(MetaError::NotFound)),
+            "{bad:?} should be rejected"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

@@ -5,6 +5,7 @@
 //! imports completed downloads and handles failed ones (history, blocklist, re-search,
 //! removal from the client).
 
+mod content;
 pub mod error;
 pub mod jobs;
 pub mod providers;
@@ -18,9 +19,9 @@ use std::time::{Duration, Instant};
 
 use reelix_api_types::library::{LibrarySearchKind, SearchRequest};
 use reelix_api_types::pipeline::QueueRemoveQuery;
-use reelix_books::BooksService;
+use reelix_books::{BooksService, ContentDownload};
 use reelix_core::bus::EventBus;
-use reelix_core::{DomainEvent, MediaKind, Protocol};
+use reelix_core::{ContentKind, DomainEvent, MediaKind, Protocol};
 use reelix_db::{Db, NewJob, now_ms};
 use reelix_downloaders::{DownloadId, DownloadItem, DownloadState, FailureAction, UsenetFailure};
 use reelix_import::files::TransferMode;
@@ -38,7 +39,7 @@ use crate::import::{FileImporter, Hint, ImportedItem, Target, transfer_mode};
 use crate::store::blocklist::{self, NewBlocklist};
 use crate::store::history::{self, HistoryEvent, NewHistory};
 use crate::store::tracked::{self, NewTracked, TrackedDownload, TrackedState};
-use crate::store::{FormatRef, GrabbedRelease};
+use crate::store::{ContentRef, FormatRef, GrabbedRelease};
 
 /// Job kinds owned by the activity service.
 pub mod kinds {
@@ -117,9 +118,7 @@ pub struct ActivityService {
     last_poll: Mutex<Option<Instant>>,
     queue: OnceLock<JobQueue>,
     /// Book and album imports (set by the server after construction).
-    #[allow(dead_code)] // read by the book/album import paths
     pub(crate) books: OnceLock<Arc<BooksService>>,
-    #[allow(dead_code)] // read by the book/album import paths
     pub(crate) music: OnceLock<Arc<MusicService>>,
 }
 
@@ -379,7 +378,16 @@ impl ActivityService {
     /// before its row existed): maps the title to library media when possible.
     async fn track_unknown(&self, h: &ClientHandle, item: &DownloadItem) -> Result<()> {
         let parsed = parse(&item.title);
-        let (movie_id, series_id, episode_ids) = self.map_title(&parsed).await?;
+        let content_kind = self.category_kind(h, item);
+        let (movie_id, series_id, episode_ids) = if content_kind.is_some() {
+            (None, None, Vec::new())
+        } else {
+            self.map_title(&parsed).await?
+        };
+        let content = match content_kind {
+            Some(k) => self.map_content_title(k, &item.title).await,
+            None => ContentRef::default(),
+        };
         let release = GrabbedRelease {
             guid: format!("{}:{}", h.id, item.download_id),
             title: item.title.clone(),
@@ -416,18 +424,74 @@ impl ActivityService {
             },
         )
         .await?;
-        if movie_id.is_none() && series_id.is_none() {
-            tracked::set_state(
-                &self.db,
-                id,
-                TrackedState::Downloading,
-                &["Unknown download: not matched to a movie or series in the library".to_owned()],
-            )
-            .await?;
+        if !content.is_empty() {
+            tracked::set_content(&self.db, id, &content).await?;
+        } else if movie_id.is_none() && series_id.is_none() {
+            let msg = match content_kind {
+                Some(ContentKind::Music) => "Unknown download: not matched to an album in the library",
+                Some(_) => "Unknown download: not matched to a book in the library",
+                None => "Unknown download: not matched to a movie or series in the library",
+            };
+            tracked::set_state(&self.db, id, TrackedState::Downloading, &[msg.to_owned()]).await?;
         }
-        tracing::info!(title = %item.title, client = %h.name, ?movie_id, ?series_id, "tracking download");
+        tracing::info!(title = %item.title, client = %h.name, ?movie_id, ?series_id, ?content, "tracking download");
         self.dirty.store(true, Ordering::Relaxed);
         Ok(())
+    }
+
+    /// Ebook / music when the item sits in the client's book or music category (and that
+    /// category isn't shared with movies or TV).
+    fn category_kind(&self, h: &ClientHandle, item: &DownloadItem) -> Option<ContentKind> {
+        let cat = item.category.as_deref()?.trim();
+        if cat.is_empty() {
+            return None;
+        }
+        let of = |k: ContentKind| h.client.category_for_kind(k);
+        let video = [of(ContentKind::Movie), of(ContentKind::Series)];
+        let is = |k: ContentKind| {
+            of(k).is_some_and(|c| {
+                c.eq_ignore_ascii_case(cat) && !video.iter().flatten().any(|v| v.eq_ignore_ascii_case(cat))
+            })
+        };
+        if is(ContentKind::Ebook) && self.books.get().is_some() {
+            Some(ContentKind::Ebook)
+        } else if is(ContentKind::Music) && self.music.get().is_some() {
+            Some(ContentKind::Music)
+        } else {
+            None
+        }
+    }
+
+    /// Book (format) / album for a release title found in a book / music category.
+    async fn map_content_title(&self, kind: ContentKind, title: &str) -> ContentRef {
+        match kind {
+            ContentKind::Music => {
+                let Some(m) = self.music.get() else {
+                    return ContentRef::default();
+                };
+                match m
+                    .search_api()
+                    .match_release(&reelix_parser::parse_music(title))
+                    .await
+                {
+                    Ok(Some(id)) => ContentRef::album(id),
+                    _ => ContentRef::default(),
+                }
+            }
+            _ => {
+                let Some(b) = self.books.get() else {
+                    return ContentRef::default();
+                };
+                match b
+                    .search_api()
+                    .match_release(&reelix_parser::parse_book(title, None))
+                    .await
+                {
+                    Ok(Some((id, f))) => ContentRef::book(id, f),
+                    _ => ContentRef::default(),
+                }
+            }
+        }
     }
 
     /// Movie / series (+ episodes) for a release title, by title (and year) against the library.
@@ -488,7 +552,7 @@ impl ActivityService {
             }
             _ => {
                 // Clear transient messages once the download moves again (keep "unknown").
-                if t.movie_id.is_some() || t.series_id.is_some() {
+                if t.movie_id.is_some() || t.series_id.is_some() || !t.content.is_empty() {
                     self.set_state(t, TrackedState::Downloading, Vec::new()).await?;
                 }
                 Ok(())
@@ -523,7 +587,7 @@ impl ActivityService {
                 )
                 .await;
         }
-        if t.movie_id.is_none() && t.series_id.is_none() {
+        if t.movie_id.is_none() && t.series_id.is_none() && t.content.is_empty() {
             let msg = "Unknown download: it couldn't be matched to a movie or series. Use manual import.";
             self.needs_manual(t, vec![msg.to_owned()]).await?;
             return Ok(());
@@ -534,6 +598,10 @@ impl ActivityService {
             t.protocol == Protocol::Usenet,
             item.can_move_files,
         );
+        if !t.content.is_empty() {
+            self.import_content(t, &local, mode, Some((h, item))).await?;
+            return Ok(());
+        }
         self.import_tracked(t, &local, mode, Some((h, item))).await?;
         Ok(())
     }
@@ -546,7 +614,7 @@ impl ActivityService {
         if first {
             let r = self.download_ref(t);
             let media = match (t.movie_id, t.series_id) {
-                (None, None) => None,
+                (None, None) => self.content_summary(&t.content).await,
                 _ => Some(self.media_summary(t.movie_id, t.series_id, &t.episode_ids).await),
             };
             self.providers
@@ -840,6 +908,7 @@ impl ActivityService {
         for ep in eps {
             let mut h = NewHistory::new(HistoryEvent::DownloadFailed, &t.title);
             fill_media(&mut h, t.movie_id, t.series_id, ep);
+            self.fill_content(&mut h, &t.content).await;
             fill_release(&mut h, &r);
             h.data = serde_json::json!({ "message": message, "reason": action.reason });
             history::insert(&self.db, &h).await?;
@@ -849,7 +918,7 @@ impl ActivityService {
             self.blocklist(t, action.reason).await?;
         }
         if action.search_again && !skip_redownload {
-            self.search_again(t.movie_id, t.series_id, &t.episode_ids).await;
+            self.search_again_for(t).await;
         }
         if action.health_warning {
             self.warn_health(format!("Download {} failed: {}", t.title, action.reason));
@@ -887,11 +956,21 @@ impl ActivityService {
                         .then(|| t.download_id.clone())
                 }),
                 message: Some(reason.to_owned()),
+                content: t.content,
             },
         )
         .await?;
         self.emit("blocklist", "created", id);
         Ok(())
+    }
+
+    /// Replacement search for whatever the download was for (movie, episodes, book, album).
+    async fn search_again_for(&self, t: &TrackedDownload) {
+        if t.content.is_empty() {
+            self.search_again(t.movie_id, t.series_id, &t.episode_ids).await;
+        } else {
+            self.search_again_content(&t.content).await;
+        }
     }
 
     /// Enqueues a replacement search (errors logged).
@@ -947,7 +1026,7 @@ impl ActivityService {
         if q.blocklist {
             self.blocklist(&t, "removed from queue by user").await?;
             if !q.skip_redownload {
-                self.search_again(t.movie_id, t.series_id, &t.episode_ids).await;
+                self.search_again_for(&t).await;
             }
         }
         tracked::set_state(
@@ -972,6 +1051,7 @@ impl ActivityService {
         tracked::set_state(&self.db, id, TrackedState::Ignored, &[]).await?;
         let mut h = NewHistory::new(HistoryEvent::Ignored, &t.title);
         fill_media(&mut h, t.movie_id, t.series_id, t.episode_ids.first().copied());
+        self.fill_content(&mut h, &t.content).await;
         fill_release(&mut h, &self.download_ref(&t));
         history::insert(&self.db, &h).await?;
         self.emit("history", "created", 0);
@@ -1021,14 +1101,18 @@ impl ActivityService {
                 "the download client doesn't report this download and its output path is unknown",
             ));
         };
-        if t.movie_id.is_none() && t.series_id.is_none() {
+        if t.movie_id.is_none() && t.series_id.is_none() && t.content.is_empty() {
             return Err(ActivityError::validation(
                 "the download isn't matched to a movie or series; use manual import",
             ));
         }
         let mm = self.library.media_management().await?;
         let mode = transfer_mode(mm.import_mode, t.protocol == Protocol::Usenet, false);
-        let ok = self.import_tracked(&t, Path::new(&path), mode, None).await?;
+        let ok = if t.content.is_empty() {
+            self.import_tracked(&t, Path::new(&path), mode, None).await?
+        } else {
+            self.import_content(&t, Path::new(&path), mode, None).await?
+        };
         self.emit("queue", "updated", id);
         Ok(ok)
     }
@@ -1071,6 +1155,7 @@ impl ActivityService {
                     series_id: h.series_id,
                     episode_ids: grabs.iter().filter_map(|g| g.episode_id).collect(),
                     release: None,
+                    content: h.content,
                     state: TrackedState::Imported,
                     status_messages: Vec::new(),
                     output_path: None,
@@ -1082,6 +1167,9 @@ impl ActivityService {
         if t.id == 0 {
             let mut row = NewHistory::new(HistoryEvent::DownloadFailed, &t.title);
             fill_media(&mut row, t.movie_id, t.series_id, t.episode_ids.first().copied());
+            row.content = h.content;
+            row.author_id = h.author_id;
+            row.artist_id = h.artist_id;
             row.download_id = h.download_id.clone();
             row.protocol = h.protocol;
             row.indexer = h.indexer.clone();
@@ -1101,13 +1189,14 @@ impl ActivityService {
                     protocol: h.protocol,
                     indexer: h.indexer.clone(),
                     message: Some(action.reason.into()),
+                    content: t.content,
                     ..Default::default()
                 },
             )
             .await?;
             self.emit("blocklist", "created", id);
             self.emit("history", "created", 0);
-            self.search_again(t.movie_id, t.series_id, &t.episode_ids).await;
+            self.search_again_for(&t).await;
             return Ok(());
         }
         self.handle_failure(&t, "Marked as failed by user", action, None, false)

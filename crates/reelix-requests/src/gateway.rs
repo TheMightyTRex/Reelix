@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use reelix_api_types::requests::{AvailabilityStatus, RootFolderOptionDto};
-use reelix_core::MediaKind;
+use reelix_api_types::requests::{AvailabilityStatus, ContentRequestKind, NamedIdDto, RootFolderOptionDto};
+use reelix_core::{BookFormat, ContentKind, MediaKind};
 use reelix_mediaserver::plextv::PlexTv;
 use reelix_mediaserver::{MediaServer, MediaServerKind};
 use reelix_metadata::{
@@ -60,6 +60,71 @@ pub struct AddSeriesRequest {
     pub request_id: i64,
 }
 
+/// A book (Open Library work) or album (MusicBrainz release group) from a metadata lookup.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ContentHit {
+    /// Work id / release-group id.
+    pub foreign_id: String,
+    pub title: String,
+    /// Author / artist name.
+    pub subtitle: Option<String>,
+    /// Author Open Library id / artist MusicBrainz id.
+    pub subtitle_id: Option<String>,
+    pub year: Option<i32>,
+    pub cover: Option<String>,
+    /// Albums: primary type (`Album`, `EP`, …).
+    pub album_type: Option<String>,
+    /// Description (detail lookups, when known).
+    pub overview: Option<String>,
+}
+
+/// An artist from a MusicBrainz lookup.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ArtistHit {
+    pub musicbrainz_id: String,
+    pub name: String,
+    pub disambiguation: Option<String>,
+    pub artist_type: Option<String>,
+    pub country: Option<String>,
+    /// Library artist id.
+    pub library_id: Option<i64>,
+}
+
+/// Adds an approved book request to the library.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddBookRequest {
+    pub work_id: String,
+    pub title: String,
+    pub formats: Vec<BookFormat>,
+    pub ebook_profile_id: Option<i64>,
+    pub ebook_root_folder_id: Option<i64>,
+    pub audiobook_profile_id: Option<i64>,
+    pub audiobook_root_folder_id: Option<i64>,
+    pub tags: Vec<i64>,
+    pub request_id: i64,
+}
+
+/// Adds an approved album request to the library.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddAlbumRequest {
+    pub release_group_id: String,
+    pub title: String,
+    pub quality_profile_id: Option<i64>,
+    pub metadata_profile_id: Option<i64>,
+    pub root_folder_id: Option<i64>,
+    pub tags: Vec<i64>,
+    pub request_id: i64,
+}
+
+/// Library ids of an added book (book + author) or album (album + artist).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ContentAdded {
+    pub item_id: i64,
+    pub parent_id: Option<i64>,
+}
+
+const NOT_CONNECTED: &str = "books and music are not connected";
+
 /// The library as seen by requests (implemented by the server over `reelix-library`).
 #[async_trait]
 pub trait LibraryGateway: Send + Sync {
@@ -81,6 +146,78 @@ pub trait LibraryGateway: Send + Sync {
 
     /// Root folders for the advanced request options.
     async fn root_folders(&self, kind: MediaKind) -> anyhow::Result<Vec<RootFolderOptionDto>>;
+
+    // ---- books / music (M8/M9). Defaults: not connected.
+
+    /// Availability per work id / release-group id; ids missing from the map are not in the
+    /// library. `Processing` while a download for the book/album is in progress.
+    async fn content_availability(
+        &self,
+        _kind: ContentRequestKind,
+        _ids: &[String],
+    ) -> anyhow::Result<HashMap<String, Availability>> {
+        Ok(HashMap::new())
+    }
+
+    /// Open Library work search.
+    async fn lookup_books(&self, _term: &str) -> anyhow::Result<Vec<ContentHit>> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// MusicBrainz release-group search.
+    async fn lookup_albums(&self, _term: &str) -> anyhow::Result<Vec<ContentHit>> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// MusicBrainz artist search.
+    async fn lookup_artists(&self, _term: &str) -> anyhow::Result<Vec<ArtistHit>> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// The books / albums of a Discover row (`row` is an id from
+    /// [`ContentRequestKind::discover_rows`]).
+    async fn discover_content(
+        &self,
+        _kind: ContentRequestKind,
+        _row: &str,
+    ) -> anyhow::Result<Vec<ContentHit>> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// One work / release group (`None` = unknown id).
+    async fn content(&self, _kind: ContentRequestKind, _id: &str) -> anyhow::Result<Option<ContentHit>> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// Adds the book (or monitors the requested formats of an existing one).
+    async fn add_book(&self, _req: AddBookRequest) -> anyhow::Result<ContentAdded> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// Adds the album (or monitors an existing one).
+    async fn add_album(&self, _req: AddAlbumRequest) -> anyhow::Result<ContentAdded> {
+        anyhow::bail!(NOT_CONNECTED)
+    }
+
+    /// Searches for the given books (`formats` empty = every monitored format) or albums.
+    async fn content_search(
+        &self,
+        _kind: ContentRequestKind,
+        _ids: &[i64],
+        _formats: &[BookFormat],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Quality profiles of `ebook`, `audiobook` or `music`.
+    async fn content_profiles(&self, _kind: ContentKind) -> anyhow::Result<Vec<NamedIdDto>> {
+        Ok(Vec::new())
+    }
+
+    /// Root folders of `ebook`, `audiobook` or `music`.
+    async fn content_root_folders(&self, _kind: ContentKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
+        Ok(Vec::new())
+    }
 }
 
 /// A configured media server.

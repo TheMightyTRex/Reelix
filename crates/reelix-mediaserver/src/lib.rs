@@ -1,4 +1,6 @@
 //! Media server adapters: Jellyfin, Emby, Plex (auth, library refresh, availability, watchlists)
+//! plus the book and music servers Audiobookshelf, Kavita, Calibre-Web and Navidrome
+//! (connection test and library refresh only; see [`MediaServer::content_kinds`]).
 //!
 //! Jellyfin and Emby share one implementation ([`emby::EmbyLike`]) that differs only in
 //! auth headers. Plex talks to the server with an `X-Plex-Token`; account-level features
@@ -12,8 +14,13 @@ use reelix_core::provider::ProviderSchema;
 use reelix_core::{ContentKind, MediaKind};
 use serde::{Deserialize, Serialize};
 
+pub mod audiobookshelf;
+pub mod calibreweb;
 pub mod emby;
 pub mod error;
+pub mod kavita;
+mod md5;
+pub mod navidrome;
 pub mod plex;
 pub mod plextv;
 mod settings;
@@ -170,10 +177,34 @@ pub fn schemas() -> Vec<ProviderSchema> {
         emby::schema(MediaServerKind::Jellyfin),
         emby::schema(MediaServerKind::Emby),
         plex::schema(),
+        audiobookshelf::schema(),
+        kavita::schema(),
+        calibreweb::schema(),
+        navidrome::schema(),
     ]
 }
 
-/// Builds an adapter from its implementation id (`jellyfin`, `emby`, `plex`) and settings.
+impl MediaServerKind {
+    /// Implementation id used in provider settings (`jellyfin`, …, `calibreweb`, `navidrome`).
+    pub fn implementation(self) -> &'static str {
+        match self {
+            Self::Jellyfin => "jellyfin",
+            Self::Emby => "emby",
+            Self::Plex => "plex",
+            Self::Audiobookshelf => "audiobookshelf",
+            Self::Kavita => "kavita",
+            Self::CalibreWeb => "calibreweb",
+            Self::Navidrome => "navidrome",
+        }
+    }
+
+    /// Movie/TV servers: logins, user import, watch history and availability sync apply.
+    pub fn is_video(self) -> bool {
+        matches!(self, Self::Jellyfin | Self::Emby | Self::Plex)
+    }
+}
+
+/// Builds an adapter from its implementation id (see [`MediaServerKind::implementation`]) and settings.
 pub fn build(
     implementation: &str,
     settings: &serde_json::Value,
@@ -191,6 +222,10 @@ pub fn build(
             ctx,
         )?),
         "plex" => Box::new(plex::Plex::from_settings(settings, ctx)?),
+        "audiobookshelf" => Box::new(audiobookshelf::Audiobookshelf::from_settings(settings, ctx)?),
+        "kavita" => Box::new(kavita::Kavita::from_settings(settings, ctx)?),
+        "calibreweb" => Box::new(calibreweb::CalibreWeb::from_settings(settings, ctx)?),
+        "navidrome" => Box::new(navidrome::Navidrome::from_settings(settings, ctx)?),
         other => return Err(MsError::UnknownImplementation(other.into())),
     })
 }

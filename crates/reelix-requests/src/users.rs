@@ -202,6 +202,10 @@ impl RequestService {
             movie_quota_days: u.movie_quota_days,
             tv_quota_limit: u.tv_quota_limit,
             tv_quota_days: u.tv_quota_days,
+            book_quota_limit: u.book_quota_limit,
+            book_quota_days: u.book_quota_days,
+            music_quota_limit: u.music_quota_limit,
+            music_quota_days: u.music_quota_days,
             has_password: u.has_password,
             request_count: count,
             created_at: ts(u.created_at),
@@ -269,6 +273,10 @@ impl RequestService {
                     movie_quota_days: dto.movie_quota_days,
                     tv_quota_limit: dto.tv_quota_limit,
                     tv_quota_days: dto.tv_quota_days,
+                    book_quota_limit: dto.book_quota_limit,
+                    book_quota_days: dto.book_quota_days,
+                    music_quota_limit: dto.music_quota_limit,
+                    music_quota_days: dto.music_quota_days,
                 },
             )
             .await?;
@@ -318,21 +326,30 @@ impl RequestService {
         {
             return Err(Error::Validation("external users have no local password".into()));
         }
-        let (mq, md, tq, td) = if actor.permissions.has(Permissions::MANAGE_USERS) {
-            (
+        let quotas = if actor.permissions.has(Permissions::MANAGE_USERS) {
+            [
                 dto.movie_quota_limit,
                 dto.movie_quota_days,
                 dto.tv_quota_limit,
                 dto.tv_quota_days,
-            )
+                dto.book_quota_limit,
+                dto.book_quota_days,
+                dto.music_quota_limit,
+                dto.music_quota_days,
+            ]
         } else {
-            (
+            [
                 target.movie_quota_limit,
                 target.movie_quota_days,
                 target.tv_quota_limit,
                 target.tv_quota_days,
-            )
+                target.book_quota_limit,
+                target.book_quota_days,
+                target.music_quota_limit,
+                target.music_quota_days,
+            ]
         };
+        let [mq, md, tq, td, bq, bd, uq, ud] = quotas;
         self.users_repo()
             .update(
                 id,
@@ -346,6 +363,10 @@ impl RequestService {
                     movie_quota_days: md,
                     tv_quota_limit: tq,
                     tv_quota_days: td,
+                    book_quota_limit: bq,
+                    book_quota_days: bd,
+                    music_quota_limit: uq,
+                    music_quota_days: ud,
                 },
             )
             .await?;

@@ -1,9 +1,12 @@
-//! Job handlers: `search` (payload [`SearchRequest`]), `rss_sync` and `process_pending`.
+//! Job handlers: `search` (payload [`SearchRequest`]), `book_search` ([`BookSearchRequest`]),
+//! `album_search` ([`AlbumSearchRequest`]), `rss_sync` and `process_pending`.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use reelix_api_types::books::BookSearchRequest;
 use reelix_api_types::library::SearchRequest;
+use reelix_api_types::music::AlbumSearchRequest;
 use reelix_jobs::{JobContext, JobHandler, JobSystemBuilder, TaskDef};
 
 use super::SearchService;
@@ -11,6 +14,10 @@ use super::SearchService;
 pub const SEARCH: &str = "search";
 pub const RSS_SYNC: &str = "rss_sync";
 pub const PROCESS_PENDING: &str = "process_pending";
+/// Enqueued by the books service.
+pub const BOOK_SEARCH: &str = reelix_books::kinds::BOOK_SEARCH;
+/// Enqueued by the music service.
+pub const ALBUM_SEARCH: &str = reelix_music::kinds::ALBUM_SEARCH;
 
 pub struct SearchJob(pub Arc<SearchService>);
 
@@ -25,6 +32,40 @@ impl JobHandler for SearchJob {
         let cancel = ctx.cancel.clone();
         let stop = move || cancel.is_cancelled();
         self.0.run_search(&req, &stop).await?;
+        Ok(())
+    }
+}
+
+pub struct BookSearchJob(pub Arc<SearchService>);
+
+#[async_trait::async_trait]
+impl JobHandler for BookSearchJob {
+    fn kind(&self) -> &'static str {
+        BOOK_SEARCH
+    }
+
+    async fn run(&self, ctx: &JobContext, payload: serde_json::Value) -> anyhow::Result<()> {
+        let req: BookSearchRequest = serde_json::from_value(payload)?;
+        let cancel = ctx.cancel.clone();
+        let stop = move || cancel.is_cancelled();
+        self.0.run_book_search(&req, &stop).await?;
+        Ok(())
+    }
+}
+
+pub struct AlbumSearchJob(pub Arc<SearchService>);
+
+#[async_trait::async_trait]
+impl JobHandler for AlbumSearchJob {
+    fn kind(&self) -> &'static str {
+        ALBUM_SEARCH
+    }
+
+    async fn run(&self, ctx: &JobContext, payload: serde_json::Value) -> anyhow::Result<()> {
+        let req: AlbumSearchRequest = serde_json::from_value(payload)?;
+        let cancel = ctx.cancel.clone();
+        let stop = move || cancel.is_cancelled();
+        self.0.run_album_search(&req, &stop).await?;
         Ok(())
     }
 }
@@ -80,10 +121,13 @@ pub fn tasks() -> Vec<TaskDef> {
     ]
 }
 
-/// Registers the handlers and tasks.
+/// Registers the handlers (`search`, `book_search`, `album_search`, `rss_sync`,
+/// `process_pending`) and tasks.
 pub fn register(mut builder: JobSystemBuilder, svc: &Arc<SearchService>) -> JobSystemBuilder {
     builder = builder
         .handler(SearchJob(svc.clone()))
+        .handler(BookSearchJob(svc.clone()))
+        .handler(AlbumSearchJob(svc.clone()))
         .handler(RssSyncJob(svc.clone()))
         .handler(ProcessPendingJob(svc.clone()));
     for t in tasks() {

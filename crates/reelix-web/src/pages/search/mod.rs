@@ -1,15 +1,20 @@
-//! `/search?q=` — combined TMDB search results with availability.
+//! `/search?q=` — combined TMDB search results with availability; `&type=books|music`
+//! searches Open Library / MusicBrainz instead (REQUEST_BOOK / REQUEST_MUSIC).
 
 use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos_router::components::A;
 use leptos_router::hooks::{use_navigate, use_query_map};
-use reelix_api_types::requests::{DiscoverItemDto, PersonDto, SearchPageDto};
+use reelix_api_types::Permissions;
+use reelix_api_types::requests::{ContentRequestKind, DiscoverItemDto, PersonDto, SearchPageDto};
 
 use crate::api;
 use crate::components::media_card::{MediaCard, MediaCardSkeleton, MediaGrid};
 use crate::components::request_status::{item_badge, kind_label, media_href, url_encode};
 use crate::components::{EmptyState, ErrorBox, Icon};
+use crate::pages::discover::content::ContentResults;
+use crate::state::AuthState;
 
 /// Route of the search results page for `q`.
 pub fn search_href(q: &str) -> String {
@@ -18,9 +23,18 @@ pub fn search_href(q: &str) -> String {
 
 #[component]
 pub fn SearchPage() -> impl IntoView {
+    let auth = AuthState::expect();
     let query = use_query_map();
     let navigate = use_navigate();
     let q = Memo::new(move |_| query.with(|m| m.get("q").unwrap_or_default().trim().to_string()));
+    // `books` / `music` (when permitted), else movies & TV.
+    let content = Memo::new(
+        move |_| match query.with(|m| m.get("type").unwrap_or_default()).as_str() {
+            "books" if auth.has(Permissions::REQUEST_BOOK) => Some(ContentRequestKind::Book),
+            "music" if auth.has(Permissions::REQUEST_MUSIC) => Some(ContentRequestKind::Music),
+            _ => None,
+        },
+    );
     let input = RwSignal::new(String::new());
     let items = RwSignal::new(Vec::<DiscoverItemDto>::new());
     let people = RwSignal::new(Vec::<PersonDto>::new());
@@ -73,7 +87,7 @@ pub fn SearchPage() -> impl IntoView {
         total.set(0);
         total_pages.set(0);
         error.set(None);
-        if !text.is_empty() {
+        if !text.is_empty() && content.get().is_none() {
             load(1);
         }
     });
@@ -82,13 +96,20 @@ pub fn SearchPage() -> impl IntoView {
         e.prevent_default();
         let text = input.get_untracked();
         if !text.trim().is_empty() {
-            navigate(&search_href(&text), Default::default());
+            let mut href = search_href(&text);
+            if let Some(k) = content.get_untracked() {
+                href.push_str(match k {
+                    ContentRequestKind::Book => "&type=books",
+                    ContentRequestKind::Music => "&type=music",
+                });
+            }
+            navigate(&href, Default::default());
         }
     };
 
     let summary = move || {
         let text = q.get();
-        if text.is_empty() {
+        if text.is_empty() || content.get().is_some() {
             return String::new();
         }
         if loading.get() && items.with(Vec::is_empty) {
@@ -113,6 +134,35 @@ pub fn SearchPage() -> impl IntoView {
                 "Search"
             </button>
         </form>
+        {move || {
+            let (books, music) = (auth.has(Permissions::REQUEST_BOOK), auth.has(Permissions::REQUEST_MUSIC));
+            (books || music).then(|| {
+                let text = q.get();
+                let cur = content.get();
+                let tab = move |kind: Option<ContentRequestKind>, label: &'static str| {
+                    let suffix = match kind {
+                        None => "",
+                        Some(ContentRequestKind::Book) => "&type=books",
+                        Some(ContentRequestKind::Music) => "&type=music",
+                    };
+                    let href = format!("{}{suffix}", search_href(&text));
+                    let active = cur == kind;
+                    view! {
+                        <A href=href attr:class=if active { "tab active" } else { "tab" } attr:role="tab"
+                            attr:aria-selected=active.to_string()>{label}</A>
+                    }
+                };
+                view! {
+                    <div class="tabs" role="tablist" aria-label="What to search">
+                        {tab(None, "Movies & TV")}
+                        {books.then(|| tab(Some(ContentRequestKind::Book), "Books"))}
+                        {music.then(|| tab(Some(ContentRequestKind::Music), "Music"))}
+                    </div>
+                }
+            })
+        }}
+        {move || content.get().map(|kind| view! { <ContentResults kind=kind query=q /> })}
+        <Show when=move || content.get().is_none()>
         {move || error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| load(page.get_untracked())) /> })}
         {move || {
             let ps = people.get();
@@ -164,5 +214,6 @@ pub fn SearchPage() -> impl IntoView {
                 </button>
             </Show>
         </div>
+        </Show>
     }
 }

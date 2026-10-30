@@ -2,7 +2,8 @@
 //!
 //! Endpoints: `/search/authors.json`, `/search.json`, `/authors/{id}.json`,
 //! `/authors/{id}/works.json`, `/works/{id}.json`, `/works/{id}/ratings.json`,
-//! `/works/{id}/editions.json` and `/isbn/{isbn}.json`; covers come from `covers.openlibrary.org`.
+//! `/works/{id}/editions.json`, `/isbn/{isbn}.json` and `/trending/weekly.json`; covers come from
+//! `covers.openlibrary.org`.
 
 mod wire;
 
@@ -148,6 +149,52 @@ impl OpenLibrary {
 
     fn cover(&self, ids: &[i64]) -> Option<String> {
         ids.iter().find(|id| **id > 0).map(|id| self.cover_url(*id, 'L'))
+    }
+
+    /// Works trending on Open Library this week (most read / wanted), up to `limit`.
+    pub async fn trending_works(&self, limit: usize) -> Result<Vec<WorkSearchHit>, MetaError> {
+        let res: wire::TrendingWorks = self
+            .get("/trending/weekly.json", &[("limit", limit.to_string())])
+            .await?;
+        Ok(res.works.into_iter().filter_map(|d| self.search_hit(d)).collect())
+    }
+
+    /// Works with the subject `subject` (an Open Library subject key such as `fantasy` or
+    /// `science_fiction`), currently trending first; up to `limit`.
+    pub async fn subject_works(&self, subject: &str, limit: usize) -> Result<Vec<WorkSearchHit>, MetaError> {
+        let subject = subject.trim();
+        if subject.is_empty() || !subject.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(MetaError::NotFound);
+        }
+        let query = [
+            ("q", format!("subject_key:{subject}")),
+            ("sort", "trending".to_string()),
+            ("fields", SEARCH_FIELDS.to_string()),
+            ("limit", limit.to_string()),
+        ];
+        let res: wire::SearchWorks = self.get("/search.json", &query).await?;
+        Ok(res.docs.into_iter().filter_map(|d| self.search_hit(d)).collect())
+    }
+
+    /// Maps a search / trending document to a hit (`None` without a work id).
+    fn search_hit(&self, d: wire::SearchWorkDoc) -> Option<WorkSearchHit> {
+        let id = olid(&d.key, 'W')?;
+        let mut isbns: Vec<String> = d.isbn.iter().filter_map(|i| normalize_isbn(i)).collect();
+        let mut seen = std::collections::HashSet::new();
+        isbns.retain(|i| seen.insert(i.clone()));
+        // ISBN-13 first, otherwise in Open Library's order.
+        isbns.sort_by_key(|i| std::cmp::Reverse(i.len()));
+        isbns.truncate(20);
+        Some(WorkSearchHit {
+            id,
+            title: d.title,
+            author_ids: d.author_key.iter().filter_map(|k| olid(k, 'A')).collect(),
+            author_names: d.author_name,
+            first_publish_year: d.first_publish_year,
+            cover_url: d.cover_i.filter(|c| *c > 0).map(|c| self.cover_url(c, 'M')),
+            isbns,
+            edition_count: d.edition_count,
+        })
     }
 
     async fn get_value(&self, path: &str, query: &[(&str, String)]) -> Result<Arc<Value>, MetaError> {
@@ -370,29 +417,7 @@ impl BookMetadataProvider for OpenLibrary {
             None => query.push(("q", q.to_string())),
         }
         let res: wire::SearchWorks = self.get("/search.json", &query).await?;
-        Ok(res
-            .docs
-            .into_iter()
-            .filter_map(|d| {
-                let id = olid(&d.key, 'W')?;
-                let mut isbns: Vec<String> = d.isbn.iter().filter_map(|i| normalize_isbn(i)).collect();
-                let mut seen = std::collections::HashSet::new();
-                isbns.retain(|i| seen.insert(i.clone()));
-                // ISBN-13 first, otherwise in Open Library's order.
-                isbns.sort_by_key(|i| std::cmp::Reverse(i.len()));
-                isbns.truncate(20);
-                Some(WorkSearchHit {
-                    id,
-                    title: d.title,
-                    author_ids: d.author_key.iter().filter_map(|k| olid(k, 'A')).collect(),
-                    author_names: d.author_name,
-                    first_publish_year: d.first_publish_year,
-                    cover_url: d.cover_i.filter(|c| *c > 0).map(|c| self.cover_url(c, 'M')),
-                    isbns,
-                    edition_count: d.edition_count,
-                })
-            })
-            .collect())
+        Ok(res.docs.into_iter().filter_map(|d| self.search_hit(d)).collect())
     }
 
     async fn author(&self, id: &str) -> Result<AuthorMetadata, MetaError> {

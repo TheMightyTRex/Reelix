@@ -13,6 +13,7 @@ use super::grab::{self, GrabTarget};
 use super::mapping;
 use super::{Result, SearchError, SearchService, SearchSummary};
 use crate::GrabbedRelease;
+use crate::store::ContentRef;
 use crate::store::pending::{self, PendingRelease};
 
 /// Rebuilds an indexer result from a stored snapshot (for re-evaluation).
@@ -38,7 +39,7 @@ fn info_from(rel: &GrabbedRelease) -> ReleaseInfo {
 fn group_key(p: &PendingRelease) -> String {
     let mut eps = p.episode_ids.clone();
     eps.sort_unstable();
-    format!("{:?}:{:?}:{eps:?}", p.movie_id, p.series_id)
+    format!("{:?}:{:?}:{eps:?}:{:?}", p.movie_id, p.series_id, p.content)
 }
 
 impl SearchService {
@@ -47,9 +48,11 @@ impl SearchService {
         let existing = pending::all(&self.db).await?;
         let movie_id = t.movie_id();
         let series_id = t.series_id();
+        let content = t.content();
         if existing.iter().any(|p| {
             p.movie_id == movie_id
                 && p.series_id == series_id
+                && p.content == content
                 && p.release.guid == e.candidate().guid
                 && p.release.indexer_id == Some(e.info.indexer_id)
         }) {
@@ -61,16 +64,27 @@ impl SearchService {
         let base = e.info.publish_date.unwrap_or(shared.now);
         let release_at = (base + Duration::minutes(i64::from(delay))).max(shared.now);
         let snapshot = grab::snapshot(e, shared.indexers.get(&e.info.indexer_id));
-        let id = pending::insert(
-            &self.db,
-            movie_id,
-            series_id,
-            &e.candidate().episode_ids,
-            &snapshot,
-            "delay",
-            release_at.timestamp_millis(),
-        )
-        .await?;
+        let id = if content.is_empty() {
+            pending::insert(
+                &self.db,
+                movie_id,
+                series_id,
+                &e.candidate().episode_ids,
+                &snapshot,
+                "delay",
+                release_at.timestamp_millis(),
+            )
+            .await?
+        } else {
+            pending::insert_content(
+                &self.db,
+                &content,
+                &snapshot,
+                "delay",
+                release_at.timestamp_millis(),
+            )
+            .await?
+        };
         tracing::info!(title = %snapshot.title, release_at = %release_at, "release delayed by delay profile");
         self.emit("pending", "created", id);
         Ok(true)
@@ -101,7 +115,23 @@ impl SearchService {
         Ok(())
     }
 
+    /// Drops pending releases of a book format / album (after a grab).
+    pub(crate) async fn clear_pending_for_content(&self, c: &ContentRef) -> Result<()> {
+        if c.is_empty() {
+            return Ok(());
+        }
+        for p in pending::all(&self.db).await? {
+            if p.content == *c && pending::delete(&self.db, p.id).await? {
+                self.emit("pending", "deleted", p.id);
+            }
+        }
+        Ok(())
+    }
+
     async fn pending_target(&self, p: &PendingRelease) -> Result<Target> {
+        if !p.content.is_empty() {
+            return self.content_target(&p.content).await;
+        }
         match (p.movie_id, p.series_id) {
             (Some(m), _) => Ok(Target::Movie(self.movie(m).await?)),
             (None, Some(s)) => self.series_target(s).await,
@@ -123,6 +153,9 @@ impl SearchService {
             groups.entry(group_key(&p)).or_default().push(p);
         }
         let mut shared = self.shared().await?;
+        if groups.values().flatten().any(|p| !p.content.is_empty()) {
+            shared.load_content(&self.db).await?;
+        }
         for (_, rows) in groups {
             let t = match self.pending_target(&rows[0]).await {
                 Ok(t) => t,
@@ -135,16 +168,13 @@ impl SearchService {
                     continue;
                 }
             };
-            let wanted_media = match &t {
-                Target::Movie(m) => m.monitored,
-                Target::Series { series, .. } => series.monitored,
-            };
+            let wanted_media = t.monitored();
             let evals = {
                 let ev = Evaluator::new(&self.db, &shared, &t).await?;
                 let mut out = Vec::new();
                 for p in &rows {
                     let info = info_from(&p.release);
-                    let mut c = mapping::candidate(&info, shared.priority(info.indexer_id));
+                    let mut c = mapping::candidate_for(&info, shared.priority(info.indexer_id), &t);
                     c.media_id = Some(t.media_id());
                     c.episode_ids = p.episode_ids.clone();
                     let decision =
@@ -196,19 +226,22 @@ impl SearchService {
 
     pub async fn list_pending(&self) -> Result<Vec<PendingReleaseDto>> {
         let rows = pending::all(&self.db).await?;
-        let refs = self
+        let mut refs = self
             .media_refs(
                 rows.iter().filter_map(|p| p.movie_id),
                 rows.iter().filter_map(|p| p.series_id),
                 rows.iter().flat_map(|p| p.episode_ids.iter().copied()),
             )
             .await?;
+        self.content_refs(&mut refs, rows.iter().map(|p| p.content)).await;
         Ok(rows
             .into_iter()
             .map(|p| PendingReleaseDto {
                 id: p.id,
                 title: p.title,
-                media: refs.media(p.movie_id, p.series_id),
+                media: refs
+                    .media(p.movie_id, p.series_id)
+                    .or_else(|| refs.content(&p.content)),
                 episodes: refs.episodes(&p.episode_ids),
                 quality: p.release.quality,
                 indexer: p.release.indexer,
@@ -236,6 +269,7 @@ impl SearchService {
             .find(|p| p.id == id)
             .ok_or_else(|| SearchError::NotFound(format!("pending release {id} not found")))?;
         let target = match (p.movie_id, p.series_id) {
+            _ if !p.content.is_empty() => self.grab_target_content(&p.content).await?,
             (Some(m), _) => self.grab_target(Some(m), &[]).await?,
             (None, Some(_)) => self.grab_target(None, &p.episode_ids).await?,
             _ => GrabTarget::default(),

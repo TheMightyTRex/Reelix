@@ -5,13 +5,20 @@
 use std::collections::HashMap;
 
 use reelix_api_types::library::{EpisodeDto, MovieDto, SeriesDto, SeriesType};
+use reelix_books::BookTarget;
+use reelix_core::{BookFormat, ContentKind};
 use reelix_decision::{IndexerFlag, ReleaseCandidate};
+use reelix_import::matching::similarity;
 use reelix_import::matching::{
     ExpectedEpisode, ExpectedMovie, best_movie_match, match_movie, match_parsed_episodes, match_title,
     normalize_title,
 };
 use reelix_indexers::ReleaseInfo;
-use reelix_parser::{ParsedRelease, ReleaseKind};
+use reelix_indexers::categories::content_kind_of;
+use reelix_music::AlbumTarget;
+use reelix_parser::{ParsedBook, ParsedMusic, ParsedRelease, QualityFamily, ReleaseKind};
+
+use super::context::Target;
 
 /// Indexer flag → decision-engine flag.
 pub fn decision_flag(f: reelix_indexers::IndexerFlag) -> IndexerFlag {
@@ -40,7 +47,21 @@ pub fn parse_flag(s: &str) -> Option<IndexerFlag> {
 
 /// A decision candidate for an indexer result (`priority`: the indexer row's priority).
 pub fn candidate(r: &ReleaseInfo, priority: i32) -> ReleaseCandidate {
-    let mut c = ReleaseCandidate::new(&r.title, r.protocol);
+    fill(ReleaseCandidate::new(&r.title, r.protocol), r, priority)
+}
+
+/// A candidate parsed for the target's content: book releases with the book parser (quality of
+/// the format's family), album releases with the music parser, everything else as [`candidate`].
+pub fn candidate_for(r: &ReleaseInfo, priority: i32, t: &Target) -> ReleaseCandidate {
+    let base = match t {
+        Target::Book(b) => ReleaseCandidate::for_book(&r.title, r.protocol, b.format),
+        Target::Album(_) => ReleaseCandidate::for_album(&r.title, r.protocol),
+        _ => return candidate(r, priority),
+    };
+    fill(base, r, priority)
+}
+
+fn fill(mut c: ReleaseCandidate, r: &ReleaseInfo, priority: i32) -> ReleaseCandidate {
     c.size = r.size.unwrap_or(0);
     c.indexer_id = Some(r.indexer_id);
     c.indexer = r.indexer.clone();
@@ -290,4 +311,142 @@ impl MediaIndex {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Books and albums
+// ---------------------------------------------------------------------------------------------
+
+fn kind_label(k: ContentKind) -> &'static str {
+    match k {
+        ContentKind::Movie => "a movie",
+        ContentKind::Series => "a TV",
+        ContentKind::Ebook => "an ebook",
+        ContentKind::Audiobook => "an audiobook",
+        ContentKind::Music => "a music",
+    }
+}
+
+/// The content kind of a release from its indexer categories (`None` = unknown / no categories).
+pub fn release_kind(r: &ReleaseInfo) -> Option<ContentKind> {
+    content_kind_of(&r.categories)
+}
+
+/// Whether a book release is `t` (one format of a book): category and format must fit, then
+/// ISBN/ASIN, else author + title.
+pub fn map_to_book(r: &ReleaseInfo, parsed: &ParsedBook, t: &BookTarget) -> Result<(), String> {
+    let want = t.format.content_kind();
+    if let Some(k) = release_kind(r).filter(|k| *k != want) {
+        return Err(format!("Release is in {} category", kind_label(k)));
+    }
+    let other = match t.format {
+        BookFormat::Ebook => BookFormat::Audiobook,
+        BookFormat::Audiobook => BookFormat::Ebook,
+    };
+    if parsed.format == Some(other) || parsed.quality.quality.family() == QualityFamily::of_book(other) {
+        return Err(format!(
+            "Release is {}, not {}",
+            kind_label(other.content_kind()),
+            kind_label(want)
+        ));
+    }
+    let id_eq = |a: Option<&str>, b: Option<&str>| {
+        let n = |s: &str| {
+            s.chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect::<String>()
+                .to_ascii_lowercase()
+        };
+        matches!((a, b), (Some(a), Some(b)) if !n(a).is_empty() && n(a) == n(b))
+    };
+    if id_eq(parsed.isbn.as_deref(), t.book.isbn13.as_deref())
+        || id_eq(parsed.asin.as_deref(), t.book.asin.as_deref())
+    {
+        return Ok(());
+    }
+    let book = normalize_title(&t.book.title);
+    let author = normalize_title(&t.author.name);
+    let title = normalize_title(&parsed.title);
+    let raw = normalize_title(&parsed.raw_title);
+    let author_ok = match parsed
+        .author
+        .as_deref()
+        .map(normalize_title)
+        .filter(|a| !a.is_empty())
+    {
+        Some(a) => {
+            a == author
+                || a.contains(&author)
+                || (author.contains(&a) && a.len() >= 4)
+                || similarity(&a, &author) >= 0.9
+        }
+        None => author.is_empty() || raw.contains(&author),
+    };
+    if !author_ok {
+        return Err(format!(
+            "Wrong author: {:?} is not by {}",
+            parsed.raw_title, t.author.name
+        ));
+    }
+    let title_ok = !book.is_empty()
+        && if parsed.author.is_some() {
+            // The parser split author and title: the title must be the book's.
+            title == book || similarity(&title, &book) >= 0.9
+        } else {
+            title == book || (book.len() >= 4 && raw.contains(&book))
+        };
+    if !title_ok {
+        return Err(format!(
+            "Wrong book: {:?} is not {:?}",
+            parsed.title, t.book.title
+        ));
+    }
+    if parsed.is_collection {
+        return Err("Release is a collection of several books".into());
+    }
+    Ok(())
+}
+
+/// Whether a music release is album `t`: category, then artist and album title (editions such as
+/// "Deluxe" are tolerated); discography packs are rejected.
+pub fn map_to_album(r: &ReleaseInfo, parsed: &ParsedMusic, t: &AlbumTarget) -> Result<(), String> {
+    if let Some(k) = release_kind(r).filter(|k| *k != ContentKind::Music) {
+        return Err(format!("Release is in {} category", kind_label(k)));
+    }
+    if parsed.is_discography {
+        return Err("Discography packs are not grabbed for a single album".into());
+    }
+    let artist = normalize_title(&t.artist.name);
+    let raw = normalize_title(&parsed.raw_title);
+    let artist_ok = match parsed
+        .artist
+        .as_deref()
+        .map(normalize_title)
+        .filter(|a| !a.is_empty())
+    {
+        Some(a) => a == artist || similarity(&a, &artist) >= 0.9,
+        None => !artist.is_empty() && raw.contains(&artist),
+    };
+    if !artist_ok {
+        return Err(format!(
+            "Wrong artist: {:?} is not by {}",
+            parsed.raw_title, t.artist.name
+        ));
+    }
+    let album = normalize_title(&t.album.title);
+    let found = parsed.album.as_deref().unwrap_or(parsed.raw_title.as_str());
+    let mut keys = vec![normalize_title(found)];
+    if let Some(e) = &parsed.edition {
+        keys.push(normalize_title(&found.replace(e.as_str(), "")));
+    }
+    let album_ok = !album.is_empty()
+        && keys.iter().any(|k| {
+            *k == album
+                || similarity(k, &album) >= 0.85
+                || (parsed.album.is_none() && album.len() >= 4 && k.contains(&album))
+        });
+    if !album_ok {
+        return Err(format!("Wrong album: {found:?} is not {:?}", t.album.title));
+    }
+    Ok(())
 }

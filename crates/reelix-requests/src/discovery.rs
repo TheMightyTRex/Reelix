@@ -534,7 +534,7 @@ fn admin_view(actor: &Actor) -> Actor {
     a
 }
 
-fn status_rank(s: RequestStatus) -> u8 {
+pub(crate) fn status_rank(s: RequestStatus) -> u8 {
     match s {
         RequestStatus::Available => 6,
         RequestStatus::PartiallyAvailable => 5,

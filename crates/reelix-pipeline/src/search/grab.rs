@@ -4,14 +4,17 @@
 use chrono::Duration;
 use reelix_api_types::library::{EpisodeDto, MovieDto, SeriesDto};
 use reelix_api_types::pipeline::GrabResponse;
-use reelix_core::{MediaKind, Protocol};
+use reelix_books::BookTarget;
+use reelix_core::{ContentKind, MediaKind, Protocol};
 use reelix_downloaders::{AddOptions, PayloadPreference, ReleasePayload};
 use reelix_indexers::IndexerError;
+use reelix_music::AlbumTarget;
 use reelix_notify::{EpisodeSummary, MediaSummary, NotificationEvent, ReleaseSummary};
 
 use super::context::{Eval, IndexerInfo, Target};
 use super::mapping::flag_name;
 use super::{Result, SearchError, SearchService};
+use crate::store::ContentRef;
 use crate::store::history::{self, HistoryEvent, NewHistory};
 use crate::store::tracked::{self, NewTracked};
 use crate::{FormatRef, GrabbedRelease};
@@ -22,6 +25,9 @@ pub struct GrabTarget {
     pub movie: Option<MovieDto>,
     pub series: Option<SeriesDto>,
     pub episodes: Vec<EpisodeDto>,
+    /// One format of a book.
+    pub book: Option<Box<BookTarget>>,
+    pub album: Option<Box<AlbumTarget>>,
 }
 
 impl GrabTarget {
@@ -32,9 +38,17 @@ impl GrabTarget {
                 ..Self::default()
             },
             Target::Series { series, .. } => Self {
-                movie: None,
                 series: Some(series.clone()),
                 episodes: t.episodes_by_id(episode_ids),
+                ..Self::default()
+            },
+            Target::Book(b) => Self {
+                book: Some(b.clone()),
+                ..Self::default()
+            },
+            Target::Album(a) => Self {
+                album: Some(a.clone()),
+                ..Self::default()
             },
         }
     }
@@ -44,7 +58,27 @@ impl GrabTarget {
             .as_ref()
             .map(|m| m.tags.clone())
             .or_else(|| self.series.as_ref().map(|s| s.tags.clone()))
+            .or_else(|| self.book.as_ref().map(|b| b.tags.clone()))
+            .or_else(|| self.album.as_ref().map(|a| a.tags.clone()))
             .unwrap_or_default()
+    }
+
+    /// Book (format) / album reference.
+    pub fn content(&self) -> ContentRef {
+        if let Some(b) = &self.book {
+            return ContentRef::book(b.book.id, b.format);
+        }
+        self.album
+            .as_ref()
+            .map(|a| ContentRef::album(a.album.id))
+            .unwrap_or_default()
+    }
+
+    fn content_kind(&self) -> Option<ContentKind> {
+        self.book
+            .as_ref()
+            .map(|b| b.format.content_kind())
+            .or_else(|| self.album.as_ref().map(|_| ContentKind::Music))
     }
 
     fn kind(&self) -> Option<MediaKind> {
@@ -60,6 +94,12 @@ impl GrabTarget {
     /// Released / aired within the last 14 days.
     fn is_recent(&self, today: chrono::NaiveDate) -> bool {
         let recent = |d: chrono::NaiveDate| d <= today && today - d <= Duration::days(14);
+        if let Some(b) = &self.book {
+            return b.book.release_date.is_some_and(recent);
+        }
+        if let Some(a) = &self.album {
+            return a.album.release_date.is_some_and(recent);
+        }
         match &self.movie {
             Some(m) => [m.in_cinemas, m.digital_release, m.physical_release]
                 .into_iter()
@@ -70,6 +110,12 @@ impl GrabTarget {
     }
 
     fn summary(&self) -> Option<MediaSummary> {
+        if let Some(b) = &self.book {
+            return Some(book_summary(b));
+        }
+        if let Some(a) = &self.album {
+            return Some(album_summary(a));
+        }
         if let Some(m) = &self.movie {
             let mut s = MediaSummary::new(MediaKind::Movie, &m.title);
             s.id = Some(m.id);
@@ -102,6 +148,32 @@ impl GrabTarget {
             .collect();
         Some(s)
     }
+}
+
+/// Notification summary of a book format (`Author - Title`).
+pub(crate) fn book_summary(b: &BookTarget) -> MediaSummary {
+    let mut s = MediaSummary::content(
+        b.format.content_kind(),
+        format!("{} - {}", b.author.name, b.book.title),
+    );
+    s.id = Some(b.book.id);
+    s.year = b.book.year;
+    s.poster_url = b.book.images.poster.clone();
+    s.overview = b.book.overview.clone();
+    s
+}
+
+/// Notification summary of an album (`Artist - Album`).
+pub(crate) fn album_summary(a: &AlbumTarget) -> MediaSummary {
+    use chrono::Datelike;
+    let mut s = MediaSummary::content(
+        ContentKind::Music,
+        format!("{} - {}", a.artist.name, a.album.title),
+    );
+    s.id = Some(a.album.id);
+    s.year = a.album.release_date.map(|d| d.year());
+    s.poster_url = a.album.images.poster.clone();
+    s
 }
 
 /// Snapshot stored with tracked / pending rows.
@@ -164,6 +236,12 @@ fn file_name(title: &str, ext: &str) -> String {
 }
 
 impl SearchService {
+    /// The book / album for a grab.
+    pub async fn grab_target_content(&self, c: &ContentRef) -> Result<GrabTarget> {
+        let t = self.content_target(c).await?;
+        Ok(GrabTarget::from_target(&t, &[]))
+    }
+
     /// The media for a grab from library ids (`episode_ids` determine the series).
     pub async fn grab_target(&self, movie_id: Option<i64>, episode_ids: &[i64]) -> Result<GrabTarget> {
         if let Some(id) = movie_id {
@@ -187,9 +265,9 @@ impl SearchService {
         }
         let series = api.series(Some(&[series_id])).await?.pop();
         Ok(GrabTarget {
-            movie: None,
             series,
             episodes,
+            ..GrabTarget::default()
         })
     }
 
@@ -271,8 +349,10 @@ impl SearchService {
         };
         let payload = self.payload(rel, client.payload_preference()).await?;
         let today = self.library.search_api().today();
+        let content = t.content();
         let opts = AddOptions {
-            category: None,
+            // Books and music go to the client's book / music category.
+            category: t.content_kind().and_then(|k| client.category_for_kind(k)),
             media_kind: t.kind(),
             priority: None,
             is_recent: t.is_recent(today),
@@ -305,9 +385,15 @@ impl SearchService {
             },
         )
         .await?;
+        if !content.is_empty() {
+            tracked::set_content(&self.db, queue_id, &content).await?;
+        }
         let mut h = NewHistory::new(HistoryEvent::Grabbed, &rel.title);
         h.movie_id = movie_id;
         h.series_id = series_id;
+        h.content = content;
+        h.author_id = t.book.as_ref().map(|b| b.author.id);
+        h.artist_id = t.album.as_ref().map(|a| a.artist.id);
         h.quality = Some(rel.quality);
         h.languages = rel.languages.clone();
         h.custom_formats = rel.custom_formats.clone();
@@ -327,6 +413,11 @@ impl SearchService {
             "download_client_id": row.id,
             "queue_id": queue_id,
         });
+        if let Some(c) = &opts.category
+            && !content.is_empty()
+        {
+            h.data["category"] = serde_json::Value::String(c.clone());
+        }
         if episode_ids.is_empty() {
             let id = history::insert(&self.db, &h).await?;
             self.emit("history", "created", id);
@@ -337,7 +428,11 @@ impl SearchService {
                 self.emit("history", "created", id);
             }
         }
-        self.clear_pending_for(movie_id, series_id, &episode_ids).await?;
+        if content.is_empty() {
+            self.clear_pending_for(movie_id, series_id, &episode_ids).await?;
+        } else {
+            self.clear_pending_for_content(&content).await?;
+        }
         tracing::info!(title = %rel.title, client = %row.name, download_id = %download_id, "release grabbed");
         self.emit("queue", "grabbed", queue_id);
         if let Some(media) = t.summary() {

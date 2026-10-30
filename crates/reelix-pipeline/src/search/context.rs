@@ -6,16 +6,20 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use reelix_api_types::library::{EpisodeDto, MovieDto, SeriesDto};
-use reelix_core::Protocol;
+use reelix_books::BookTarget;
+use reelix_core::{BookFormat, ContentKind, Protocol};
 use reelix_decision::{
     CustomFormat, Decision, DecisionContext, DelayProfile, ExistingFile, QualityDefinition, QualityProfile,
     RankedRelease, Rejection, RejectionKind, ReleaseCandidate, ReleaseProfile, SearchKind, prioritize,
+    size_runtime_minutes,
 };
 use reelix_import::matching::ExpectedEpisode;
 use reelix_indexers::ReleaseInfo;
-use reelix_parser::Language;
+use reelix_music::AlbumTarget;
+use reelix_parser::{Language, QualityFamily};
 use reelix_providers::ProviderService;
 
+use crate::store::ContentRef;
 use crate::store::blocklist::{self, BlocklistEntry};
 use crate::store::tracked::{self, TrackedDownload};
 
@@ -47,6 +51,11 @@ pub struct Shared {
     pub queue: Vec<TrackedDownload>,
     pub now: DateTime<Utc>,
     pub today: NaiveDate,
+    /// Book and music profiles (every family; loaded by [`Shared::load_content`]).
+    pub content_profiles: HashMap<i64, QualityProfile>,
+    /// Ebook / audiobook / music quality definitions.
+    pub content_definitions: HashMap<QualityFamily, Vec<QualityDefinition>>,
+    content_loaded: bool,
 }
 
 impl Shared {
@@ -92,7 +101,31 @@ impl Shared {
             queue: tracked::active(db).await?,
             now: Utc::now(),
             today,
+            content_profiles: HashMap::new(),
+            content_definitions: HashMap::new(),
+            content_loaded: false,
         })
+    }
+
+    /// Loads book/music profiles and definitions (seeding their defaults on first use). Only
+    /// book/album searches call it, so movie/TV runs never touch the other families.
+    pub async fn load_content(&mut self, db: &reelix_db::Db) -> reelix_db::Result<()> {
+        if self.content_loaded {
+            return Ok(());
+        }
+        for f in [
+            QualityFamily::Ebook,
+            QualityFamily::Audiobook,
+            QualityFamily::Music,
+        ] {
+            for p in db.quality_profiles().list_family(f).await? {
+                self.content_profiles.insert(p.id, p);
+            }
+            self.content_definitions
+                .insert(f, db.quality_definitions().list_family(f).await?);
+        }
+        self.content_loaded = true;
+        Ok(())
     }
 
     pub fn priority(&self, indexer_id: i64) -> i32 {
@@ -124,6 +157,9 @@ pub enum Target {
         episodes: Vec<EpisodeDto>,
         expected: Vec<ExpectedEpisode>,
     },
+    /// One format of a book.
+    Book(Box<BookTarget>),
+    Album(Box<AlbumTarget>),
 }
 
 impl Target {
@@ -140,6 +176,8 @@ impl Target {
         match self {
             Self::Movie(m) => &m.tags,
             Self::Series { series, .. } => &series.tags,
+            Self::Book(b) => &b.tags,
+            Self::Album(a) => &a.tags,
         }
     }
 
@@ -147,6 +185,8 @@ impl Target {
         match self {
             Self::Movie(m) => m.quality_profile_id,
             Self::Series { series, .. } => series.quality_profile_id,
+            Self::Book(b) => b.quality_profile_id,
+            Self::Album(a) => a.quality_profile_id,
         }
     }
 
@@ -154,27 +194,83 @@ impl Target {
         match self {
             Self::Movie(m) => m.id,
             Self::Series { series, .. } => series.id,
+            Self::Book(b) => b.book.id,
+            Self::Album(a) => a.album.id,
         }
     }
 
     pub fn movie_id(&self) -> Option<i64> {
         match self {
             Self::Movie(m) => Some(m.id),
-            Self::Series { .. } => None,
+            _ => None,
         }
     }
 
     pub fn series_id(&self) -> Option<i64> {
         match self {
-            Self::Movie(_) => None,
             Self::Series { series, .. } => Some(series.id),
+            _ => None,
+        }
+    }
+
+    /// Book (format) / album reference (empty for movies and series).
+    pub fn content(&self) -> ContentRef {
+        match self {
+            Self::Book(b) => ContentRef::book(b.book.id, b.format),
+            Self::Album(a) => ContentRef::album(a.album.id),
+            _ => ContentRef::default(),
+        }
+    }
+
+    pub fn is_content(&self) -> bool {
+        matches!(self, Self::Book(_) | Self::Album(_))
+    }
+
+    /// Ebook / audiobook / music for content targets.
+    pub fn content_kind(&self) -> Option<ContentKind> {
+        match self {
+            Self::Book(b) => Some(b.format.content_kind()),
+            Self::Album(_) => Some(ContentKind::Music),
+            _ => None,
+        }
+    }
+
+    /// Quality family of the target's profile.
+    pub fn family(&self) -> QualityFamily {
+        match self {
+            Self::Book(b) => QualityFamily::of_book(b.format),
+            Self::Album(_) => QualityFamily::Music,
+            _ => QualityFamily::Video,
+        }
+    }
+
+    pub fn book_format(&self) -> Option<BookFormat> {
+        match self {
+            Self::Book(b) => Some(b.format),
+            _ => None,
+        }
+    }
+
+    /// Whether the media (and, for books, the format) is monitored.
+    pub fn monitored(&self) -> bool {
+        match self {
+            Self::Movie(m) => m.monitored,
+            Self::Series { series, .. } => series.monitored,
+            Self::Book(b) => {
+                b.author.monitored
+                    && match b.format {
+                        BookFormat::Ebook => b.book.monitored_ebook,
+                        BookFormat::Audiobook => b.book.monitored_audiobook,
+                    }
+            }
+            Self::Album(a) => a.album.monitored && a.artist.monitored,
         }
     }
 
     pub fn episodes(&self) -> &[EpisodeDto] {
         match self {
-            Self::Movie(_) => &[],
             Self::Series { episodes, .. } => episodes,
+            _ => &[],
         }
     }
 
@@ -188,6 +284,8 @@ impl Target {
         let code = match self {
             Self::Movie(m) => m.original_language.as_deref(),
             Self::Series { series, .. } => series.original_language.as_deref(),
+            // Book/music profiles have no language requirement (see reelix_decision::family).
+            Self::Book(_) | Self::Album(_) => None,
         }?;
         Language::from_iso639_1(code)
     }
@@ -263,7 +361,11 @@ pub struct Evaluator<'a> {
 
 impl<'a> Evaluator<'a> {
     pub async fn new(db: &reelix_db::Db, shared: &'a Shared, target: &'a Target) -> reelix_db::Result<Self> {
-        let blocklist = blocklist::for_media(db, target.movie_id(), target.series_id()).await?;
+        let blocklist = if target.is_content() {
+            blocklist::for_content(db, &target.content()).await?
+        } else {
+            blocklist::for_media(db, target.movie_id(), target.series_id()).await?
+        };
         Ok(Self {
             shared,
             target,
@@ -293,6 +395,37 @@ impl<'a> Evaluator<'a> {
                         e.season_number, e.episode_number
                     )
                 }),
+            Target::Book(b) => b
+                .book
+                .release_date
+                .filter(|d| *d > self.shared.today)
+                .map(|d| format!("Book is not released yet ({d})")),
+            Target::Album(a) => a
+                .album
+                .release_date
+                .filter(|d| *d > self.shared.today)
+                .map(|d| format!("Album is not released yet ({d})")),
+        }
+    }
+
+    /// The target's quality profile (video profiles for movies/series, family profiles otherwise).
+    fn profile(&self) -> Option<&'a QualityProfile> {
+        let id = self.target.profile_id();
+        if self.target.is_content() {
+            self.shared.content_profiles.get(&id)
+        } else {
+            self.shared.profiles.get(&id)
+        }
+    }
+
+    fn definitions(&self) -> &'a [QualityDefinition] {
+        if self.target.is_content() {
+            self.shared
+                .content_definitions
+                .get(&self.target.family())
+                .map_or(&[], Vec::as_slice)
+        } else {
+            &self.shared.definitions
         }
     }
 
@@ -309,6 +442,31 @@ impl<'a> Evaluator<'a> {
                     .map(|f| existing_of(&f.file))
                     .collect()
             }
+            Target::Book(b) => b
+                .existing
+                .iter()
+                .map(|f| ExistingFile {
+                    quality: f.quality,
+                    format_ids: f.custom_format_ids.clone(),
+                    languages: Vec::new(),
+                })
+                .collect(),
+            // The album counts as its lowest-quality track.
+            Target::Album(a) => {
+                let profile = self.profile();
+                let rank =
+                    |q: reelix_parser::Quality| profile.and_then(|p| p.rank(q)).map_or(-1, |r| r as i64);
+                a.existing
+                    .iter()
+                    .min_by_key(|f| rank(f.quality.quality))
+                    .map(|f| ExistingFile {
+                        quality: f.quality,
+                        format_ids: f.custom_format_ids.clone(),
+                        languages: Vec::new(),
+                    })
+                    .into_iter()
+                    .collect()
+            }
         }
     }
 
@@ -318,6 +476,9 @@ impl<'a> Evaluator<'a> {
             Target::Series { series, episodes, .. } => series
                 .runtime_minutes
                 .or_else(|| episodes.iter().find_map(|e| e.runtime_minutes)),
+            // Ebooks: Some(1) (per-book sizes); audiobook: edition duration; album: track minutes.
+            Target::Book(b) => size_runtime_minutes(self.target.family(), b.runtime_minutes),
+            Target::Album(a) => size_runtime_minutes(QualityFamily::Music, a.runtime_minutes),
         }
     }
 
@@ -329,6 +490,7 @@ impl<'a> Evaluator<'a> {
                 Target::Series { series, .. } => {
                     t.series_id == Some(series.id) && t.episode_ids.iter().any(|e| c.episode_ids.contains(e))
                 }
+                Target::Book(_) | Target::Album(_) => t.content == self.target.content(),
             };
             covers
                 && t.release
@@ -345,7 +507,7 @@ impl<'a> Evaluator<'a> {
         kind: SearchKind,
         extra: Vec<Rejection>,
     ) -> Decision {
-        let Some(profile) = self.shared.profiles.get(&self.target.profile_id()) else {
+        let Some(profile) = self.profile() else {
             return Decision {
                 accepted: false,
                 rejections: vec![rejection(
@@ -364,7 +526,7 @@ impl<'a> Evaluator<'a> {
         let queued = |c: &ReleaseCandidate| self.queued(c, profile);
         let mut ctx = DecisionContext::new(profile, self.shared.now);
         ctx.formats = &self.shared.formats;
-        ctx.definitions = &self.shared.definitions;
+        ctx.definitions = self.definitions();
         ctx.existing = self.existing(c);
         ctx.runtime_minutes = self.runtime();
         ctx.episode_count = (c.episode_ids.len() as u32).max(1);

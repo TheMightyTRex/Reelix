@@ -1,12 +1,37 @@
 //! `media_server_availability` (every 6 h): records which library movies/series exist on each
 //! media server (matched by TMDB, then TVDB/IMDb ids).
+//!
+//! Only movie/TV servers take part ([`tracks_availability`]); book and music servers
+//! (Audiobookshelf, Kavita, Calibre-Web, Navidrome) are refreshed after imports instead
+//! ([`servers_for`], used by [`super::bridge::LibraryRefresher`]).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use reelix_api_types::integrations::{MediaServerAvailabilityDto, MediaServerSyncDto};
-use reelix_core::MediaKind;
+use reelix_core::{ContentKind, MediaKind};
 use reelix_db::{Db, from_ms, now_ms};
-use reelix_mediaserver::MsItem;
+use reelix_mediaserver::{MediaServer, MsItem};
+use reelix_providers::ProviderRow;
+
+/// Whether a server's library is matched against movies/series (Jellyfin, Emby, Plex).
+pub fn tracks_availability(server: &dyn MediaServer) -> bool {
+    server
+        .content_kinds()
+        .iter()
+        .any(|k| matches!(k, ContentKind::Movie | ContentKind::Series))
+}
+
+/// Enabled servers that serve `kind` (the ones to refresh after importing it).
+pub fn servers_for(
+    servers: Vec<(ProviderRow, Arc<dyn MediaServer>)>,
+    kind: ContentKind,
+) -> Vec<(ProviderRow, Arc<dyn MediaServer>)> {
+    servers
+        .into_iter()
+        .filter(|(row, server)| row.enabled && server.content_kinds().contains(&kind))
+        .collect()
+}
 
 fn kind_str(k: MediaKind) -> &'static str {
     match k {

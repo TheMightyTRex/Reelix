@@ -4,12 +4,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
+use reelix_core::{BookFormat, ContentKind};
 use reelix_decision::SearchKind;
 use reelix_import::matching::ExpectedEpisode;
 use reelix_indexers::ReleaseInfo;
 
 use super::context::{Evaluator, Target};
-use super::mapping::{Mapped, MediaIndex, expected_episodes};
+use super::mapping::{Mapped, MediaIndex, expected_episodes, release_kind};
 use super::{Result, SearchService, SearchSummary, episode_wanted, lock};
 
 impl SearchService {
@@ -96,9 +97,46 @@ impl SearchService {
         let mut movies_hit: BTreeMap<i64, Vec<ReleaseInfo>> = BTreeMap::new();
         let mut series_hit: BTreeMap<i64, Vec<ReleaseInfo>> = BTreeMap::new();
         let mut seen = std::collections::HashSet::new();
+        let mut books_hit: BTreeMap<(i64, BookFormat), Vec<ReleaseInfo>> = BTreeMap::new();
+        let mut albums_hit: BTreeMap<i64, Vec<ReleaseInfo>> = BTreeMap::new();
         for r in releases {
             if !seen.insert((r.indexer_id, r.guid.clone())) {
                 continue;
+            }
+            // Book / music categories go to the books and music libraries only.
+            match release_kind(&r) {
+                Some(k @ (ContentKind::Ebook | ContentKind::Audiobook)) => {
+                    if let Some(books) = self.books.get() {
+                        let hint = if k == ContentKind::Audiobook {
+                            BookFormat::Audiobook
+                        } else {
+                            BookFormat::Ebook
+                        };
+                        let parsed = reelix_parser::parse_book(&r.title, Some(hint));
+                        match books.search_api().match_release(&parsed).await {
+                            Ok(Some(key)) => books_hit.entry(key).or_default().push(r),
+                            Ok(None) => {}
+                            Err(e) => {
+                                tracing::warn!(title = %r.title, error = %e, "RSS: book matching failed")
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Some(ContentKind::Music) => {
+                    if let Some(music) = self.music.get() {
+                        let parsed = reelix_parser::parse_music(&r.title);
+                        match music.search_api().match_release(&parsed).await {
+                            Ok(Some(id)) => albums_hit.entry(id).or_default().push(r),
+                            Ok(None) => {}
+                            Err(e) => {
+                                tracing::warn!(title = %r.title, error = %e, "RSS: album matching failed")
+                            }
+                        }
+                    }
+                    continue;
+                }
+                _ => {}
             }
             let parsed = reelix_parser::parse(&r.title);
             match index.map(&r, &parsed) {
@@ -142,6 +180,54 @@ impl SearchService {
             self.grab_best(shared, &t, evals, &wanted, false, &mut sum)
                 .await?;
         }
+        if !books_hit.is_empty() || !albums_hit.is_empty() {
+            shared.load_content(&self.db).await?;
+        }
+        for ((id, format), infos) in books_hit {
+            let Some(books) = self.books.get() else { break };
+            // Only monitored formats that are missing or below the cutoff.
+            let wanted = books
+                .search_api()
+                .targets(&[id], Some(format), reelix_books::Wanted::MissingOrCutoff)
+                .await;
+            let Some(b) = wanted.ok().and_then(|mut v| v.pop()) else {
+                continue;
+            };
+            let t = Target::Book(Box::new(b));
+            self.rss_content(shared, &t, infos, &mut sum).await?;
+        }
+        for (id, infos) in albums_hit {
+            let Some(music) = self.music.get() else { break };
+            let wanted = music
+                .search_api()
+                .targets(&[id], reelix_music::Wanted::MissingOrCutoff)
+                .await;
+            let Some(a) = wanted
+                .ok()
+                .and_then(|mut v| v.pop())
+                .filter(|a| a.album.monitored && a.artist.monitored)
+            else {
+                continue;
+            };
+            let t = Target::Album(Box::new(a));
+            self.rss_content(shared, &t, infos, &mut sum).await?;
+        }
         Ok(sum)
+    }
+
+    async fn rss_content(
+        &self,
+        shared: &mut super::Shared,
+        t: &Target,
+        infos: Vec<ReleaseInfo>,
+        sum: &mut SearchSummary,
+    ) -> Result<()> {
+        let evals = {
+            let ev = Evaluator::new(&self.db, shared, t).await?;
+            self.evaluate_all(&ev, infos, SearchKind::Rss, None)
+        };
+        sum.searched += 1;
+        self.grab_best(shared, t, evals, &[], false, sum).await?;
+        Ok(())
     }
 }

@@ -56,6 +56,12 @@ impl ActivityService {
                 let t = tracked::by_download_id(&self.db, d)
                     .await?
                     .ok_or_else(|| ActivityError::not_found("download", d))?;
+                if !t.content.is_empty() {
+                    return Err(ActivityError::validation(
+                        "manual import handles movies and episodes; retry the import of this book / album \
+                         download from the queue instead",
+                    ));
+                }
                 let path = t
                     .output_path
                     .clone()

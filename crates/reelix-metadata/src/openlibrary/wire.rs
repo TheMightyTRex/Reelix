@@ -48,6 +48,13 @@ pub(super) struct SearchWorks {
     pub docs: Vec<SearchWorkDoc>,
 }
 
+/// `/trending/{period}.json`: the same documents as search, under `works`.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub(super) struct TrendingWorks {
+    pub works: Vec<SearchWorkDoc>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub(super) struct SearchWorkDoc {

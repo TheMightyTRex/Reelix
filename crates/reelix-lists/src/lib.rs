@@ -1,5 +1,7 @@
 //! Import list adapters: TMDB, Trakt, IMDb, MDBList, Plex watchlist, Jellyfin/Emby favourites,
-//! generic JSON URL lists and other Reelix instances.
+//! generic JSON URL lists and other Reelix instances (movies/series), plus Last.fm, ListenBrainz
+//! and Spotify (music: artists and albums, see [`ListContent::Music`] and
+//! [`ImportList::fetch_music`]).
 //!
 //! Every adapter implements [`ImportList`], publishes a [`ProviderSchema`] via [`schemas`] and is
 //! constructed from a validated settings object via [`build`]. Upstream base URLs default to the
@@ -9,9 +11,12 @@
 mod common;
 pub mod imdb;
 pub mod jellyfin;
+pub mod lastfm;
+pub mod listenbrainz;
 pub mod mdblist;
 pub mod plex;
 pub mod reelix;
+pub mod spotify;
 pub mod tmdb;
 pub mod trakt;
 pub mod url_list;
@@ -59,6 +64,117 @@ impl ListItem {
     }
 }
 
+/// What a list yields: movies/series ([`ImportList::fetch`]) or music ([`ImportList::fetch_music`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ListContent {
+    #[default]
+    Video,
+    Music,
+}
+
+impl ListContent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Video => "video",
+            Self::Music => "music",
+        }
+    }
+}
+
+/// Content of an implementation id (without building it); unknown ids are `Video`.
+pub fn content_of(implementation: &str) -> ListContent {
+    match implementation {
+        lastfm::IMPLEMENTATION | listenbrainz::IMPLEMENTATION | spotify::IMPLEMENTATION => ListContent::Music,
+        _ => ListContent::Video,
+    }
+}
+
+/// Whether a music list entry is an artist or an album (release group).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MusicItemKind {
+    Artist,
+    Album,
+}
+
+/// One entry of a music import list. MusicBrainz ids are set when the source knows them
+/// (ListenBrainz, Last.fm artists); otherwise the sync matches by name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MusicListItem {
+    pub kind: MusicItemKind,
+    /// Artist name (the album's primary artist for albums).
+    pub artist_name: String,
+    pub artist_mbid: Option<String>,
+    /// Album title (albums only).
+    pub album_title: Option<String>,
+    /// MusicBrainz release-group id (albums only).
+    pub album_mbid: Option<String>,
+    pub year: Option<i32>,
+    /// Album barcode when the source reports it (Spotify).
+    pub upc: Option<String>,
+}
+
+impl MusicListItem {
+    pub fn artist(name: impl Into<String>, mbid: Option<String>) -> Self {
+        Self {
+            kind: MusicItemKind::Artist,
+            artist_name: name.into(),
+            artist_mbid: mbid,
+            album_title: None,
+            album_mbid: None,
+            year: None,
+            upc: None,
+        }
+    }
+
+    pub fn album(
+        title: impl Into<String>,
+        artist: impl Into<String>,
+        release_group_mbid: Option<String>,
+    ) -> Self {
+        Self {
+            kind: MusicItemKind::Album,
+            album_title: Some(title.into()),
+            album_mbid: release_group_mbid,
+            ..Self::artist(artist, None)
+        }
+    }
+
+    /// Human-readable label for logs (`Artist` or `Artist – Album`).
+    pub fn label(&self) -> String {
+        match &self.album_title {
+            Some(t) => format!("{} – {t}", self.artist_name),
+            None => self.artist_name.clone(),
+        }
+    }
+}
+
+/// Removes duplicate music entries (same kind and MBID, else same lower-cased names).
+pub fn dedupe_music(items: Vec<MusicListItem>) -> Vec<MusicListItem> {
+    let mut seen: HashSet<(MusicItemKind, String)> = HashSet::new();
+    items
+        .into_iter()
+        .filter(|i| {
+            let key = match i.kind {
+                MusicItemKind::Artist => match &i.artist_mbid {
+                    Some(m) => format!("mbid:{m}"),
+                    None => format!("name:{}", i.artist_name.to_lowercase()),
+                },
+                MusicItemKind::Album => match &i.album_mbid {
+                    Some(m) => format!("mbid:{m}"),
+                    None => format!(
+                        "name:{}:{}",
+                        i.artist_name.to_lowercase(),
+                        i.album_title.as_deref().unwrap_or_default().to_lowercase()
+                    ),
+                },
+            };
+            seen.insert((i.kind, key))
+        })
+        .collect()
+}
+
 /// Errors from list adapters.
 #[derive(Debug, thiserror::Error)]
 pub enum ListError {
@@ -96,8 +212,19 @@ pub trait ImportList: Send + Sync {
     /// Implementation id, matching [`ProviderSchema::implementation`].
     fn implementation(&self) -> &'static str;
 
+    /// What this list yields; music lists implement [`fetch_music`](Self::fetch_music).
+    fn content(&self) -> ListContent {
+        ListContent::Video
+    }
+
     /// Fetches the full list (all pages up to the adapter's limits), de-duplicated.
+    /// Music lists return an empty list here.
     async fn fetch(&self) -> Result<Vec<ListItem>, ListError>;
+
+    /// Fetches a music list's artists / albums, de-duplicated (empty for video lists).
+    async fn fetch_music(&self) -> Result<Vec<MusicListItem>, ListError> {
+        Ok(Vec::new())
+    }
 
     /// Verifies credentials and that the list exists.
     async fn test(&self) -> Result<(), ListError> {
@@ -115,6 +242,13 @@ pub struct BaseUrls {
     pub mdblist: String,
     /// Plex discover service used for the account watchlist.
     pub plex_discover: String,
+    /// Last.fm web service root (`/2.0/` is appended).
+    pub lastfm: String,
+    pub listenbrainz: String,
+    /// Spotify Web API root (`/v1/…` is appended).
+    pub spotify_api: String,
+    /// Spotify accounts service (`/api/token`).
+    pub spotify_accounts: String,
 }
 
 impl Default for BaseUrls {
@@ -125,6 +259,10 @@ impl Default for BaseUrls {
             imdb: "https://www.imdb.com".into(),
             mdblist: "https://api.mdblist.com".into(),
             plex_discover: "https://discover.provider.plex.tv".into(),
+            lastfm: "https://ws.audioscrobbler.com".into(),
+            listenbrainz: "https://api.listenbrainz.org".into(),
+            spotify_api: "https://api.spotify.com".into(),
+            spotify_accounts: "https://accounts.spotify.com".into(),
         }
     }
 }
@@ -153,7 +291,11 @@ impl BuildContext {
             trakt: b.clone(),
             imdb: b.clone(),
             mdblist: b.clone(),
-            plex_discover: b,
+            plex_discover: b.clone(),
+            lastfm: b.clone(),
+            listenbrainz: b.clone(),
+            spotify_api: b.clone(),
+            spotify_accounts: b,
         };
         self
     }
@@ -171,6 +313,9 @@ pub fn schemas() -> Vec<ProviderSchema> {
         jellyfin::schema(jellyfin::Flavor::Emby),
         url_list::schema(),
         reelix::schema(),
+        lastfm::schema(),
+        listenbrainz::schema(),
+        spotify::schema(),
     ]
 }
 
@@ -198,6 +343,11 @@ pub fn build(
         )?),
         url_list::IMPLEMENTATION => Box::new(url_list::UrlList::from_settings(settings, ctx)?),
         reelix::IMPLEMENTATION => Box::new(reelix::ReelixList::from_settings(settings, ctx)?),
+        lastfm::IMPLEMENTATION => Box::new(lastfm::LastFmList::from_settings(settings, ctx)?),
+        listenbrainz::IMPLEMENTATION => {
+            Box::new(listenbrainz::ListenBrainzList::from_settings(settings, ctx)?)
+        }
+        spotify::IMPLEMENTATION => Box::new(spotify::SpotifyList::from_settings(settings, ctx)?),
         other => return Err(ListError::UnknownImplementation(other.into())),
     })
 }
@@ -251,7 +401,13 @@ mod tests {
     #[test]
     fn every_schema_has_sync_interval_and_builds_unknown_fails() {
         let all = schemas();
-        assert_eq!(all.len(), 9);
+        assert_eq!(all.len(), 12);
+        let music: Vec<_> = all
+            .iter()
+            .filter(|s| content_of(&s.implementation) == ListContent::Music)
+            .map(|s| s.implementation.as_str())
+            .collect();
+        assert_eq!(music, ["lastfm", "listenbrainz", "spotify"]);
         for s in &all {
             assert!(
                 s.fields.iter().any(|f| f.name == SYNC_INTERVAL_FIELD),
@@ -301,5 +457,19 @@ mod tests {
         let e = ListItem::new(MediaKind::Movie, "X");
         let out = dedupe(vec![a.clone(), b, c.clone(), d.clone(), e.clone(), e.clone()]);
         assert_eq!(out, vec![a, c, d, e]);
+    }
+
+    #[test]
+    fn dedupe_music_by_mbid_or_name() {
+        let a = MusicListItem::artist("Radiohead", Some("m1".into()));
+        let b = MusicListItem::artist("radiohead", Some("m1".into()));
+        let c = MusicListItem::artist("Radiohead", None);
+        let d = MusicListItem::artist("RADIOHEAD", None);
+        let e = MusicListItem::album("OK Computer", "Radiohead", None);
+        let f = MusicListItem::album("ok computer", "radiohead", None);
+        assert_eq!(
+            dedupe_music(vec![a.clone(), b, c.clone(), d, e.clone(), f]),
+            vec![a, c, e]
+        );
     }
 }

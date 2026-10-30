@@ -3,7 +3,7 @@ use reelix_core::Protocol;
 use reelix_db::{Db, Result, from_ms, now_ms};
 use reelix_parser::{Language, QualityModel};
 
-use super::{from_json, json, parse_protocol, protocol_str};
+use super::{ContentRef, from_json, json, parse_protocol, protocol_str};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NewBlocklist {
@@ -19,6 +19,8 @@ pub struct NewBlocklist {
     pub publish_date: Option<DateTime<Utc>>,
     pub torrent_info_hash: Option<String>,
     pub message: Option<String>,
+    /// Book (format) / album.
+    pub content: ContentRef,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +39,7 @@ pub struct BlocklistEntry {
     pub torrent_info_hash: Option<String>,
     pub message: Option<String>,
     pub date: DateTime<Utc>,
+    pub content: ContentRef,
 }
 
 #[derive(sqlx::FromRow)]
@@ -55,6 +58,9 @@ struct Row {
     torrent_info_hash: Option<String>,
     message: Option<String>,
     date: i64,
+    book_id: Option<i64>,
+    book_format: Option<String>,
+    album_id: Option<i64>,
 }
 
 impl From<Row> for BlocklistEntry {
@@ -74,18 +80,19 @@ impl From<Row> for BlocklistEntry {
             torrent_info_hash: r.torrent_info_hash,
             message: r.message,
             date: from_ms(r.date),
+            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
         }
     }
 }
 
 const COLS: &str = "id, movie_id, series_id, episode_ids, source_title, quality, languages, protocol, \
-    indexer, size, publish_date, torrent_info_hash, message, date";
+    indexer, size, publish_date, torrent_info_hash, message, date, book_id, book_format, album_id";
 
 pub async fn insert(db: &Db, b: &NewBlocklist) -> Result<i64> {
     let id = sqlx::query_scalar(
         "INSERT INTO blocklist (movie_id, series_id, episode_ids, source_title, quality, languages, protocol, \
-         indexer, size, publish_date, torrent_info_hash, message, date) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         indexer, size, publish_date, torrent_info_hash, message, date, book_id, book_format, album_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(b.movie_id)
     .bind(b.series_id)
@@ -100,6 +107,9 @@ pub async fn insert(db: &Db, b: &NewBlocklist) -> Result<i64> {
     .bind(b.torrent_info_hash.as_deref().map(str::to_ascii_lowercase))
     .bind(&b.message)
     .bind(now_ms())
+    .bind(b.content.book_id)
+    .bind(b.content.format_str())
+    .bind(b.content.album_id)
     .fetch_one(db.pool())
     .await?;
     Ok(id)
@@ -131,6 +141,24 @@ pub async fn for_media(
     ))
     .bind(movie_id)
     .bind(series_id)
+    .fetch_all(db.pool())
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Entries for one book format (a book's entries without a format count for every format) or
+/// one album.
+pub async fn for_content(db: &Db, c: &ContentRef) -> Result<Vec<BlocklistEntry>> {
+    if c.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<Row> = sqlx::query_as(&format!(
+        "SELECT {COLS} FROM blocklist WHERE (?1 IS NOT NULL AND book_id = ?1 AND (book_format IS NULL OR ?2 IS NULL \
+         OR book_format = ?2)) OR (?3 IS NOT NULL AND album_id = ?3)"
+    ))
+    .bind(c.book_id)
+    .bind(c.format_str())
+    .bind(c.album_id)
     .fetch_all(db.pool())
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())

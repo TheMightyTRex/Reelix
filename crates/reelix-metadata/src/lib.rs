@@ -1,5 +1,6 @@
 //! Metadata providers: TMDB (primary), TVDB (optional, anime/absolute numbering),
-//! TheXEM scene-numbering mappings, Open Library (books) and MusicBrainz (music).
+//! TheXEM scene-numbering mappings, Open Library (books), MusicBrainz (music) and ListenBrainz
+//! (music charts and new releases).
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), reelix_metadata::MetaError> {
@@ -13,6 +14,7 @@
 
 pub mod books;
 pub mod http;
+pub mod listenbrainz;
 pub mod model;
 pub mod music;
 pub mod musicbrainz;
@@ -27,6 +29,7 @@ use reelix_core::provider::{FieldKind, FieldSchema, ProviderSchema};
 use serde::{Deserialize, Serialize};
 
 pub use books::*;
+pub use listenbrainz::{ChartAlbum, ListenBrainz, ListenBrainzOptions, StatsRange};
 pub use model::*;
 pub use music::*;
 pub use musicbrainz::{MusicBrainz, MusicBrainzOptions};

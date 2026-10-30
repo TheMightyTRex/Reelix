@@ -56,6 +56,7 @@ impl From<SearchError> for ApiError {
             },
             SearchError::Library(l) => l.into(),
             SearchError::Db(d) => ApiError::internal(d),
+            SearchError::Internal(m) => ApiError::internal(m),
         }
     }
 }
@@ -68,7 +69,8 @@ fn require(user: &CurrentUser) -> ApiResult<()> {
     user.require(Permissions::MANAGE_LIBRARY)
 }
 
-/// Interactive search: every release from interactive-enabled indexers, with its decision.
+/// Interactive search for a movie, season, episode, book format (`book_id` + optional
+/// `book_format`) or album: every release from interactive-enabled indexers, with its decision.
 #[utoipa::path(get, path = "/api/v1/releases", tag = "pipeline", params(ReleaseQuery),
     security(("session" = []), ("api_key" = [])),
     responses(

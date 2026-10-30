@@ -137,6 +137,30 @@ pub(crate) fn imdb_id(s: Option<String>) -> Option<String> {
     s.filter(|s| s.len() > 2 && s.starts_with("tt") && s[2..].bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Normalises a MusicBrainz id (lower-case UUID), rejecting anything else.
+pub(crate) fn mbid(s: Option<String>) -> Option<String> {
+    let s = s?.trim().to_ascii_lowercase();
+    let ok = s.len() == 36
+        && s.char_indices().all(|(i, c)| {
+            if [8, 13, 18, 23].contains(&i) {
+                c == '-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        });
+    ok.then_some(s)
+}
+
+/// The id after `musicbrainz.org/<entity>/` in a URL (JSPF identifiers), or a bare MBID.
+pub(crate) fn mbid_from_url(s: &str, entity: &str) -> Option<String> {
+    let needle = format!("musicbrainz.org/{entity}/");
+    let id = match s.split_once(&needle) {
+        Some((_, rest)) => rest.split(['/', '?', '#']).next().unwrap_or_default(),
+        None => s,
+    };
+    mbid(Some(id.to_string()))
+}
+
 pub(crate) fn sync_interval_field() -> FieldSchema {
     FieldSchema::new(SYNC_INTERVAL_FIELD, "Sync interval (hours)", FieldKind::Number)
         .default_value(DEFAULT_SYNC_INTERVAL_HOURS)
@@ -206,5 +230,12 @@ mod tests {
         assert_eq!(value_u64(Some(&Value::String("42".into()))), Some(42));
         assert_eq!(imdb_id(Some("tt0133093".into())).as_deref(), Some("tt0133093"));
         assert_eq!(imdb_id(Some("nm0000206".into())), None);
+        let id = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
+        assert_eq!(mbid(Some(id.to_uppercase())).as_deref(), Some(id));
+        assert_eq!(mbid(Some("nope".into())), None);
+        assert_eq!(
+            mbid_from_url(&format!("https://musicbrainz.org/artist/{id}"), "artist").as_deref(),
+            Some(id)
+        );
     }
 }

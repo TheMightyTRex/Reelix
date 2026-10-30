@@ -458,7 +458,18 @@ async fn plextv_watchlist_resolves_missing_ids() {
 fn schemas_and_settings_validation() {
     let s = schemas();
     let ids: Vec<_> = s.iter().map(|s| s.implementation.as_str()).collect();
-    assert_eq!(ids, ["jellyfin", "emby", "plex"]);
+    assert_eq!(
+        ids,
+        [
+            "jellyfin",
+            "emby",
+            "plex",
+            "audiobookshelf",
+            "kavita",
+            "calibreweb",
+            "navidrome"
+        ]
+    );
     for schema in &s {
         assert!(schema.secret_fields().count() >= 1);
         assert!(matches!(

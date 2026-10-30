@@ -1,5 +1,8 @@
 //! `/requests` — every request the user may see, with filters, inline approve/decline,
-//! bulk actions and a detail drawer. Requesters only see their own.
+//! bulk actions and a detail drawer. Requesters only see their own. The type filter also
+//! switches to book / album requests ([`content`]).
+
+pub mod content;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -21,7 +24,7 @@ use crate::components::{ConfirmDialog, EmptyState, ErrorBox, Icon, Modal, PageHe
 use crate::format;
 use crate::state::{AuthState, Toasts};
 
-const PAGE_SIZE: u32 = 25;
+pub(crate) const PAGE_SIZE: u32 = 25;
 
 /// Status filter tabs: (query value, label).
 const TABS: &[(&str, &str)] = &[
@@ -87,8 +90,14 @@ pub fn RequestsPage() -> impl IntoView {
     let decline_reason = RwSignal::new(String::new());
     let delete_open = RwSignal::new(false);
     let edit_open = RwSignal::new(false);
+    // Book / album requests are listed by their own table.
+    let content_mode = move || matches!(kind.get().as_str(), "media" | "book" | "music");
+    let has_content = move || {
+        auth.has_any(Permissions::REQUEST_BOOK | Permissions::REQUEST_MUSIC | Permissions::VIEW_REQUESTS)
+    };
 
     let list = LocalResource::new(move || {
+        let skip = content_mode();
         let mut q = format!(
             "/requests?status={}&sort={}&page={}&page_size={PAGE_SIZE}",
             status.get(),
@@ -103,7 +112,17 @@ pub fn RequestsPage() -> impl IntoView {
         if !u.is_empty() {
             q.push_str(&format!("&user_id={u}"));
         }
-        async move { api::get::<RequestPageDto>(&q).await }
+        async move {
+            if skip {
+                return Ok(RequestPageDto {
+                    items: Vec::new(),
+                    total: 0,
+                    page: 1,
+                    page_size: PAGE_SIZE,
+                });
+            }
+            api::get::<RequestPageDto>(&q).await
+        }
     });
     let counts = LocalResource::new(|| api::get::<RequestCountsDto>("/requests/count"));
     let users = LocalResource::new(move || {
@@ -248,7 +267,7 @@ pub fn RequestsPage() -> impl IntoView {
 
     let bulk_bar = move || {
         let ids = selected.get();
-        (!ids.is_empty() && can_manage()).then(|| {
+        (!ids.is_empty() && can_manage() && !content_mode()).then(|| {
             let (a, d, x) = (ids.clone(), ids.clone(), ids.clone());
             view! {
                 <div class="bulk-bar" role="toolbar" aria-label="Bulk actions">
@@ -469,6 +488,11 @@ pub fn RequestsPage() -> impl IntoView {
                 <option value="">"Movies & series"</option>
                 <option value="movie">"Movies"</option>
                 <option value="series">"Series"</option>
+                {move || has_content().then(|| view! {
+                    <option value="media">"Books & music"</option>
+                    <option value="book">"Books"</option>
+                    <option value="music">"Music"</option>
+                })}
             </select>
             {user_filter}
             <select class="input input-sm" aria-label="Sort" prop:value=move || sort.get()
@@ -479,7 +503,14 @@ pub fn RequestsPage() -> impl IntoView {
             </select>
         </div>
         {bulk_bar}
-        <div class="card"><div class="card-body flush">{rows}</div></div>
+        {move || if content_mode() {
+            view! {
+                <content::ContentRequestTable status=status kind=kind sort=sort user_id=user_id page=page
+                    on_change=Callback::new(move |()| counts.refetch()) />
+            }.into_any()
+        } else {
+            view! { <div class="card"><div class="card-body flush">{rows()}</div></div> }.into_any()
+        }}
 
         <Drawer open=drawer_open title=drawer_title>
             {drawer_body}

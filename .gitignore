@@ -1,9 +1,58 @@
+# Build output
 /target
-/data
+**/target
 /crates/reelix-web/dist
+
+# Local runtime data (SQLite, secret.key, config.toml, backups)
+/data
+/dev-data
+/crates/*/data
+/backups
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+/secret.key
+/config.toml
+/*.zip
+
+# Environment and local Docker overrides (keep the .example files tracked)
 .env
-/crates/*/data
+.env.*
+!.env.example
+/docker/docker-compose.yml
+/docker/docker-compose.override.yml
+/docker-compose.yml
+/docker-compose.override.yml
+
+# Logs
 *.log
+
+# Coverage, profiling and test tooling output
+lcov.info
+*.profraw
+*.profdata
+tarpaulin-report.*
+cobertura.xml
+/coverage
+/mutants.out
+/mutants.out.old
+/fuzz/artifacts
+/fuzz/corpus
+/fuzz/coverage
+
+# Editors
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+*:Zone.Identifier

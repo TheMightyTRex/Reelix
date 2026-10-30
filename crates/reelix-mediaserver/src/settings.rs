@@ -24,6 +24,16 @@ impl Settings {
             .ok_or_else(|| MsError::InvalidSettings(format!("{key} is required")))
     }
 
+    /// A boolean flag (`true`/`false`, or `"true"`/`"1"` strings); `default` when unset.
+    pub fn bool(&self, key: &str, default: bool) -> bool {
+        match self.0.get(key) {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::String(s)) => matches!(s.trim(), "true" | "1" | "yes"),
+            Some(Value::Number(n)) => n.as_i64().is_some_and(|n| n != 0),
+            _ => default,
+        }
+    }
+
     /// An absolute http(s) URL with any trailing slash removed.
     pub fn url(&self, key: &str) -> Result<String, MsError> {
         let raw = self.str(key)?;

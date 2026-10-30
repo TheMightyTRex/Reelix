@@ -3,7 +3,7 @@ use reelix_core::Protocol;
 use reelix_db::{Db, Result, from_ms, now_ms};
 use serde::{Deserialize, Serialize};
 
-use super::{GrabbedRelease, from_json, json, parse_protocol, protocol_str};
+use super::{ContentRef, GrabbedRelease, from_json, json, parse_protocol, protocol_str};
 
 /// Lifecycle of a download Reelix is responsible for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +85,8 @@ pub struct TrackedDownload {
     pub series_id: Option<i64>,
     pub episode_ids: Vec<i64>,
     pub release: Option<GrabbedRelease>,
+    /// Book / album the download is for (set with [`set_content`]).
+    pub content: ContentRef,
     pub state: TrackedState,
     pub status_messages: Vec<String>,
     pub output_path: Option<String>,
@@ -108,6 +110,9 @@ struct Row {
     output_path: Option<String>,
     added: i64,
     updated: i64,
+    book_id: Option<i64>,
+    book_format: Option<String>,
+    album_id: Option<i64>,
 }
 
 impl From<Row> for TrackedDownload {
@@ -122,6 +127,7 @@ impl From<Row> for TrackedDownload {
             series_id: r.series_id,
             episode_ids: from_json(&r.episode_ids),
             release: serde_json::from_str(&r.release).ok(),
+            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
             state: TrackedState::parse(&r.state).unwrap_or(TrackedState::Downloading),
             status_messages: from_json(&r.status_messages),
             output_path: r.output_path,
@@ -132,7 +138,7 @@ impl From<Row> for TrackedDownload {
 }
 
 const COLS: &str = "id, download_client_id, download_id, protocol, title, movie_id, series_id, episode_ids, \
-    release, state, status_messages, output_path, added, updated";
+    release, state, status_messages, output_path, added, updated, book_id, book_format, album_id";
 
 /// Inserts a new tracked download (state `downloading`); an existing (client, download id) row is replaced.
 pub async fn insert(db: &Db, t: &NewTracked) -> Result<i64> {
@@ -142,7 +148,8 @@ pub async fn insert(db: &Db, t: &NewTracked) -> Result<i64> {
          episode_ids, release, state, added, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'downloading', ?, ?) \
          ON CONFLICT (download_client_id, download_id) DO UPDATE SET title = excluded.title, \
          movie_id = excluded.movie_id, series_id = excluded.series_id, episode_ids = excluded.episode_ids, \
-         release = excluded.release, state = 'downloading', status_messages = '[]', updated = excluded.updated \
+         release = excluded.release, state = 'downloading', status_messages = '[]', updated = excluded.updated, \
+         book_id = NULL, book_format = NULL, album_id = NULL \
          RETURNING id",
     )
     .bind(t.download_client_id)
@@ -158,6 +165,21 @@ pub async fn insert(db: &Db, t: &NewTracked) -> Result<i64> {
     .fetch_one(db.pool())
     .await?;
     Ok(id)
+}
+
+/// Points a download at a book (format) or album.
+pub async fn set_content(db: &Db, id: i64, c: &ContentRef) -> Result<()> {
+    sqlx::query(
+        "UPDATE tracked_downloads SET book_id = ?, book_format = ?, album_id = ?, updated = ? WHERE id = ?",
+    )
+    .bind(c.book_id)
+    .bind(c.format_str())
+    .bind(c.album_id)
+    .bind(now_ms())
+    .bind(id)
+    .execute(db.pool())
+    .await?;
+    Ok(())
 }
 
 pub async fn get(db: &Db, id: i64) -> Result<Option<TrackedDownload>> {

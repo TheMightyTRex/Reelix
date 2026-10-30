@@ -10,12 +10,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::requests::{
+    ContentRequestDto, ContentRequestOptionsQuery, ContentRequestPageDto, CreateContentRequestDto,
+    UpdateContentRequestDto,
+};
+use reelix_api_types::requests::{
     CreateCommentDto, CreateIssueDto, CreateRequestDto, DeclineRequestDto, IssueCountsDto, IssueDto,
     IssueListQuery, IssuePageDto, IssueStatus, NotificationPrefsDto, QuotaDto, RequestCountsDto, RequestDto,
     RequestListQuery, RequestOptionsDto, RequestOptionsQuery, RequestPageDto, RequestSettingsDto,
     UpdateIssueDto, UpdateRequestDto,
 };
-use reelix_core::{MediaKind, Permissions};
+use reelix_core::{ContentKind, MediaKind, Permissions};
 use reelix_requests::RequestService;
 use std::sync::Arc;
 use utoipa::OpenApi;
@@ -37,6 +41,20 @@ pub fn routes() -> Router<AppState> {
         .route("/requests/{id}/approve", post(approve_request))
         .route("/requests/{id}/decline", post(decline_request))
         .route("/requests/{id}/retry", post(retry_request))
+        .route(
+            "/requests/media",
+            get(list_media_requests).post(create_media_request),
+        )
+        .route("/requests/media/options", get(media_request_options))
+        .route(
+            "/requests/media/{id}",
+            get(get_media_request)
+                .put(update_media_request)
+                .delete(delete_media_request),
+        )
+        .route("/requests/media/{id}/approve", post(approve_media_request))
+        .route("/requests/media/{id}/decline", post(decline_media_request))
+        .route("/requests/media/{id}/retry", post(retry_media_request))
         .route("/users/{id}/quota", get(user_quota))
         .route("/issues", get(list_issues).post(create_issue))
         .route("/issues/count", get(issue_counts))
@@ -56,6 +74,9 @@ pub fn routes() -> Router<AppState> {
     paths(
         list_requests, create_request, request_counts, request_options, get_request, update_request,
         delete_request, approve_request, decline_request, retry_request, user_quota,
+        list_media_requests, create_media_request, media_request_options, get_media_request,
+        update_media_request, delete_media_request, approve_media_request, decline_media_request,
+        retry_media_request,
         list_issues, create_issue, issue_counts, get_issue, update_issue, delete_issue, add_comment,
         resolve_issue, reopen_issue, get_settings, put_settings, get_prefs, put_prefs,
     ),
@@ -86,6 +107,11 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::requests::RequestSettingsDto,
         reelix_api_types::requests::RequestDefaultsDto,
         reelix_api_types::requests::NotificationPrefsDto,
+        reelix_api_types::requests::ContentRequestKind,
+        reelix_api_types::requests::ContentRequestDto,
+        reelix_api_types::requests::CreateContentRequestDto,
+        reelix_api_types::requests::UpdateContentRequestDto,
+        reelix_api_types::requests::ContentRequestPageDto,
     )),
     tags((name = "requests", description = "Media requests, approvals, quotas and issues")),
 )]
@@ -274,14 +300,7 @@ pub async fn decline_request(
     ApiPath(id): ApiPath<i64>,
     body: axum::body::Bytes,
 ) -> ApiResult<ApiJson<RequestDto>> {
-    // The body is optional: `{}` / empty = no reason.
-    let reason = if body.iter().all(u8::is_ascii_whitespace) {
-        None
-    } else {
-        serde_json::from_slice::<DeclineRequestDto>(&body)
-            .map_err(|e| ApiError::validation(format!("invalid body: {e}")))?
-            .reason
-    };
+    let reason = decline_reason(&body)?;
     Ok(ApiJson(
         svc(&state)?.decline_request(&user.user, id, reason).await?,
     ))
@@ -317,6 +336,193 @@ pub async fn user_quota(
     ApiPath(id): ApiPath<i64>,
 ) -> ApiResult<ApiJson<QuotaDto>> {
     Ok(ApiJson(svc(&state)?.quota(&user.user, id).await?))
+}
+
+// ---------------------------------------------------------------- book / album requests
+
+/// Book and album requests (own, or all with VIEW_REQUESTS), paged. `kind`: `book`,
+/// `music` or `all`; the other filters work like `GET /requests`.
+#[utoipa::path(get, path = "/api/v1/requests/media", tag = "requests", params(RequestListQuery),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Page of requests", body = ContentRequestPageDto),
+        (status = 400, description = "Bad filter", body = ApiErrorBody),
+    ))]
+pub async fn list_media_requests(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiQuery(q): ApiQuery<RequestListQuery>,
+) -> ApiResult<ApiJson<ContentRequestPageDto>> {
+    Ok(ApiJson(svc(&state)?.list_content_requests(&user.user, &q).await?))
+}
+
+/// Requests a book (REQUEST_BOOK; choose `formats`) or an album (REQUEST_MUSIC). Duplicate,
+/// availability and quota checks; auto-approved with AUTO_APPROVE_BOOK / AUTO_APPROVE_MUSIC
+/// or the auto-approve request settings.
+#[utoipa::path(post, path = "/api/v1/requests/media", tag = "requests", request_body = CreateContentRequestDto,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 201, description = "Created", body = ContentRequestDto),
+        (status = 403, description = "Not permitted or quota exceeded", body = ApiErrorBody),
+        (status = 404, description = "Unknown work / release group", body = ApiErrorBody),
+        (status = 409, description = "Already available or requested", body = ApiErrorBody),
+        (status = 502, description = "Metadata / library unavailable", body = ApiErrorBody),
+    ))]
+pub async fn create_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(dto): ApiJson<CreateContentRequestDto>,
+) -> ApiResult<Response> {
+    Ok(created(
+        svc(&state)?.create_content_request(&user.user, dto).await?,
+    ))
+}
+
+/// Profiles and root folders for advanced book/album requests (REQUEST_ADVANCED).
+#[utoipa::path(get, path = "/api/v1/requests/media/options", tag = "requests",
+    params(ContentRequestOptionsQuery),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Options", body = RequestOptionsDto),
+        (status = 403, description = "Requires REQUEST_ADVANCED", body = ApiErrorBody),
+    ))]
+pub async fn media_request_options(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiQuery(q): ApiQuery<ContentRequestOptionsQuery>,
+) -> ApiResult<ApiJson<RequestOptionsDto>> {
+    let kind = match q.kind.as_deref() {
+        None | Some("ebook" | "book") => ContentKind::Ebook,
+        Some("audiobook") => ContentKind::Audiobook,
+        Some("music" | "album") => ContentKind::Music,
+        Some(other) => return Err(ApiError::validation(format!("unknown kind {other:?}"))),
+    };
+    Ok(ApiJson(
+        svc(&state)?.content_request_options(&user.user, kind).await?,
+    ))
+}
+
+/// One book/album request.
+#[utoipa::path(get, path = "/api/v1/requests/media/{id}", tag = "requests",
+    params(("id" = i64, Path, description = "Request id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Request", body = ContentRequestDto),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn get_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<ApiJson<ContentRequestDto>> {
+    Ok(ApiJson(svc(&state)?.get_content_request(&user.user, id).await?))
+}
+
+/// Edits formats / advanced options (owner while pending, or MANAGE_REQUESTS).
+#[utoipa::path(put, path = "/api/v1/requests/media/{id}", tag = "requests", request_body = UpdateContentRequestDto,
+    params(("id" = i64, Path, description = "Request id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Updated", body = ContentRequestDto),
+        (status = 403, description = "Not permitted", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn update_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(dto): ApiJson<UpdateContentRequestDto>,
+) -> ApiResult<ApiJson<ContentRequestDto>> {
+    Ok(ApiJson(
+        svc(&state)?.update_content_request(&user.user, id, dto).await?,
+    ))
+}
+
+/// Deletes a book/album request (owner while pending/declined/failed, or MANAGE_REQUESTS).
+#[utoipa::path(delete, path = "/api/v1/requests/media/{id}", tag = "requests",
+    params(("id" = i64, Path, description = "Request id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 403, description = "Not permitted", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn delete_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<StatusCode> {
+    svc(&state)?.delete_content_request(&user.user, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Approves a book/album request: adds it to the library (request settings defaults per
+/// format) and starts a search. A failed add returns status `failed` with a `failure_reason`.
+#[utoipa::path(post, path = "/api/v1/requests/media/{id}/approve", tag = "requests",
+    params(("id" = i64, Path, description = "Request id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Approved (or failed)", body = ContentRequestDto),
+        (status = 403, description = "Requires MANAGE_REQUESTS", body = ApiErrorBody),
+        (status = 409, description = "Not pending", body = ApiErrorBody),
+    ))]
+pub async fn approve_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<ApiJson<ContentRequestDto>> {
+    Ok(ApiJson(
+        svc(&state)?.approve_content_request(&user.user, id).await?,
+    ))
+}
+
+/// Declines a book/album request with an optional reason.
+#[utoipa::path(post, path = "/api/v1/requests/media/{id}/decline", tag = "requests", request_body = DeclineRequestDto,
+    params(("id" = i64, Path, description = "Request id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Declined", body = ContentRequestDto),
+        (status = 403, description = "Requires MANAGE_REQUESTS", body = ApiErrorBody),
+        (status = 409, description = "Not pending", body = ApiErrorBody),
+    ))]
+pub async fn decline_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+    body: axum::body::Bytes,
+) -> ApiResult<ApiJson<ContentRequestDto>> {
+    let reason = decline_reason(&body)?;
+    Ok(ApiJson(
+        svc(&state)?
+            .decline_content_request(&user.user, id, reason)
+            .await?,
+    ))
+}
+
+/// Retries a failed book/album request.
+#[utoipa::path(post, path = "/api/v1/requests/media/{id}/retry", tag = "requests",
+    params(("id" = i64, Path, description = "Request id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Retried", body = ContentRequestDto),
+        (status = 409, description = "Not failed", body = ApiErrorBody),
+    ))]
+pub async fn retry_media_request(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<ApiJson<ContentRequestDto>> {
+    Ok(ApiJson(svc(&state)?.retry_content_request(&user.user, id).await?))
+}
+
+/// The optional decline body: `{}` / empty = no reason.
+fn decline_reason(body: &[u8]) -> ApiResult<Option<String>> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    Ok(serde_json::from_slice::<DeclineRequestDto>(body)
+        .map_err(|e| ApiError::validation(format!("invalid body: {e}")))?
+        .reason)
 }
 
 // ---------------------------------------------------------------- issues

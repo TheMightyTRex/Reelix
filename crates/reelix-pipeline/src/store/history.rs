@@ -4,7 +4,7 @@ use reelix_db::{Db, Result, from_ms, now_ms};
 use reelix_parser::{Language, QualityModel};
 use serde::{Deserialize, Serialize};
 
-use super::{FormatRef, from_json, json, parse_protocol, protocol_str};
+use super::{ContentRef, FormatRef, from_json, json, parse_protocol, protocol_str};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +63,10 @@ pub struct NewHistory {
     pub download_client: Option<String>,
     /// Event-specific details (paths, messages, release info…).
     pub data: serde_json::Value,
+    /// Book (format) / album of the event.
+    pub content: ContentRef,
+    pub author_id: Option<i64>,
+    pub artist_id: Option<i64>,
 }
 
 impl NewHistory {
@@ -82,6 +86,9 @@ impl NewHistory {
             indexer: None,
             download_client: None,
             data: serde_json::json!({}),
+            content: ContentRef::default(),
+            author_id: None,
+            artist_id: None,
         }
     }
 }
@@ -104,6 +111,9 @@ pub struct HistoryEntry {
     pub download_client: Option<String>,
     pub data: serde_json::Value,
     pub date: DateTime<Utc>,
+    pub content: ContentRef,
+    pub author_id: Option<i64>,
+    pub artist_id: Option<i64>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -124,6 +134,11 @@ struct Row {
     download_client: Option<String>,
     data: String,
     date: i64,
+    book_id: Option<i64>,
+    book_format: Option<String>,
+    author_id: Option<i64>,
+    album_id: Option<i64>,
+    artist_id: Option<i64>,
 }
 
 impl From<Row> for HistoryEntry {
@@ -145,6 +160,9 @@ impl From<Row> for HistoryEntry {
             download_client: r.download_client,
             data: serde_json::from_str(&r.data).unwrap_or_default(),
             date: from_ms(r.date),
+            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
+            author_id: r.author_id,
+            artist_id: r.artist_id,
         }
     }
 }
@@ -157,16 +175,22 @@ pub struct HistoryFilter {
     pub episode_id: Option<i64>,
     pub event: Option<HistoryEvent>,
     pub download_id: Option<String>,
+    pub book_id: Option<i64>,
+    pub author_id: Option<i64>,
+    pub album_id: Option<i64>,
+    pub artist_id: Option<i64>,
 }
 
 const COLS: &str = "id, event_type, movie_id, series_id, episode_id, source_title, quality, languages, \
-    custom_formats, format_score, download_id, protocol, indexer, download_client, data, date";
+    custom_formats, format_score, download_id, protocol, indexer, download_client, data, date, book_id, book_format, \
+    author_id, album_id, artist_id";
 
 pub async fn insert(db: &Db, h: &NewHistory) -> Result<i64> {
     let id = sqlx::query_scalar(
         "INSERT INTO history (event_type, movie_id, series_id, episode_id, source_title, quality, languages, \
-         custom_formats, format_score, download_id, protocol, indexer, download_client, data, date) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         custom_formats, format_score, download_id, protocol, indexer, download_client, data, date, book_id, \
+         book_format, author_id, album_id, artist_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(h.event.as_str())
     .bind(h.movie_id)
@@ -183,6 +207,11 @@ pub async fn insert(db: &Db, h: &NewHistory) -> Result<i64> {
     .bind(&h.download_client)
     .bind(h.data.to_string())
     .bind(now_ms())
+    .bind(h.content.book_id)
+    .bind(h.content.format_str())
+    .bind(h.author_id)
+    .bind(h.content.album_id)
+    .bind(h.artist_id)
     .fetch_one(db.pool())
     .await?;
     Ok(id)
@@ -206,6 +235,16 @@ pub async fn list(db: &Db, f: &HistoryFilter, offset: i64, limit: i64) -> Result
     if f.download_id.is_some() {
         wh.push_str(" AND download_id = ?");
     }
+    for (v, col) in [
+        (f.book_id, "book_id"),
+        (f.author_id, "author_id"),
+        (f.album_id, "album_id"),
+        (f.artist_id, "artist_id"),
+    ] {
+        if v.is_some() {
+            wh.push_str(&format!(" AND {col} = ?"));
+        }
+    }
     macro_rules! bind_all {
         ($q:expr) => {{
             let mut q = $q;
@@ -223,6 +262,12 @@ pub async fn list(db: &Db, f: &HistoryFilter, offset: i64, limit: i64) -> Result
             }
             if let Some(v) = &f.download_id {
                 q = q.bind(v.clone());
+            }
+            for v in [f.book_id, f.author_id, f.album_id, f.artist_id]
+                .into_iter()
+                .flatten()
+            {
+                q = q.bind(v);
             }
             q
         }};

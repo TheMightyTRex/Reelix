@@ -1,10 +1,11 @@
-//! Interactive search modal: search every indexer for one movie / season / episode, show the
-//! decision for each release (rejection reasons, custom-format score, rank) and grab one.
+//! Interactive search modal: search every indexer for one movie / season / episode / book format
+//! / album, show the decision for each release (rejection reasons, custom-format score, rank) and
+//! grab one.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use reelix_api_types::pipeline::{GrabRequest, GrabResponse, ReleaseDto, ReleaseQuery};
-use reelix_core::Protocol;
+use reelix_core::{BookFormat, Protocol};
 
 use super::history_table::{FormatScore, ProtoBadge, episodes_label, languages_label, quality_label};
 use super::library_common::{SortHeader, bytes};
@@ -52,6 +53,28 @@ impl SearchTarget {
         }
     }
 
+    /// One format of a book (`None` = the first format the author has a profile for).
+    pub fn book(book_id: i64, format: Option<BookFormat>, title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            query: ReleaseQuery {
+                book_id: Some(book_id),
+                book_format: format,
+                ..Default::default()
+            },
+        }
+    }
+
+    pub fn album(album_id: i64, title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            query: ReleaseQuery {
+                album_id: Some(album_id),
+                ..Default::default()
+            },
+        }
+    }
+
     fn url(&self) -> String {
         let q = &self.query;
         let s = |v: Option<i64>| v.map(|v| v.to_string()).unwrap_or_default();
@@ -62,6 +85,12 @@ impl SearchTarget {
                 ("series_id", s(q.series_id)),
                 ("season", q.season.map(|v| v.to_string()).unwrap_or_default()),
                 ("episode_id", s(q.episode_id)),
+                ("book_id", s(q.book_id)),
+                (
+                    "book_format",
+                    q.book_format.map(|f| f.as_str().to_string()).unwrap_or_default(),
+                ),
+                ("album_id", s(q.album_id)),
             ],
         )
     }
@@ -403,5 +432,11 @@ mod tests {
             "/releases?series_id=2&season=3"
         );
         assert_eq!(SearchTarget::episode(9, "x").url(), "/releases?episode_id=9");
+        assert_eq!(
+            SearchTarget::book(5, Some(BookFormat::Audiobook), "x").url(),
+            "/releases?book_id=5&book_format=audiobook"
+        );
+        assert_eq!(SearchTarget::book(5, None, "x").url(), "/releases?book_id=5");
+        assert_eq!(SearchTarget::album(8, "x").url(), "/releases?album_id=8");
     }
 }

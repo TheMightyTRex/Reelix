@@ -1,4 +1,5 @@
-//! Import list sync (`import_list_sync`) and the exclusion / status tables.
+//! Import list sync (`import_list_sync`) and the exclusion / status tables. Music lists
+//! ([`reelix_lists::ListContent::Music`]) are handed to [`super::music_lists`].
 
 use std::collections::HashSet;
 
@@ -10,7 +11,7 @@ use reelix_api_types::library::{
 use reelix_core::{DomainEvent, MediaKind};
 use reelix_db::{Db, from_ms, now_ms};
 use reelix_library::LibraryError;
-use reelix_lists::ListItem;
+use reelix_lists::{ListContent, ListItem};
 use reelix_metadata::ExternalSource;
 use reelix_providers::ProviderRow;
 use serde::de::DeserializeOwned;
@@ -313,25 +314,29 @@ impl IntegrationsService {
                 list_id: row.id,
                 ..Default::default()
             };
-            match list.fetch().await {
-                Err(e) => {
-                    tracing::warn!(list = %row.name, error = %e, "import list fetch failed");
-                    o.error = Some(e.to_string());
-                }
-                Ok(items) => {
-                    o.found = items.len() as u32;
-                    if opts.enabled_auto_add {
-                        self.add_items(
-                            &row,
-                            &opts,
-                            items,
-                            &roots,
-                            default_profile,
-                            &mut excluded,
-                            &mut existing,
-                            &mut o,
-                        )
-                        .await;
+            if list.content() == ListContent::Music {
+                self.sync_music_list(&row, list.as_ref(), &mut o).await?;
+            } else {
+                match list.fetch().await {
+                    Err(e) => {
+                        tracing::warn!(list = %row.name, error = %e, "import list fetch failed");
+                        o.error = Some(e.to_string());
+                    }
+                    Ok(items) => {
+                        o.found = items.len() as u32;
+                        if opts.enabled_auto_add {
+                            self.add_items(
+                                &row,
+                                &opts,
+                                items,
+                                &roots,
+                                default_profile,
+                                &mut excluded,
+                                &mut existing,
+                                &mut o,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
@@ -349,6 +354,35 @@ impl IntegrationsService {
             outcomes.push(o);
         }
         Ok(outcomes)
+    }
+
+    /// Fetches a music list and adds its artists / albums through the music service.
+    async fn sync_music_list(
+        &self,
+        row: &ProviderRow,
+        list: &dyn reelix_lists::ImportList,
+        o: &mut ListSyncOutcome,
+    ) -> sqlx::Result<()> {
+        let opts = super::music_lists::MusicListOptions::from_row(row);
+        match list.fetch_music().await {
+            Err(e) => {
+                tracing::warn!(list = %row.name, error = %e, "music import list fetch failed");
+                o.error = Some(e.to_string());
+            }
+            Ok(items) => {
+                o.found = items.len() as u32;
+                if !opts.enabled_auto_add {
+                    return Ok(());
+                }
+                let Some(music) = self.music.get() else {
+                    o.error = Some("music is not available".into());
+                    return Ok(());
+                };
+                super::music_lists::add_music_items(&self.db, music.as_ref(), &row.name, &opts, items, o)
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

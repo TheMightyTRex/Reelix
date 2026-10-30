@@ -4,7 +4,10 @@ use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
 use reelix_api_types::ApiErrorBody;
-use reelix_api_types::requests::{DiscoverPageDto, GenreDto, MediaDetailDto, PageQuery, SearchPageDto};
+use reelix_api_types::requests::{
+    BookSearchPageDto, ContentDetailDto, ContentRequestKind, ContentRowDto, DiscoverPageDto, GenreDto,
+    MediaDetailDto, MusicSearchPageDto, PageQuery, SearchPageDto,
+};
 use reelix_core::MediaKind;
 use utoipa::OpenApi;
 
@@ -17,8 +20,13 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/discover/genres/{kind}", get(genres))
+        .route("/discover/content/{kind}/{row}", get(discover_content))
         .route("/discover/{*feed}", get(discover))
         .route("/search", get(search))
+        .route("/search/books", get(search_books))
+        .route("/search/music", get(search_music))
+        .route("/media/book/{work_id}", get(book))
+        .route("/media/album/{release_group_id}", get(album))
         .route("/media/movie/{tmdb_id}", get(movie))
         .route("/media/tv/{tmdb_id}", get(tv))
         .route("/media/{kind}/{tmdb_id}/recommendations", get(recommendations))
@@ -27,7 +35,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(discover, genres, search, movie, tv, recommendations, similar),
+    paths(discover, discover_content, genres, search, movie, tv, recommendations, similar, search_books, search_music, book, album),
     components(schemas(
         reelix_api_types::requests::DiscoverItemDto,
         reelix_api_types::requests::DiscoverPageDto,
@@ -44,6 +52,15 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::requests::RequestAbilityDto,
         reelix_api_types::requests::MediaDetailDto,
         reelix_api_types::requests::PageQuery,
+        reelix_api_types::requests::ContentRequestKind,
+        reelix_api_types::requests::ContentRequestBriefDto,
+        reelix_api_types::requests::ContentItemDto,
+        reelix_api_types::requests::ArtistItemDto,
+        reelix_api_types::requests::BookSearchPageDto,
+        reelix_api_types::requests::MusicSearchPageDto,
+        reelix_api_types::requests::ContentRequestAbilityDto,
+        reelix_api_types::requests::ContentDetailDto,
+        reelix_api_types::requests::ContentRowDto,
     )),
     tags((name = "discover", description = "Discovery feeds, search and media details with availability")),
 )]
@@ -183,6 +200,111 @@ pub async fn similar(
     Ok(ApiJson(
         svc(&state)?
             .related(&user.user, kind_of(&kind)?, id, true, q.page.unwrap_or(1))
+            .await?,
+    ))
+}
+
+/// Books (Open Library works) matching `q`, with availability and request state.
+/// `isbn:…`, `olid:OL…W` and bare ISBNs look up a single work.
+#[utoipa::path(get, path = "/api/v1/search/books", tag = "discover", params(PageQuery),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Results", body = BookSearchPageDto),
+        (status = 502, description = "Open Library unavailable", body = ApiErrorBody),
+    ))]
+pub async fn search_books(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiQuery(q): ApiQuery<PageQuery>,
+) -> ApiResult<ApiJson<BookSearchPageDto>> {
+    Ok(ApiJson(
+        svc(&state)?
+            .search_books(&user.user, q.q.as_deref().unwrap_or(""))
+            .await?,
+    ))
+}
+
+/// Albums (MusicBrainz release groups, with availability and request state) and artists
+/// matching `q`.
+#[utoipa::path(get, path = "/api/v1/search/music", tag = "discover", params(PageQuery),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Results", body = MusicSearchPageDto),
+        (status = 502, description = "MusicBrainz unavailable", body = ApiErrorBody),
+    ))]
+pub async fn search_music(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiQuery(q): ApiQuery<PageQuery>,
+) -> ApiResult<ApiJson<MusicSearchPageDto>> {
+    Ok(ApiJson(
+        svc(&state)?
+            .search_music(&user.user, q.q.as_deref().unwrap_or(""))
+            .await?,
+    ))
+}
+
+/// One Discover row of books (Open Library trending and subjects) or albums (ListenBrainz new
+/// releases and charts), with availability and request state.
+#[utoipa::path(get, path = "/api/v1/discover/content/{kind}/{row}", tag = "discover",
+    params(
+        ("kind" = String, Path, description = "`book` or `music`"),
+        ("row" = String, Path, description = "Row id, e.g. `trending`, `subject-fantasy`, `new-releases`, `popular-week`"),
+    ),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Row items", body = ContentRowDto),
+        (status = 404, description = "Unknown kind or row", body = ApiErrorBody),
+        (status = 502, description = "Open Library or ListenBrainz unavailable", body = ApiErrorBody),
+    ))]
+pub async fn discover_content(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath((kind, row)): ApiPath<(String, String)>,
+) -> ApiResult<ApiJson<ContentRowDto>> {
+    let kind = ContentRequestKind::parse(&kind)
+        .ok_or_else(|| ApiError::not_found(format!("unknown content kind {kind:?}")))?;
+    Ok(ApiJson(
+        svc(&state)?.discover_content(&user.user, kind, &row).await?,
+    ))
+}
+
+/// A book's request view: availability, requests and the formats the caller may request.
+#[utoipa::path(get, path = "/api/v1/media/book/{work_id}", tag = "discover",
+    params(("work_id" = String, Path, description = "Open Library work id (`OL…W`)")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Details", body = ContentDetailDto),
+        (status = 404, description = "Unknown work", body = ApiErrorBody),
+    ))]
+pub async fn book(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<String>,
+) -> ApiResult<ApiJson<ContentDetailDto>> {
+    Ok(ApiJson(
+        svc(&state)?
+            .content_detail(&user.user, ContentRequestKind::Book, &id)
+            .await?,
+    ))
+}
+
+/// An album's request view: availability, requests and what the caller may request.
+#[utoipa::path(get, path = "/api/v1/media/album/{release_group_id}", tag = "discover",
+    params(("release_group_id" = String, Path, description = "MusicBrainz release-group id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Details", body = ContentDetailDto),
+        (status = 404, description = "Unknown release group", body = ApiErrorBody),
+    ))]
+pub async fn album(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<String>,
+) -> ApiResult<ApiJson<ContentDetailDto>> {
+    Ok(ApiJson(
+        svc(&state)?
+            .content_detail(&user.user, ContentRequestKind::Music, &id)
             .await?,
     ))
 }

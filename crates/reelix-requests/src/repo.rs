@@ -301,13 +301,12 @@ impl RequestRepo<'_> {
         rows.iter().map(map_request).collect()
     }
 
+    /// Every request of the user, of any kind (movie, series, book, music).
     pub async fn count_for_user(&self, user_id: i64) -> Result<u64> {
-        let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM requests WHERE user_id = ? AND media_kind IN ('movie', 'series')",
-        )
-        .bind(user_id)
-        .fetch_one(self.0.pool())
-        .await?;
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM requests WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_one(self.0.pool())
+            .await?;
         Ok(n as u64)
     }
 }
@@ -564,6 +563,10 @@ pub struct UserRecord {
     pub movie_quota_days: Option<u32>,
     pub tv_quota_limit: Option<u32>,
     pub tv_quota_days: Option<u32>,
+    pub book_quota_limit: Option<u32>,
+    pub book_quota_days: Option<u32>,
+    pub music_quota_limit: Option<u32>,
+    pub music_quota_days: Option<u32>,
     pub has_password: bool,
     /// Encrypted plex.tv token.
     pub plex_token: Option<String>,
@@ -608,6 +611,10 @@ fn map_user(r: &SqliteRow) -> Result<UserRecord> {
         movie_quota_days: opt_u32(r, "movie_quota_days")?,
         tv_quota_limit: opt_u32(r, "tv_quota_limit")?,
         tv_quota_days: opt_u32(r, "tv_quota_days")?,
+        book_quota_limit: opt_u32(r, "book_quota_limit")?,
+        book_quota_days: opt_u32(r, "book_quota_days")?,
+        music_quota_limit: opt_u32(r, "music_quota_limit")?,
+        music_quota_days: opt_u32(r, "music_quota_days")?,
         has_password: r.try_get::<Option<String>, _>("password_hash")?.is_some(),
         plex_token: r.try_get("plex_token")?,
         created_at: r.try_get("created_at")?,
@@ -627,6 +634,10 @@ pub struct UserEdit {
     pub movie_quota_days: Option<u32>,
     pub tv_quota_limit: Option<u32>,
     pub tv_quota_days: Option<u32>,
+    pub book_quota_limit: Option<u32>,
+    pub book_quota_days: Option<u32>,
+    pub music_quota_limit: Option<u32>,
+    pub music_quota_days: Option<u32>,
 }
 
 pub struct UserAdminRepo<'a>(pub &'a Db);
@@ -689,7 +700,8 @@ impl UserAdminRepo<'_> {
     pub async fn update(&self, id: i64, e: &UserEdit) -> Result<()> {
         sqlx::query(
             "UPDATE users SET display_name = ?, email = ?, avatar = ?, locale = ?, permissions = ?,
-                movie_quota_limit = ?, movie_quota_days = ?, tv_quota_limit = ?, tv_quota_days = ?, updated_at = ?
+                movie_quota_limit = ?, movie_quota_days = ?, tv_quota_limit = ?, tv_quota_days = ?,
+                book_quota_limit = ?, book_quota_days = ?, music_quota_limit = ?, music_quota_days = ?, updated_at = ?
              WHERE id = ?",
         )
         .bind(&e.display_name)
@@ -701,6 +713,10 @@ impl UserAdminRepo<'_> {
         .bind(e.movie_quota_days.map(i64::from))
         .bind(e.tv_quota_limit.map(i64::from))
         .bind(e.tv_quota_days.map(i64::from))
+        .bind(e.book_quota_limit.map(i64::from))
+        .bind(e.book_quota_days.map(i64::from))
+        .bind(e.music_quota_limit.map(i64::from))
+        .bind(e.music_quota_days.map(i64::from))
         .bind(now_ms())
         .bind(id)
         .execute(self.0.pool())

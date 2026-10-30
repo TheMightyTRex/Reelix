@@ -15,9 +15,13 @@
 //! - auth: `GET /auth/methods`, `POST /auth/jellyfin`, `POST /auth/emby`, `POST /auth/plex/pin`,
 //!   `POST /auth/plex/pin/{id}`, `GET /auth/oidc/login?redirect=`, `GET /auth/oidc/callback`
 //! - profile: `GET/PUT /profile/notifications`
+//! - book/music requests (M8/M9): `GET/POST /requests/media`, `GET /requests/media/options`,
+//!   `GET/PUT/DELETE /requests/media/{id}`, `POST /requests/media/{id}/approve|decline|retry`
+//! - book/music discovery: `GET /search/books?q=`, `GET /search/music?q=`,
+//!   `GET /media/book/{workId}`, `GET /media/album/{releaseGroupId}`
 
 use chrono::{DateTime, NaiveDate, Utc};
-use reelix_core::{MediaKind, Permissions};
+use reelix_core::{BookFormat, MediaKind, Permissions};
 use serde::{Deserialize, Serialize};
 
 use crate::UserDto;
@@ -471,6 +475,15 @@ pub struct RequestCountsDto {
     pub failed: u64,
     pub movie: u64,
     pub series: u64,
+    /// Book / album requests (included in the status counts; omitted when zero).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub book: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub music: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -521,8 +534,270 @@ pub struct QuotaUsageDto {
 pub struct QuotaDto {
     pub movie: QuotaUsageDto,
     pub tv: QuotaUsageDto,
+    /// Book requests (each request counts once, whatever its formats).
+    #[serde(default)]
+    pub book: QuotaUsageDto,
+    /// Album requests.
+    #[serde(default)]
+    pub music: QuotaUsageDto,
     /// Users with MANAGE_REQUESTS bypass quotas.
     pub exempt: bool,
+}
+
+// ---------------------------------------------------------------- book / music requests
+
+/// Kind of a book/music request (`book` = an Open Library work, `music` = a MusicBrainz
+/// release group, i.e. an album).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum ContentRequestKind {
+    Book,
+    Music,
+}
+
+impl ContentRequestKind {
+    pub const ALL: [ContentRequestKind; 2] = [Self::Book, Self::Music];
+
+    /// `book` | `music` (the `requests.media_kind` value).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Book => "book",
+            Self::Music => "music",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "book" | "books" => Some(Self::Book),
+            "music" | "album" | "albums" => Some(Self::Music),
+            _ => None,
+        }
+    }
+}
+
+/// A book or album request (`GET /requests/media`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentRequestDto {
+    pub id: i64,
+    pub kind: ContentRequestKind,
+    /// Open Library work id (book) or MusicBrainz release-group id (album).
+    pub foreign_id: String,
+    pub title: String,
+    /// Author (book) or artist (album) name.
+    pub subtitle: Option<String>,
+    pub year: Option<i32>,
+    /// Cover URL.
+    pub poster: Option<String>,
+    /// Requested book formats (books only; empty for albums).
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub formats: Vec<BookFormat>,
+    pub status: RequestStatus,
+    pub profile_id: Option<i64>,
+    pub root_folder_id: Option<i64>,
+    pub tags: Vec<i64>,
+    pub requested_by: UserBriefDto,
+    pub modified_by: Option<UserBriefDto>,
+    pub decline_reason: Option<String>,
+    pub failure_reason: Option<String>,
+    /// Library ids once approved.
+    pub book_id: Option<i64>,
+    pub author_id: Option<i64>,
+    pub album_id: Option<i64>,
+    pub artist_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub approved_at: Option<DateTime<Utc>>,
+    pub available_at: Option<DateTime<Utc>>,
+}
+
+/// `POST /requests/media`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateContentRequestDto {
+    pub kind: ContentRequestKind,
+    /// Open Library work id (`OL…W`) or MusicBrainz release-group id.
+    pub foreign_id: String,
+    /// Books: formats to request; empty = the configured default formats (or both).
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub formats: Vec<BookFormat>,
+    /// Advanced options (REQUEST_ADVANCED). For books they apply to the single requested
+    /// format (they are rejected when both formats are requested).
+    #[serde(default)]
+    pub profile_id: Option<i64>,
+    #[serde(default)]
+    pub root_folder_id: Option<i64>,
+    #[serde(default)]
+    pub tags: Vec<i64>,
+    /// Request on behalf of another user (MANAGE_REQUESTS).
+    #[serde(default)]
+    pub user_id: Option<i64>,
+}
+
+/// `PUT /requests/media/{id}`: owner (while pending) or MANAGE_REQUESTS. `None` = unchanged.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateContentRequestDto {
+    /// Books only.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Vec<String>>))]
+    pub formats: Option<Vec<BookFormat>>,
+    #[serde(default)]
+    pub profile_id: Option<i64>,
+    #[serde(default)]
+    pub root_folder_id: Option<i64>,
+    #[serde(default)]
+    pub tags: Option<Vec<i64>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentRequestPageDto {
+    pub items: Vec<ContentRequestDto>,
+    pub total: u64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+/// `GET /requests/media/options?kind=ebook|audiobook|music`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams, utoipa::ToSchema))]
+pub struct ContentRequestOptionsQuery {
+    /// `ebook` (default), `audiobook` or `music`.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// Compact book/album request state overlaid on search results and detail views.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentRequestBriefDto {
+    pub id: i64,
+    pub status: RequestStatus,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub formats: Vec<BookFormat>,
+    pub requested_by: UserBriefDto,
+    pub created_at: DateTime<Utc>,
+}
+
+/// One book or album in book/music search results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentItemDto {
+    pub kind: ContentRequestKind,
+    /// Open Library work id or MusicBrainz release-group id.
+    pub foreign_id: String,
+    pub title: String,
+    /// Author / artist name.
+    pub subtitle: Option<String>,
+    /// Open Library author id / MusicBrainz artist id.
+    pub subtitle_id: Option<String>,
+    pub year: Option<i32>,
+    pub cover: Option<String>,
+    /// Albums: `Album`, `EP`, `Single`, … (`None` for books).
+    pub album_type: Option<String>,
+    pub availability: AvailabilityStatus,
+    /// Library book / album id when in the library.
+    pub library_id: Option<i64>,
+    /// The most relevant request visible to the caller (active first), if any.
+    pub request: Option<ContentRequestBriefDto>,
+}
+
+/// An artist in music search results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ArtistItemDto {
+    pub musicbrainz_id: String,
+    pub name: String,
+    pub disambiguation: Option<String>,
+    pub artist_type: Option<String>,
+    pub country: Option<String>,
+    /// Library artist id when the artist is in the library.
+    pub library_id: Option<i64>,
+}
+
+/// `GET /search/books?q=`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BookSearchPageDto {
+    pub results: Vec<ContentItemDto>,
+}
+
+/// `GET /search/music?q=`: matching albums and artists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MusicSearchPageDto {
+    pub albums: Vec<ContentItemDto>,
+    pub artists: Vec<ArtistItemDto>,
+}
+
+/// Discover rows for books: `(row id, title)`. Subject rows use Open Library subject keys.
+pub const BOOK_DISCOVER_ROWS: &[(&str, &str)] = &[
+    ("trending", "Trending this week"),
+    ("subject-fantasy", "Fantasy"),
+    ("subject-science_fiction", "Science fiction"),
+    ("subject-mystery", "Mystery"),
+    ("subject-thriller", "Thriller"),
+    ("subject-romance", "Romance"),
+    ("subject-horror", "Horror"),
+    ("subject-historical_fiction", "Historical fiction"),
+    ("subject-young_adult_fiction", "Young adult"),
+    ("subject-biography", "Biography"),
+];
+
+/// Discover rows for music: `(row id, title)`.
+pub const MUSIC_DISCOVER_ROWS: &[(&str, &str)] = &[
+    ("new-releases", "New releases"),
+    ("popular-week", "Popular this week"),
+    ("popular-month", "Popular this month"),
+];
+
+impl ContentRequestKind {
+    /// The Discover rows of this kind: `(row id, title)`.
+    pub fn discover_rows(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::Book => BOOK_DISCOVER_ROWS,
+            Self::Music => MUSIC_DISCOVER_ROWS,
+        }
+    }
+}
+
+/// `GET /discover/content/{kind}/{row}`: one Discover row of books or albums.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentRowDto {
+    pub results: Vec<ContentItemDto>,
+}
+
+/// What the current user may do in a book/album request view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentRequestAbilityDto {
+    /// Has REQUEST_BOOK / REQUEST_MUSIC and there is something left to request.
+    pub can_request: bool,
+    pub can_request_advanced: bool,
+    /// Books: formats that can still be requested (not covered by an active request).
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub formats: Vec<BookFormat>,
+    /// Books: formats preselected in the dialog.
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub default_formats: Vec<BookFormat>,
+    /// Why `can_request` is false.
+    pub reason: Option<String>,
+}
+
+/// `GET /media/book/{workId}` and `GET /media/album/{releaseGroupId}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ContentDetailDto {
+    #[serde(flatten)]
+    pub item: ContentItemDto,
+    pub overview: Option<String>,
+    /// Every request for this book/album visible to the caller.
+    pub requests: Vec<ContentRequestBriefDto>,
+    pub request_ability: ContentRequestAbilityDto,
 }
 
 // ---------------------------------------------------------------- issues
@@ -712,6 +987,14 @@ pub struct UserDetailDto {
     pub movie_quota_days: Option<u32>,
     pub tv_quota_limit: Option<u32>,
     pub tv_quota_days: Option<u32>,
+    #[serde(default)]
+    pub book_quota_limit: Option<u32>,
+    #[serde(default)]
+    pub book_quota_days: Option<u32>,
+    #[serde(default)]
+    pub music_quota_limit: Option<u32>,
+    #[serde(default)]
+    pub music_quota_days: Option<u32>,
     /// A local password is set.
     pub has_password: bool,
     pub request_count: u64,
@@ -740,6 +1023,14 @@ pub struct CreateUserDto {
     pub tv_quota_limit: Option<u32>,
     #[serde(default)]
     pub tv_quota_days: Option<u32>,
+    #[serde(default)]
+    pub book_quota_limit: Option<u32>,
+    #[serde(default)]
+    pub book_quota_days: Option<u32>,
+    #[serde(default)]
+    pub music_quota_limit: Option<u32>,
+    #[serde(default)]
+    pub music_quota_days: Option<u32>,
 }
 
 /// `PUT /users/{id}`: replaces the editable fields (send the whole object back).
@@ -765,6 +1056,14 @@ pub struct UpdateUserDto {
     pub tv_quota_limit: Option<u32>,
     #[serde(default)]
     pub tv_quota_days: Option<u32>,
+    #[serde(default)]
+    pub book_quota_limit: Option<u32>,
+    #[serde(default)]
+    pub book_quota_days: Option<u32>,
+    #[serde(default)]
+    pub music_quota_limit: Option<u32>,
+    #[serde(default)]
+    pub music_quota_days: Option<u32>,
     #[serde(default)]
     pub password: Option<String>,
 }
@@ -890,6 +1189,23 @@ pub struct RequestSettingsDto {
     pub discover_language: Option<String>,
     /// Hide titles that are already available from discover rows.
     pub hide_available: bool,
+    /// Book requests: defaults per format (ebook / audiobook quality profile + root folder).
+    pub book_ebook: RequestDefaultsDto,
+    pub book_audiobook: RequestDefaultsDto,
+    /// Formats preselected in the book request dialog (empty = both).
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub book_default_formats: Vec<BookFormat>,
+    /// Album requests: music quality profile + root folder (+ tags) for new artists.
+    pub music: RequestDefaultsDto,
+    /// Metadata profile for artists added by album requests (`None` = first profile).
+    pub music_metadata_profile_id: Option<i64>,
+    pub auto_approve_book: bool,
+    pub auto_approve_music: bool,
+    /// Global book / album quota defaults (`None` = unlimited).
+    pub book_quota_limit: Option<u32>,
+    pub book_quota_days: u32,
+    pub music_quota_limit: Option<u32>,
+    pub music_quota_days: u32,
 }
 
 impl Default for RequestSettingsDto {
@@ -916,6 +1232,17 @@ impl Default for RequestSettingsDto {
             discover_region: None,
             discover_language: None,
             hide_available: false,
+            book_ebook: RequestDefaultsDto::default(),
+            book_audiobook: RequestDefaultsDto::default(),
+            book_default_formats: Vec::new(),
+            music: RequestDefaultsDto::default(),
+            music_metadata_profile_id: None,
+            auto_approve_book: false,
+            auto_approve_music: false,
+            book_quota_limit: None,
+            book_quota_days: 7,
+            music_quota_limit: None,
+            music_quota_days: 7,
         }
     }
 }

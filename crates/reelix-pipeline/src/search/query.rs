@@ -87,3 +87,25 @@ pub fn episode(s: &SeriesDto, e: &EpisodeDto) -> Vec<SearchQuery> {
     }
     out
 }
+
+/// Book query for one format: author + title (+ year).
+pub fn book(t: &reelix_books::BookTarget) -> SearchQuery {
+    let mut q = SearchQuery::book(t.author.name.clone(), t.book.title.clone());
+    q.book_format = Some(t.format);
+    q.year = t.book.year.and_then(|y| u16::try_from(y).ok());
+    q
+}
+
+/// Title-only book query (used when author + title finds nothing).
+pub fn book_fallback(t: &reelix_books::BookTarget) -> SearchQuery {
+    let mut q = SearchQuery::book(String::new(), t.book.title.clone());
+    q.book_format = Some(t.format);
+    q
+}
+
+/// Album query: artist + album title (+ year).
+pub fn album(t: &reelix_music::AlbumTarget) -> SearchQuery {
+    let mut q = SearchQuery::music(t.artist.name.clone(), t.album.title.clone());
+    q.year = t.album.release_date.and_then(|d| u16::try_from(d.year()).ok());
+    q
+}

@@ -134,7 +134,10 @@ pub fn catalog(kind: ProviderKind, defs: &DefinitionStore) -> Vec<ProviderSchema
             reelix_lists::schemas()
                 .into_iter()
                 .map(|mut s| {
-                    s.fields.extend(import_list_fields());
+                    match reelix_lists::content_of(&s.implementation) {
+                        reelix_lists::ListContent::Music => s.fields.extend(music_import_list_fields()),
+                        reelix_lists::ListContent::Video => s.fields.extend(import_list_fields()),
+                    }
                     s
                 })
                 .collect(),
@@ -152,7 +155,90 @@ fn options(values: &[(&str, &str)]) -> Vec<SelectOption> {
         .collect()
 }
 
-/// Names of the Reelix-level fields added to every import-list schema.
+/// `video` or `music`: what an import-list implementation yields (and so which target fields
+/// its schema carries).
+pub fn import_list_content(implementation: &str) -> &'static str {
+    reelix_lists::content_of(implementation).as_str()
+}
+
+/// `(implementation, content)` of every import-list implementation.
+pub fn import_list_contents() -> Vec<(String, &'static str)> {
+    reelix_lists::schemas()
+        .into_iter()
+        .map(|s| {
+            let c = import_list_content(&s.implementation);
+            (s.implementation, c)
+        })
+        .collect()
+}
+
+/// Names of the Reelix-level fields added to every music import-list schema.
+pub const MUSIC_IMPORT_LIST_FIELDS: [&str; 8] = [
+    "enabled_auto_add",
+    "quality_profile_id",
+    "metadata_profile_id",
+    "root_folder_id",
+    "artist_monitor",
+    "monitor_new_items",
+    "album_handling",
+    "search_on_add",
+];
+
+/// How artists / albums of a music list are added (the row's tags are applied to added artists).
+fn music_import_list_fields() -> Vec<FieldSchema> {
+    vec![
+        FieldSchema::new("enabled_auto_add", "Add automatically", FieldKind::Bool)
+            .default_value(true)
+            .help("Add new list artists / albums to the library on every sync"),
+        FieldSchema::new("quality_profile_id", "Quality profile", FieldKind::Number)
+            .help("Music quality profile id; empty uses the first music profile"),
+        FieldSchema::new("metadata_profile_id", "Metadata profile", FieldKind::Number)
+            .help("Metadata profile id; empty uses the first metadata profile"),
+        FieldSchema::new("root_folder_id", "Root folder", FieldKind::Number)
+            .help("Music root folder id; empty uses the first music root folder"),
+        FieldSchema::new(
+            "artist_monitor",
+            "Monitor (artists)",
+            FieldKind::Select {
+                options: options(&[
+                    ("all", "All albums"),
+                    ("future", "Future albums"),
+                    ("missing", "Missing albums"),
+                    ("existing", "Existing albums"),
+                    ("latest", "Latest album"),
+                    ("first", "First album"),
+                    ("none", "None"),
+                ]),
+            },
+        )
+        .default_value("all"),
+        FieldSchema::new(
+            "monitor_new_items",
+            "Monitor new albums",
+            FieldKind::Select {
+                options: options(&[("all", "All"), ("new", "Released after adding"), ("none", "None")]),
+            },
+        )
+        .default_value("all"),
+        FieldSchema::new(
+            "album_handling",
+            "List albums",
+            FieldKind::Select {
+                options: options(&[
+                    ("album", "Add only the album"),
+                    ("artist", "Add the album's artist"),
+                ]),
+            },
+        )
+        .default_value("album")
+        .help("What to add for album entries (artist entries always add the artist)"),
+        FieldSchema::new("search_on_add", "Search on add", FieldKind::Bool)
+            .default_value(true)
+            .help("Search for monitored albums right away"),
+    ]
+}
+
+/// Names of the Reelix-level fields added to every movie/series import-list schema.
 pub const IMPORT_LIST_FIELDS: [&str; 9] = [
     "enabled_auto_add",
     "quality_profile_id",
@@ -304,9 +390,14 @@ mod tests {
         }
         assert!(find(ProviderKind::Notification, "discord", &defs).is_some());
         for s in catalog(ProviderKind::ImportList, &defs) {
-            for f in IMPORT_LIST_FIELDS {
+            let fields: &[&str] = if import_list_content(&s.schema.implementation) == "music" {
+                &MUSIC_IMPORT_LIST_FIELDS
+            } else {
+                &IMPORT_LIST_FIELDS
+            };
+            for f in fields {
                 assert!(
-                    s.schema.fields.iter().any(|x| x.name == f),
+                    s.schema.fields.iter().any(|x| x.name == *f),
                     "{} lacks {f}",
                     s.schema.implementation
                 );

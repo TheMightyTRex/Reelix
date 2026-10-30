@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use reelix_core::ContentKind;
 use reelix_downloaders::DownloadClient;
 use reelix_notify::NotificationEvent;
 use reelix_providers::ProviderService;
@@ -48,7 +49,8 @@ pub trait ActivityProviders: Send + Sync {
     /// Fan-out notification; never fails.
     async fn notify(&self, event: &NotificationEvent);
 
-    /// Asks every enabled media server to rescan `paths`; errors are logged.
+    /// Asks every enabled movie/TV media server to rescan `paths`; errors are logged. Book and
+    /// music servers are refreshed by the server's library refresher on import events.
     async fn refresh_media_servers(&self, paths: &[PathBuf]);
 }
 
@@ -94,7 +96,11 @@ impl ActivityProviders for ProviderService {
 
     async fn refresh_media_servers(&self, paths: &[PathBuf]) {
         for (row, server) in self.media_servers() {
-            if !row.enabled {
+            let video = server
+                .content_kinds()
+                .iter()
+                .any(|k| matches!(k, ContentKind::Movie | ContentKind::Series));
+            if !row.enabled || !video {
                 continue;
             }
             if let Err(e) = server.refresh_library(paths).await {

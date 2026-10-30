@@ -3,7 +3,7 @@
 //! blocklist / pending APIs.
 //!
 //! [`SearchService`] is registered as an `AppState` extension; [`jobs::register`] adds the
-//! `search`, `rss_sync` and `process_pending` handlers and tasks.
+//! `search`, `book_search`, `album_search`, `rss_sync` and `process_pending` handlers and tasks.
 
 pub mod context;
 pub mod dto;
@@ -18,24 +18,28 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use reelix_api_types::books::BookSearchRequest;
+use reelix_api_types::content::ContentSearchKind;
 use reelix_api_types::library::{
     CalendarKind, EpisodeDto, LibrarySearchKind, MovieDto, SearchRequest, SeriesDto, WantedQuery,
 };
+use reelix_api_types::music::AlbumSearchRequest;
 use reelix_api_types::pipeline::{GrabRequest, GrabResponse, ReleaseDto, ReleaseQuery};
-use reelix_books::BooksService;
-use reelix_core::DomainEvent;
+use reelix_books::{BooksError, BooksService};
 use reelix_core::bus::EventBus;
+use reelix_core::{BookFormat, DomainEvent};
 use reelix_db::Db;
 use reelix_decision::{RankedRelease, SearchKind};
 use reelix_indexers::{ReleaseInfo, SearchQuery};
 use reelix_library::{LibraryError, LibraryService};
-use reelix_music::MusicService;
+use reelix_music::{MusicError, MusicService};
 use reelix_providers::ProviderService;
 
 pub use context::{Eval, Evaluator, IndexerInfo, Shared, Target};
 pub use grab::GrabTarget;
 
 use crate::GrabbedRelease;
+use crate::store::ContentRef;
 
 /// Errors surfaced to the API / jobs.
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +55,31 @@ pub enum SearchError {
     Db(#[from] reelix_db::DbError),
     #[error(transparent)]
     Library(#[from] LibraryError),
+    /// Unexpected failure in the books / music services.
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl From<BooksError> for SearchError {
+    fn from(e: BooksError) -> Self {
+        match e {
+            BooksError::NotFound(m) => Self::NotFound(m),
+            BooksError::Validation(m) | BooksError::Conflict(m) => Self::Validation(m),
+            BooksError::Db(d) => Self::Db(d),
+            other => Self::Internal(other.to_string()),
+        }
+    }
+}
+
+impl From<MusicError> for SearchError {
+    fn from(e: MusicError) -> Self {
+        match e {
+            MusicError::NotFound(m) => Self::NotFound(m),
+            MusicError::Validation(m) | MusicError::Conflict(m) => Self::Validation(m),
+            MusicError::Db(d) => Self::Db(d),
+            other => Self::Internal(other.to_string()),
+        }
+    }
 }
 
 pub type Result<T, E = SearchError> = std::result::Result<T, E>;
@@ -85,6 +114,8 @@ struct Cached {
     release: GrabbedRelease,
     movie_id: Option<i64>,
     episode_ids: Vec<i64>,
+    /// Book (format) / album of the search.
+    content: ContentRef,
     rejections: Vec<String>,
     at: Instant,
 }
@@ -107,9 +138,7 @@ pub struct SearchService {
     cache: Mutex<HashMap<(i64, String), Cached>>,
     pub(crate) rss_last: Mutex<Option<Instant>>,
     /// Book and album searches (set by the server after construction).
-    #[allow(dead_code)] // read by the book/album search paths
     pub(crate) books: OnceLock<Arc<BooksService>>,
-    #[allow(dead_code)] // read by the book/album search paths
     pub(crate) music: OnceLock<Arc<MusicService>>,
 }
 
@@ -191,6 +220,47 @@ impl SearchService {
         Ok(Target::series(s, eps))
     }
 
+    pub(crate) fn books_svc(&self) -> Result<&Arc<BooksService>> {
+        self.books
+            .get()
+            .ok_or_else(|| SearchError::Unavailable("books are not available".into()))
+    }
+
+    pub(crate) fn music_svc(&self) -> Result<&Arc<MusicService>> {
+        self.music
+            .get()
+            .ok_or_else(|| SearchError::Unavailable("music is not available".into()))
+    }
+
+    /// One format of a book (the author needs a profile for it).
+    pub(crate) async fn book_target(&self, id: i64, format: BookFormat) -> Result<Target> {
+        let t = self.books_svc()?.search_api().target(id, format).await?;
+        Ok(Target::Book(Box::new(t)))
+    }
+
+    pub(crate) async fn album_target(&self, id: i64) -> Result<Target> {
+        let t = self.music_svc()?.search_api().target(id).await?;
+        Ok(Target::Album(Box::new(t)))
+    }
+
+    /// The book / album target of a content reference.
+    pub(crate) async fn content_target(&self, c: &ContentRef) -> Result<Target> {
+        if let Some((id, f)) = c.book_ref() {
+            return self.book_target(id, f).await;
+        }
+        match c.album_id {
+            Some(id) => self.album_target(id).await,
+            None => Err(SearchError::NotFound("no book or album".into())),
+        }
+    }
+
+    /// [`Self::shared`] with book/music profiles loaded.
+    pub(crate) async fn shared_content(&self) -> Result<Shared> {
+        let mut s = self.shared().await?;
+        s.load_content(&self.db).await?;
+        Ok(s)
+    }
+
     // ------------------------------------------------------------------
     // Indexer queries + evaluation
     // ------------------------------------------------------------------
@@ -251,6 +321,14 @@ impl SearchService {
                 }
                 self.query_all(&queries, interactive).await
             }
+            Target::Book(b) => {
+                let found = self.query_all(&[query::book(b)], interactive).await;
+                if found.is_empty() {
+                    return self.query_all(&[query::book_fallback(b)], interactive).await;
+                }
+                found
+            }
+            Target::Album(a) => self.query_all(&[query::album(a)], interactive).await,
         }
     }
 
@@ -266,7 +344,7 @@ impl SearchService {
         let interactive = kind == SearchKind::Interactive;
         let mut out = Vec::new();
         for info in infos {
-            let mut c = mapping::candidate(&info, ev.shared.priority(info.indexer_id));
+            let mut c = mapping::candidate_for(&info, ev.shared.priority(info.indexer_id), ev.target);
             let mut extra = Vec::new();
             match ev.target {
                 Target::Movie(m) => {
@@ -315,6 +393,26 @@ impl SearchService {
                         }
                     }
                 }
+                Target::Book(b) => {
+                    c.media_id = Some(b.book.id);
+                    let parsed = reelix_parser::parse_book(&info.title, Some(b.format));
+                    if let Err(reason) = mapping::map_to_book(&info, &parsed, b) {
+                        if !interactive {
+                            continue;
+                        }
+                        extra.push(context::rejection("mapping", reason));
+                    }
+                }
+                Target::Album(a) => {
+                    c.media_id = Some(a.album.id);
+                    let parsed = reelix_parser::parse_music(&info.title);
+                    if let Err(reason) = mapping::map_to_album(&info, &parsed, a) {
+                        if !interactive {
+                            continue;
+                        }
+                        extra.push(context::rejection("mapping", reason));
+                    }
+                }
             }
             let decision = ev.evaluate(&c, info.info_hash.as_deref(), kind, extra);
             out.push(Eval {
@@ -357,12 +455,28 @@ impl SearchService {
                 SearchError::Validation("series search needs `season` (or use episode_id)".into())
             })?;
             (self.series_target(sid).await?, Some(season), Vec::new())
+        } else if let Some(bid) = q.book_id {
+            let t = match q.book_format {
+                Some(f) => self.book_target(bid, f).await?,
+                // Without a format: the first one the author has a profile for.
+                None => match self.book_target(bid, BookFormat::Ebook).await {
+                    Ok(t) => t,
+                    Err(SearchError::Validation(_)) => self.book_target(bid, BookFormat::Audiobook).await?,
+                    Err(e) => return Err(e),
+                },
+            };
+            (t, None, Vec::new())
+        } else if let Some(aid) = q.album_id {
+            (self.album_target(aid).await?, None, Vec::new())
         } else {
             return Err(SearchError::Validation(
-                "one of movie_id, series_id + season or episode_id is required".into(),
+                "one of movie_id, series_id + season, episode_id, book_id or album_id is required".into(),
             ));
         };
-        let shared = self.shared().await?;
+        let mut shared = self.shared().await?;
+        if target.is_content() {
+            shared.load_content(&self.db).await?;
+        }
         let infos = self.fetch(&target, season, &episodes, true).await;
         let ev = Evaluator::new(&self.db, &shared, &target).await?;
         let evals = self.evaluate_all(&ev, infos, SearchKind::Interactive, None);
@@ -379,6 +493,7 @@ impl SearchService {
                     release: snapshot,
                     movie_id: target.movie_id(),
                     episode_ids: e.candidate().episode_ids.clone(),
+                    content: target.content(),
                     rejections: e.decision().rejections.iter().map(|r| r.reason.clone()).collect(),
                     at: now,
                 },
@@ -397,7 +512,7 @@ impl SearchService {
                 .filter(|c| c.at.elapsed() < self.opts.cache_ttl)
                 .cloned()
         };
-        let (release, movie_id, mut episode_ids) = match cached {
+        let (release, movie_id, mut episode_ids, content) = match cached {
             Some(c) => {
                 if !c.rejections.is_empty() && !req.force {
                     return Err(SearchError::Validation(format!(
@@ -405,7 +520,7 @@ impl SearchService {
                         c.rejections.join("; ")
                     )));
                 }
-                (c.release, c.movie_id, c.episode_ids)
+                (c.release, c.movie_id, c.episode_ids, c.content)
             }
             None => {
                 let Some(url) = req.download_url.clone().filter(|u| !u.trim().is_empty()) else {
@@ -413,14 +528,21 @@ impl SearchService {
                         "release not found in the search results cache; search again".into(),
                     ));
                 };
-                (self.raw_release(req, url)?, None, Vec::new())
+                (
+                    self.raw_release(req, url)?,
+                    None,
+                    Vec::new(),
+                    ContentRef::default(),
+                )
             }
         };
         let movie_id = req.movie_id.or(movie_id);
         if let Some(ids) = &req.episode_ids {
             episode_ids = ids.clone();
         }
-        let target = if req.movie_id.is_some() {
+        let target = if req.movie_id.is_none() && req.episode_ids.is_none() && !content.is_empty() {
+            self.grab_target_content(&content).await?
+        } else if req.movie_id.is_some() {
             self.grab_target(movie_id, &[]).await?
         } else if req.episode_ids.is_some() {
             self.grab_target(None, &episode_ids).await?
@@ -645,6 +767,98 @@ impl SearchService {
         Ok(())
     }
 
+    /// Searches, evaluates and grabs for one book format or album.
+    pub(crate) async fn auto_content(
+        &self,
+        shared: &mut Shared,
+        t: Target,
+        sum: &mut SearchSummary,
+    ) -> Result<()> {
+        sum.searched += 1;
+        let infos = self.fetch(&t, None, &[], false).await;
+        let evals = {
+            let ev = Evaluator::new(&self.db, shared, &t).await?;
+            self.evaluate_all(&ev, infos, SearchKind::Automatic, None)
+        };
+        self.grab_best(shared, &t, evals, &[], false, sum).await?;
+        Ok(())
+    }
+
+    async fn auto_targets(
+        &self,
+        targets: Vec<Target>,
+        throttle: bool,
+        stop: &(dyn Fn() -> bool + Sync),
+    ) -> Result<SearchSummary> {
+        let mut sum = SearchSummary::default();
+        if targets.is_empty() {
+            return Ok(sum);
+        }
+        let mut shared = self.shared_content().await?;
+        for (i, t) in targets.into_iter().enumerate() {
+            if stop() {
+                break;
+            }
+            if throttle && i > 0 {
+                tokio::time::sleep(self.opts.throttle).await;
+            }
+            self.auto_content(&mut shared, t, &mut sum).await?;
+        }
+        Ok(sum)
+    }
+
+    /// Executes a `book_search` job payload: book ids (`item`), author ids (`parent`) or the
+    /// wanted lists (`missing` / `cutoff`, whole library when `ids` is empty), per format.
+    pub async fn run_book_search(
+        &self,
+        req: &BookSearchRequest,
+        stop: &(dyn Fn() -> bool + Sync),
+    ) -> Result<SearchSummary> {
+        use reelix_books::Wanted;
+        let api = self.books_svc()?.search_api();
+        let targets = match req.kind {
+            ContentSearchKind::Item => api.targets(&req.ids, req.format, Wanted::Any).await?,
+            ContentSearchKind::Parent => {
+                api.targets_for_authors(&req.ids, req.format, Wanted::MissingOrCutoff)
+                    .await?
+            }
+            ContentSearchKind::Missing => api.targets(&req.ids, req.format, Wanted::Missing).await?,
+            ContentSearchKind::Cutoff => api.targets(&req.ids, req.format, Wanted::Cutoff).await?,
+        };
+        let throttle = matches!(req.kind, ContentSearchKind::Missing | ContentSearchKind::Cutoff);
+        let targets = targets.into_iter().map(|t| Target::Book(Box::new(t))).collect();
+        let sum = self.auto_targets(targets, throttle, stop).await?;
+        tracing::info!(kind = ?req.kind, searched = sum.searched, grabbed = sum.grabbed, pending = sum.pending, "book search finished");
+        Ok(sum)
+    }
+
+    /// Executes an `album_search` job payload: album ids (`item`), artist ids (`parent`) or the
+    /// wanted lists (`missing` / `cutoff`).
+    pub async fn run_album_search(
+        &self,
+        req: &AlbumSearchRequest,
+        stop: &(dyn Fn() -> bool + Sync),
+    ) -> Result<SearchSummary> {
+        use reelix_music::Wanted;
+        let api = self.music_svc()?.search_api();
+        let targets = match req.kind {
+            ContentSearchKind::Item => api.targets(&req.ids, Wanted::Any).await?,
+            ContentSearchKind::Parent => api.targets_for_artists(&req.ids, Wanted::MissingOrCutoff).await?,
+            ContentSearchKind::Missing => api.targets(&req.ids, Wanted::Missing).await?,
+            ContentSearchKind::Cutoff => api.targets(&req.ids, Wanted::Cutoff).await?,
+        };
+        let throttle = matches!(req.kind, ContentSearchKind::Missing | ContentSearchKind::Cutoff);
+        let targets = targets
+            .into_iter()
+            // Wanted lists only cover monitored albums of monitored artists.
+            .filter(|t| req.kind == ContentSearchKind::Item || (t.album.monitored && t.artist.monitored))
+            .map(|t| Target::Album(Box::new(t)))
+            .collect();
+        let sum = self.auto_targets(targets, throttle, stop).await?;
+        tracing::info!(kind = ?req.kind, searched = sum.searched, grabbed = sum.grabbed, pending = sum.pending, "album search finished");
+        Ok(sum)
+    }
+
     /// Season pack first; then per-episode searches for wanted episodes it didn't cover.
     async fn auto_season(
         &self,
@@ -712,7 +926,7 @@ impl SearchService {
     ) -> Result<Vec<i64>> {
         let mut covered: Vec<i64> = Vec::new();
         let mut attempts = 0usize;
-        if let Target::Movie(_) = t {
+        if !matches!(t, Target::Series { .. }) {
             for e in evals.iter().filter(|e| e.decision().accepted) {
                 if attempts >= self.opts.max_grab_attempts {
                     break;

@@ -7,7 +7,7 @@ pub mod pending;
 pub mod tracked;
 
 use chrono::{DateTime, Utc};
-use reelix_core::Protocol;
+use reelix_core::{BookFormat, Protocol};
 use reelix_parser::{Language, QualityModel};
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +45,58 @@ pub struct GrabbedRelease {
     pub indexer_flags: Vec<String>,
     pub seed_ratio: Option<f64>,
     pub seed_time_minutes: Option<u32>,
+}
+
+/// Book / album reference of a pipeline row (columns from `0010_media_shared.sql`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ContentRef {
+    pub book_id: Option<i64>,
+    pub book_format: Option<BookFormat>,
+    pub album_id: Option<i64>,
+}
+
+impl ContentRef {
+    pub fn book(id: i64, format: BookFormat) -> Self {
+        Self {
+            book_id: Some(id),
+            book_format: Some(format),
+            album_id: None,
+        }
+    }
+
+    pub fn album(id: i64) -> Self {
+        Self {
+            album_id: Some(id),
+            ..Self::default()
+        }
+    }
+
+    /// Neither a book nor an album.
+    pub fn is_empty(&self) -> bool {
+        self.book_id.is_none() && self.album_id.is_none()
+    }
+
+    /// The book and its format (a missing format reads as ebook).
+    pub fn book_ref(&self) -> Option<(i64, BookFormat)> {
+        self.book_id
+            .map(|id| (id, self.book_format.unwrap_or(BookFormat::Ebook)))
+    }
+
+    pub(crate) fn format_str(&self) -> Option<&'static str> {
+        self.book_format.map(BookFormat::as_str)
+    }
+
+    pub(crate) fn from_columns(
+        book_id: Option<i64>,
+        book_format: Option<&str>,
+        album_id: Option<i64>,
+    ) -> Self {
+        Self {
+            book_id,
+            book_format: book_format.and_then(BookFormat::parse),
+            album_id,
+        }
+    }
 }
 
 pub(crate) fn json<T: Serialize>(v: &T) -> String {

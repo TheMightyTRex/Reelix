@@ -1,0 +1,5 @@
+{"payload": {"count": 3, "range": "year", "artists": [
+ {"artist_mbid": "f59c5520-5f46-4d2c-b2c4-822eabf53419", "artist_name": "Linkin Park", "listen_count": 706036},
+ {"artist_mbid": "7dc8f5bd-9d0b-4087-9f73-dc164950bbd8", "artist_name": "Queens of the Stone Age", "listen_count": 400000},
+ {"artist_mbid": "72c536dc-7137-4477-a521-567eeb840fa8", "artist_name": "Bob Dylan", "listen_count": 300000}
+]}}

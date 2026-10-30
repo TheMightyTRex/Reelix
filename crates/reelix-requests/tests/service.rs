@@ -589,6 +589,10 @@ async fn user_management_rules() {
                 movie_quota_days: None,
                 tv_quota_limit: None,
                 tv_quota_days: None,
+                book_quota_limit: Some(2),
+                book_quota_days: None,
+                music_quota_limit: None,
+                music_quota_days: None,
             },
             "hash".into(),
         )
@@ -596,6 +600,7 @@ async fn user_management_rules() {
         .unwrap();
     assert_eq!(created.permissions, Permissions::ROLE_USER);
     assert_eq!(created.movie_quota_limit, Some(3));
+    assert_eq!(created.book_quota_limit, Some(2));
     assert_eq!(created.display_name, "Carol");
     let mut dup = CreateUserDto {
         username: "CAROL".into(),
@@ -607,6 +612,10 @@ async fn user_management_rules() {
         movie_quota_days: None,
         tv_quota_limit: None,
         tv_quota_days: None,
+        book_quota_limit: None,
+        book_quota_days: None,
+        music_quota_limit: None,
+        music_quota_days: None,
     };
     assert!(matches!(
         t.svc.create_user(&manager, dup.clone(), "h".into()).await,
@@ -628,6 +637,10 @@ async fn user_management_rules() {
         movie_quota_days: None,
         tv_quota_limit: None,
         tv_quota_days: None,
+        book_quota_limit: None,
+        book_quota_days: None,
+        music_quota_limit: None,
+        music_quota_days: None,
         password: None,
     };
     assert!(matches!(

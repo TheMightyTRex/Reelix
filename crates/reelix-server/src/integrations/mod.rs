@@ -1,5 +1,6 @@
 //! M7 wiring: import list sync, notification bridge, health watch and media server
-//! availability sync.
+//! availability sync; M9 music import lists ([`music_lists`]: artists/albums added through the
+//! music service).
 //!
 //! [`IntegrationsService`] is registered on the API state as [`reelix_api::Integrations`]
 //! (exclusions, sync-now, list status, availability). Jobs: `import_list_sync` (15 min; each
@@ -10,6 +11,7 @@ pub mod availability;
 pub mod bridge;
 pub mod health;
 pub mod lists;
+pub mod music_lists;
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -17,7 +19,8 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use reelix_api::{ApiError, ApiResult, HealthSource, IntegrationsBackend};
 use reelix_api_types::integrations::{
-    CreateExclusionRequest, ImportListExclusionDto, ImportListStatusDto, MediaServerAvailabilityDto,
+    CreateExclusionRequest, CreateMusicExclusionRequest, ImportListExclusionDto, ImportListStatusDto,
+    MediaServerAvailabilityDto, MusicListExclusionDto,
 };
 use reelix_core::bus::EventBus;
 use reelix_db::Db;
@@ -29,6 +32,7 @@ use reelix_notify::NotificationEvent;
 use reelix_providers::{ProviderRow, ProviderService};
 
 pub use lists::{ListOptions, ListSyncOutcome, SyncPayload};
+pub use music_lists::{MusicLibrary, MusicListOptions};
 
 pub const IMPORT_LIST_SYNC: &str = reelix_api::IMPORT_LIST_SYNC;
 pub const HEALTH_WATCH: &str = "health_watch";
@@ -71,8 +75,7 @@ pub struct IntegrationsService {
     health: health::HealthWatch,
     server_timeout: Duration,
     /// Music import lists add artists/albums through the music service.
-    #[allow(dead_code)] // read by the music import-list sync
-    music: OnceLock<Arc<reelix_music::MusicService>>,
+    music: OnceLock<Arc<dyn MusicLibrary>>,
 }
 
 impl IntegrationsService {
@@ -101,6 +104,11 @@ impl IntegrationsService {
         let _ = self.music.set(music);
     }
 
+    /// Connects any [`MusicLibrary`] (tests). Later calls are ignored.
+    pub fn set_music_library(&self, music: Arc<dyn MusicLibrary>) {
+        let _ = self.music.set(music);
+    }
+
     /// Health sources watched by `health_watch` (set once in the attach phase).
     pub fn set_health_sources(&self, sources: Vec<Arc<dyn HealthSource>>) {
         let _ = self.health_sources.set(sources);
@@ -111,6 +119,9 @@ impl IntegrationsService {
         let rx = self.events.subscribe();
         let notify = self.sources.notify.clone();
         let bridge = bridge::Bridge::new(self.db.clone());
+        // Book and music imports refresh the servers that serve that content kind.
+        let refresher = bridge::LibraryRefresher::new(self.db.clone(), self.sources.media_servers.clone());
+        tokio::spawn(refresher.run(self.events.subscribe()));
         tokio::spawn(bridge.run(rx, move |ev| notify(ev)))
     }
 
@@ -134,6 +145,8 @@ impl IntegrationsService {
         let servers: Vec<_> = (self.sources.media_servers)()
             .into_iter()
             .filter(|(r, _)| r.enabled)
+            // Book/music servers have no movie/series items to match.
+            .filter(|(_, s)| availability::tracks_availability(s.as_ref()))
             .collect();
         let timeout = self.server_timeout;
         let results = futures::future::join_all(servers.iter().map(|(row, server)| async move {
@@ -186,6 +199,30 @@ impl IntegrationsBackend for IntegrationsService {
 
     fn list_status(&self) -> BoxFuture<'_, ApiResult<Vec<ImportListStatusDto>>> {
         Box::pin(async move { lists::list_status(&self.db).await.map_err(internal) })
+    }
+
+    fn music_exclusions(&self) -> BoxFuture<'_, ApiResult<Vec<MusicListExclusionDto>>> {
+        Box::pin(async move { music_lists::list_exclusions(&self.db).await.map_err(internal) })
+    }
+
+    fn add_music_exclusion(
+        &self,
+        req: CreateMusicExclusionRequest,
+    ) -> BoxFuture<'_, ApiResult<MusicListExclusionDto>> {
+        Box::pin(async move {
+            music_lists::add_exclusion(&self.db, &req)
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| ApiError::Conflict("this artist / album is already excluded".into()))
+        })
+    }
+
+    fn delete_music_exclusions(&self, ids: Vec<i64>) -> BoxFuture<'_, ApiResult<u64>> {
+        Box::pin(async move {
+            music_lists::delete_exclusions(&self.db, &ids)
+                .await
+                .map_err(internal)
+        })
     }
 
     fn availability(&self) -> BoxFuture<'_, ApiResult<MediaServerAvailabilityDto>> {

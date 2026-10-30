@@ -1,6 +1,6 @@
 [package]
 name = "reelix-mediaserver"
-description = "Media server adapters: Jellyfin, Emby, Plex (auth, library refresh, availability, watchlists)"
+description = "Media server adapters: Jellyfin, Emby, Plex (auth, library refresh, availability, watchlists) plus Audiobookshelf, Kavita, Calibre-Web and Navidrome library refresh"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

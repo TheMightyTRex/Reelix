@@ -9,6 +9,7 @@ use reelix_api_types::content::ContentSearchKind;
 use reelix_api_types::music::{AlbumDto, AlbumEdit, TrackDto, TrackFileDto};
 
 use crate::api;
+use crate::components::interactive_search::{InteractiveSearchModal, SearchTarget};
 use crate::components::library_common::{LibIcon, bytes, on_entity_changed};
 use crate::components::library_forms::{DeleteMediaDialog, require_library};
 use crate::components::music::{
@@ -47,6 +48,8 @@ fn AlbumDetail(id: i64) -> impl IntoView {
     on_entity_changed(&["album", "trackfile"], true, refetch);
 
     let release_open = RwSignal::new(false);
+    let isearch_open = RwSignal::new(false);
+    let isearch_target = RwSignal::new(None::<SearchTarget>);
     let delete_open = RwSignal::new(false);
     let file_to_delete = RwSignal::new(None::<TrackFileDto>);
     let file_delete_open = RwSignal::new(false);
@@ -104,6 +107,7 @@ fn AlbumDetail(id: i64) -> impl IntoView {
         let s = a.statistics.clone();
         let release = a.releases.iter().find(|r| r.selected).cloned();
         let title = a.title.clone();
+        let is_title = format!("{} - {}", a.artist_name, a.title);
         let (on, any_ok) = (a.monitored, a.any_release_ok);
         let kind = std::iter::once(album_type_label(a.album_type).to_string())
             .chain(a.secondary_types.iter().map(|t| secondary_label(*t).to_string()))
@@ -170,6 +174,11 @@ fn AlbumDetail(id: i64) -> impl IntoView {
                                 "Search"
                             </button>
                             // INTERACTIVE_SEARCH
+                            <button type="button" class="btn btn-secondary"
+                                on:click=move |_| { isearch_target.set(Some(SearchTarget::album(id, is_title.clone()))); isearch_open.set(true); }>
+                                <Icon name="list" />
+                                "Interactive"
+                            </button>
                             <button type="button" class="btn btn-secondary" on:click=move |_| release_open.set(true)>
                                 <LibIcon name="edit" />
                                 "Change release"
@@ -312,6 +321,7 @@ fn AlbumDetail(id: i64) -> impl IntoView {
             <div class="card-body">{file_list}</div>
         </section>
         <ChooseReleaseModal open=release_open album=album_sig on_saved=Callback::new(move |()| refetch()) />
+        <InteractiveSearchModal open=isearch_open target=isearch_target />
         <DeleteMediaDialog open=delete_open title="Delete album?"
             message=Signal::derive(move || album.get().and_then(Result::ok).map(|a| format!("“{}” will be removed from the library.", a.title)).unwrap_or_default())
             on_confirm=delete />

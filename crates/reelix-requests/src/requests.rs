@@ -4,9 +4,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use reelix_api_types::requests::{
-    AvailabilityStatus, CreateRequestDto, NamedIdDto, QuotaDto, QuotaUsageDto, RequestCountsDto,
-    RequestDefaultsDto, RequestDto, RequestListQuery, RequestOptionsDto, RequestPageDto, RequestSettingsDto,
-    RequestStatus, UpdateRequestDto, UserBriefDto,
+    AvailabilityStatus, ContentRequestKind, CreateRequestDto, NamedIdDto, QuotaDto, QuotaUsageDto,
+    RequestCountsDto, RequestDefaultsDto, RequestDto, RequestListQuery, RequestOptionsDto, RequestPageDto,
+    RequestSettingsDto, RequestStatus, UpdateRequestDto, UserBriefDto,
 };
 use reelix_core::{MediaKind, Permissions};
 use reelix_db::now_ms;
@@ -55,7 +55,7 @@ pub(crate) fn four_k_enabled(s: &RequestSettingsDto, kind: MediaKind) -> bool {
     }
 }
 
-fn notify_status(s: RequestStatus) -> reelix_notify::event::RequestStatus {
+pub(crate) fn notify_status(s: RequestStatus) -> reelix_notify::event::RequestStatus {
     use reelix_notify::event::RequestStatus as N;
     match s {
         RequestStatus::Pending => N::Pending,
@@ -91,7 +91,7 @@ pub(crate) fn series_status(requested: &[u32], a: &Availability) -> Option<Reque
     }
 }
 
-fn movie_status(a: &Availability) -> Option<RequestStatus> {
+pub(crate) fn movie_status(a: &Availability) -> Option<RequestStatus> {
     match a.status {
         AvailabilityStatus::Available => Some(RequestStatus::Available),
         AvailabilityStatus::PartiallyAvailable => Some(RequestStatus::PartiallyAvailable),
@@ -146,22 +146,10 @@ impl RequestService {
     }
 
     pub async fn list_requests(&self, actor: &Actor, q: &RequestListQuery) -> Result<RequestPageDto> {
-        let mut f = RequestFilter::default();
-        match q.status.as_deref().unwrap_or("all") {
-            "all" | "" => {}
-            "active" => {
-                f.statuses = vec![
-                    RequestStatus::Pending,
-                    RequestStatus::Approved,
-                    RequestStatus::Processing,
-                ]
-            }
-            other => {
-                let s = RequestStatus::parse(other)
-                    .ok_or_else(|| Error::Validation(format!("unknown status filter {other:?}")))?;
-                f.statuses = vec![s];
-            }
-        }
+        let mut f = RequestFilter {
+            statuses: status_filter(q.status.as_deref())?,
+            ..Default::default()
+        };
         if let Some(k) = q.kind.as_deref().filter(|k| !k.is_empty() && *k != "all") {
             f.kind = Some(parse_kind(k).ok_or_else(|| Error::Validation(format!("unknown kind {k:?}")))?);
         }
@@ -213,6 +201,25 @@ impl RequestService {
                 c.series += n;
             }
         }
+        for (status, kind, n) in self.content_repo().counts(scope).await? {
+            let n = n as u64;
+            c.total += n;
+            match status.as_str() {
+                "pending" => c.pending += n,
+                "approved" => c.approved += n,
+                "declined" => c.declined += n,
+                "processing" => c.processing += n,
+                "partially_available" => c.partially_available += n,
+                "available" => c.available += n,
+                "failed" => c.failed += n,
+                _ => {}
+            }
+            if kind == "book" {
+                c.book += n;
+            } else {
+                c.music += n;
+            }
+        }
         Ok(c)
     }
 
@@ -259,9 +266,31 @@ impl RequestService {
             .iter()
             .map(|r| r.seasons.len().max(1) as u32)
             .sum();
+        let book_limit = user.book_quota_limit.or(s.book_quota_limit);
+        let book_days = user.book_quota_days.unwrap_or(s.book_quota_days).max(1);
+        let music_limit = user.music_quota_limit.or(s.music_quota_limit);
+        let music_days = user.music_quota_days.unwrap_or(s.music_quota_days).max(1);
+        let books = self
+            .content_repo()
+            .count_since(
+                user.id,
+                ContentRequestKind::Book,
+                now - i64::from(book_days) * DAY_MS,
+            )
+            .await?;
+        let albums = self
+            .content_repo()
+            .count_since(
+                user.id,
+                ContentRequestKind::Music,
+                now - i64::from(music_days) * DAY_MS,
+            )
+            .await?;
         Ok(QuotaDto {
             movie: usage(movie_limit, movie_days, movies),
             tv: usage(tv_limit, tv_days, seasons),
+            book: usage(book_limit, book_days, books),
+            music: usage(music_limit, music_days, albums),
             exempt: user.permissions.has(Permissions::MANAGE_REQUESTS),
         })
     }
@@ -712,8 +741,8 @@ impl RequestService {
 
     // ------------------------------------------------------------ status sync
 
-    /// Updates approved / processing / partially available requests from library
-    /// availability. Returns how many requests changed.
+    /// Updates approved / processing / partially available requests (every kind, books and
+    /// albums included) from library availability. Returns how many requests changed.
     pub async fn sync_request_statuses(&self) -> Result<usize> {
         let rows = self
             .requests_repo()
@@ -726,7 +755,8 @@ impl RequestService {
                 ..Default::default()
             })
             .await?;
-        self.sync_rows(rows).await
+        let movies_tv = self.sync_rows(rows).await?;
+        Ok(movies_tv + self.sync_content_statuses().await?)
     }
 
     async fn sync_rows(&self, rows: Vec<RequestRow>) -> Result<usize> {
@@ -889,7 +919,23 @@ pub(crate) enum NotifyKind {
     Available,
 }
 
-fn require_manager(actor: &Actor) -> Result<()> {
+/// Statuses selected by a list `status` filter (`all`, `active` or one status).
+pub(crate) fn status_filter(status: Option<&str>) -> Result<Vec<RequestStatus>> {
+    Ok(match status.unwrap_or("all") {
+        "all" | "" => Vec::new(),
+        "active" => vec![
+            RequestStatus::Pending,
+            RequestStatus::Approved,
+            RequestStatus::Processing,
+        ],
+        other => vec![
+            RequestStatus::parse(other)
+                .ok_or_else(|| Error::Validation(format!("unknown status filter {other:?}")))?,
+        ],
+    })
+}
+
+pub(crate) fn require_manager(actor: &Actor) -> Result<()> {
     if actor.permissions.has(Permissions::MANAGE_REQUESTS) {
         Ok(())
     } else {
@@ -897,7 +943,7 @@ fn require_manager(actor: &Actor) -> Result<()> {
     }
 }
 
-fn unknown_user(id: i64) -> UserBriefDto {
+pub(crate) fn unknown_user(id: i64) -> UserBriefDto {
     UserBriefDto {
         id,
         username: "deleted".into(),

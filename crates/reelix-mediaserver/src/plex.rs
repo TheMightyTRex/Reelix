@@ -87,7 +87,7 @@ pub struct Plex {
 }
 
 /// Whether `path` is `root` or inside it (separator-aware, either slash style).
-fn is_within(path: &str, root: &str) -> bool {
+pub(crate) fn is_within(path: &str, root: &str) -> bool {
     let root = root.trim_end_matches(['/', '\\']);
     path.strip_prefix(root)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '\\']))

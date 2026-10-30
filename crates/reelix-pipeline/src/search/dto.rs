@@ -10,7 +10,7 @@ use reelix_decision::RejectionKind;
 
 use super::context::{Eval, Target};
 use super::{Result, SearchError, SearchService};
-use crate::store::blocklist;
+use crate::store::{ContentRef, blocklist};
 
 fn episode_ref(e: &reelix_api_types::library::EpisodeDto) -> EpisodeRefDto {
     EpisodeRefDto {
@@ -74,6 +74,9 @@ pub fn release_dto(e: &Eval, t: &Target, rank: u32, now: DateTime<Utc>) -> Relea
         series_id: t.series_id(),
         episodes: t.episodes_by_id(&c.episode_ids).iter().map(episode_ref).collect(),
         full_season: c.parsed.episode().is_some_and(|x| x.full_season),
+        book_id: t.content().book_id,
+        book_format: t.book_format(),
+        album_id: t.content().album_id,
     }
 }
 
@@ -83,6 +86,8 @@ pub struct MediaRefs {
     movies: HashMap<i64, MediaRefDto>,
     series: HashMap<i64, MediaRefDto>,
     episodes: HashMap<i64, EpisodeRefDto>,
+    books: HashMap<i64, MediaRefDto>,
+    albums: HashMap<i64, MediaRefDto>,
 }
 
 impl MediaRefs {
@@ -93,11 +98,57 @@ impl MediaRefs {
             .cloned()
     }
 
+    /// The book (with the row's format) or album of a content reference.
+    pub fn content(&self, c: &ContentRef) -> Option<MediaRefDto> {
+        if let Some(id) = c.book_id {
+            return self.books.get(&id).cloned().map(|mut m| {
+                m.book_format = c.book_format;
+                m
+            });
+        }
+        c.album_id.and_then(|id| self.albums.get(&id).cloned())
+    }
+
     pub fn episodes(&self, ids: &[i64]) -> Vec<EpisodeRefDto> {
         ids.iter()
             .filter_map(|id| self.episodes.get(id).cloned())
             .collect()
     }
+}
+
+/// Book / album reference of a library book (`kind` `book`, author as subtitle).
+pub fn book_ref(b: &reelix_api_types::books::BookDto) -> MediaRefDto {
+    MediaRefDto {
+        kind: "book".into(),
+        id: b.id,
+        title: b.title.clone(),
+        year: b.year,
+        subtitle: Some(b.author_name.clone()),
+        book_format: None,
+    }
+}
+
+/// Album reference (`kind` `album`, artist as subtitle).
+pub fn album_ref(a: &reelix_api_types::music::AlbumDto) -> MediaRefDto {
+    use chrono::Datelike;
+    MediaRefDto {
+        kind: "album".into(),
+        id: a.id,
+        title: a.title.clone(),
+        year: a.release_date.map(|d| d.year()),
+        subtitle: Some(a.artist_name.clone()),
+        book_format: None,
+    }
+}
+
+/// Distinct book and album ids of content references.
+pub fn content_ids(items: impl Iterator<Item = ContentRef>) -> (Vec<i64>, Vec<i64>) {
+    let (mut books, mut albums) = (Vec::new(), Vec::new());
+    for c in items {
+        books.extend(c.book_id);
+        albums.extend(c.album_id);
+    }
+    (uniq(books.into_iter()), uniq(albums.into_iter()))
 }
 
 fn uniq(it: impl Iterator<Item = i64>) -> Vec<i64> {
@@ -126,6 +177,8 @@ impl SearchService {
                         id: x.id,
                         title: x.title,
                         year: x.year,
+                        subtitle: None,
+                        book_format: None,
                     },
                 );
             }
@@ -139,6 +192,8 @@ impl SearchService {
                         id: x.id,
                         title: x.title,
                         year: x.year,
+                        subtitle: None,
+                        book_format: None,
                     },
                 );
             }
@@ -149,6 +204,26 @@ impl SearchService {
             }
         }
         Ok(refs)
+    }
+
+    /// Adds book / album references (titles with author / artist) to `refs`. Unknown ids
+    /// (deleted media) are skipped.
+    pub(crate) async fn content_refs(&self, refs: &mut MediaRefs, items: impl Iterator<Item = ContentRef>) {
+        let (books, albums) = content_ids(items);
+        if let Some(svc) = self.books.get() {
+            for id in books {
+                if let Ok(b) = svc.get_book(id).await {
+                    refs.books.insert(id, book_ref(&b));
+                }
+            }
+        }
+        if let Some(svc) = self.music.get() {
+            for id in albums {
+                if let Ok(a) = svc.get_album(id).await {
+                    refs.albums.insert(id, album_ref(&a));
+                }
+            }
+        }
     }
 
     /// `GET /blocklist` (newest first; `page` 1-based, default page size 50).
@@ -165,19 +240,22 @@ impl SearchService {
             (i64::from(page - 1) * i64::from(size), i64::from(size))
         };
         let (rows, total) = blocklist::list(&self.db, offset, limit).await?;
-        let refs = self
+        let mut refs = self
             .media_refs(
                 rows.iter().filter_map(|b| b.movie_id),
                 rows.iter().filter_map(|b| b.series_id),
                 std::iter::empty(),
             )
             .await?;
+        self.content_refs(&mut refs, rows.iter().map(|b| b.content)).await;
         Ok(Paged {
             items: rows
                 .into_iter()
                 .map(|b| BlocklistDto {
                     id: b.id,
-                    media: refs.media(b.movie_id, b.series_id),
+                    media: refs
+                        .media(b.movie_id, b.series_id)
+                        .or_else(|| refs.content(&b.content)),
                     source_title: b.source_title,
                     quality: b.quality,
                     protocol: b.protocol,

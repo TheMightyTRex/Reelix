@@ -698,9 +698,296 @@ fn openapi_has_m6_tags() {
     for p in [
         "/api/v1/requests",
         "/api/v1/discover/{feed}",
+        "/api/v1/discover/content/{kind}/{row}",
         "/api/v1/users",
         "/api/v1/auth/oidc/login",
     ] {
         assert!(doc["paths"].get(p).is_some(), "{p}");
     }
+}
+
+#[tokio::test]
+async fn book_and_album_requests_and_discovery() {
+    let app = app().await;
+    app.lib
+        .state()
+        .book_hits
+        .push(fakes::book("OL893415W", "Dune", "Frank Herbert"));
+    app.lib.state().album_hits.push(fakes::album(
+        "b1392450-e666-3926-a536-22c65f834433",
+        "OK Computer",
+        "Radiohead",
+    ));
+    let admin = login(&app, "admin").await;
+    let alice = login(&app, "alice").await;
+
+    // ROLE_USER has no REQUEST_BOOK.
+    let body = json!({"kind": "book", "foreign_id": "OL893415W", "formats": ["audiobook"]});
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&alice),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // Search shows availability; the detail view lists requestable formats.
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/search/books?q=dune",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["results"][0]["foreign_id"], "OL893415W");
+    assert_eq!(r.body["results"][0]["availability"], "unknown");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/media/book/OL893415W",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["title"], "Dune");
+    assert_eq!(
+        r.body["request_ability"]["formats"],
+        json!(["ebook", "audiobook"])
+    );
+    let r = call(&app, Method::GET, "/api/v1/media/book/OL404W", Some(&admin), None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    // Admin requests are auto-approved and added to the library.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&admin),
+        Some(body),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(r.body["status"], "approved");
+    assert_eq!(r.body["formats"], json!(["audiobook"]));
+    assert_eq!(r.body["subtitle"], "Frank Herbert");
+    assert!(r.body["book_id"].is_i64());
+    assert_eq!(app.lib.state().added_books.len(), 1);
+
+    let album = json!({"kind": "music", "foreign_id": "b1392450-e666-3926-a536-22c65f834433"});
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&admin),
+        Some(album.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let album_id = r.body["id"].as_i64().unwrap();
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&admin),
+        Some(album),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests/media?kind=music",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["total"], 1);
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/requests/media/{album_id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["kind"], "music");
+    // Movie/TV endpoints don't see book/album requests.
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/requests/{album_id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(&app, Method::GET, "/api/v1/requests", Some(&admin), None).await;
+    assert_eq!(r.body["total"], 0);
+    let r = call(&app, Method::GET, "/api/v1/requests/count", Some(&admin), None).await;
+    assert_eq!(r.body["total"], 2);
+    assert_eq!(r.body["book"], 1);
+    assert_eq!(r.body["music"], 1);
+
+    let r = call(&app, Method::GET, "/api/v1/search/music?q=ok", Some(&alice), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["albums"][0]["request"]["status"], Value::Null);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests/media/options?kind=audiobook",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["profiles"][0]["id"], 100);
+
+    let me = call(&app, Method::GET, "/api/v1/auth/me", Some(&admin), None).await;
+    let uid = me.body["id"].as_i64().unwrap();
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/users/{uid}/quota"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["book"]["used"], 1);
+    assert_eq!(r.body["music"]["used"], 1);
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/requests/media/{album_id}/decline"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    // Approved requests cannot be declined.
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    let r = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/requests/media/{album_id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn movie_request_json_shape_is_unchanged() {
+    let app = app().await;
+    let admin = login(&app, "admin").await;
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests",
+        Some(&admin),
+        Some(json!({"kind": "movie", "tmdb_id": 603})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let mut keys: Vec<&str> = r.body.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "approved_at",
+            "available_at",
+            "backdrop",
+            "created_at",
+            "decline_reason",
+            "failure_reason",
+            "id",
+            "imdb_id",
+            "is_4k",
+            "kind",
+            "modified_by",
+            "movie_id",
+            "poster",
+            "profile_id",
+            "requested_by",
+            "root_folder_id",
+            "seasons",
+            "series_id",
+            "status",
+            "tags",
+            "title",
+            "tmdb_id",
+            "tvdb_id",
+            "updated_at",
+            "year",
+        ]
+    );
+    let r = call(&app, Method::GET, "/api/v1/requests/count", Some(&admin), None).await;
+    assert!(r.body.get("book").is_none() && r.body.get("music").is_none());
+}
+
+#[tokio::test]
+async fn book_and_music_discover_rows() {
+    let app = app().await;
+    app.lib.state().content_rows.insert(
+        (
+            reelix_api_types::requests::ContentRequestKind::Book,
+            "subject-fantasy".into(),
+        ),
+        vec![fakes::book("OL27479W", "The Two Towers", "J.R.R. Tolkien")],
+    );
+    app.lib.state().content_rows.insert(
+        (
+            reelix_api_types::requests::ContentRequestKind::Music,
+            "new-releases".into(),
+        ),
+        vec![fakes::album("rg-1", "Perfecth", "Queens of the Stone Age")],
+    );
+    let alice = login(&app, "alice").await;
+
+    // Not taken by the `/discover/{feed}` catch-all.
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/book/subject-fantasy",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["results"][0]["foreign_id"], "OL27479W");
+    assert_eq!(r.body["results"][0]["subtitle"], "J.R.R. Tolkien");
+    assert_eq!(r.body["results"][0]["kind"], "book");
+
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/music/new-releases",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["results"][0]["title"], "Perfecth");
+
+    for uri in [
+        "/api/v1/discover/content/movies/trending",
+        "/api/v1/discover/content/book/nope",
+    ] {
+        let r = call(&app, Method::GET, uri, Some(&alice), None).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{uri}");
+    }
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/book/trending",
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }

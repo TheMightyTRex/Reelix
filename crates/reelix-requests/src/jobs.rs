@@ -4,8 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reelix_api_types::requests::CreateRequestDto;
-use reelix_core::MediaKind;
-use reelix_jobs::{JobContext, JobHandler, TaskDef};
+use reelix_core::bus::EventBus;
+use reelix_core::{DomainEvent, MediaKind};
+use reelix_db::NewJob;
+use reelix_jobs::{JobContext, JobHandler, JobQueue, TaskDef};
 
 use crate::repo::RequestFilter;
 use crate::{Error, RequestService, Result};
@@ -39,11 +41,84 @@ impl JobHandler for RequestStatusSyncJob {
         REQUEST_STATUS_SYNC
     }
 
-    async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> anyhow::Result<()> {
-        let n = self.0.sync_request_statuses().await?;
+    async fn run(&self, _ctx: &JobContext, payload: serde_json::Value) -> anyhow::Result<()> {
+        // `{"content": true}` (queued by the library watch): book/album requests only.
+        let n = if payload.get("content").and_then(serde_json::Value::as_bool) == Some(true) {
+            self.0.sync_content_statuses().await?
+        } else {
+            self.0.sync_request_statuses().await?
+        };
         tracing::debug!(changed = n, "request status sync finished");
         Ok(())
     }
+}
+
+/// Library changes that can change the availability of a book/album request.
+const CONTENT_ENTITIES: &[&str] = &[
+    "book",
+    "book_file",
+    "author",
+    "album",
+    "trackfile",
+    "track_file",
+    "artist",
+    "queue",
+];
+
+/// Debounce for library change bursts (e.g. an album import emits one event per track).
+const CONTENT_SYNC_QUIET: Duration = Duration::from_secs(3);
+const CONTENT_SYNC_MAX_WAIT: Duration = Duration::from_secs(30);
+
+/// Watches book/music library changes and queues a book/album request status sync shortly
+/// after they settle, so requests turn `processing` / `available` without waiting for the
+/// 15-minute task. Needs a tokio runtime; does nothing without one.
+pub(crate) fn spawn_content_watch(events: &EventBus, queue: JobQueue) {
+    let Ok(rt) = tokio::runtime::Handle::try_current() else {
+        tracing::debug!("no runtime: book/album request status watch disabled");
+        return;
+    };
+    let mut rx = events.subscribe();
+    rt.spawn(async move {
+        use tokio::sync::broadcast::error::RecvError;
+        let relevant = |ev: &DomainEvent| {
+            matches!(ev, DomainEvent::EntityChanged { entity, .. } if CONTENT_ENTITIES.contains(&entity.as_str()))
+        };
+        loop {
+            // Wait for the first relevant change.
+            match rx.recv().await {
+                Ok(ev) if relevant(&ev) => {}
+                Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => return,
+            }
+            // Let the burst settle.
+            let started = tokio::time::Instant::now();
+            loop {
+                let quiet = tokio::time::sleep(CONTENT_SYNC_QUIET);
+                tokio::select! {
+                    ev = rx.recv() => match ev {
+                        Err(RecvError::Closed) => return,
+                        _ if started.elapsed() >= CONTENT_SYNC_MAX_WAIT => break,
+                        _ => continue,
+                    },
+                    () = quiet => break,
+                }
+            }
+            // A sync that is already queued/running deduplicates this one; retry a few times
+            // so changes made during a running sync are not lost.
+            for _ in 0..5 {
+                let job = NewJob::new(REQUEST_STATUS_SYNC, serde_json::json!({ "content": true }))
+                    .dedupe(format!("{REQUEST_STATUS_SYNC}:content"));
+                match queue.enqueue(job).await {
+                    Ok(Some(_)) => break,
+                    Ok(None) => tokio::time::sleep(CONTENT_SYNC_QUIET).await,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "could not queue the request status sync");
+                        break;
+                    }
+                }
+            }
+        }
+    });
 }
 
 pub struct WatchlistSyncJob(pub Arc<RequestService>);

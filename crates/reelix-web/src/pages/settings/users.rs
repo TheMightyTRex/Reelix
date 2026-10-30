@@ -116,12 +116,17 @@ pub fn UsersPage() -> impl IntoView {
     let mq_days = RwSignal::new(String::new());
     let tq_limit = RwSignal::new(String::new());
     let tq_days = RwSignal::new(String::new());
+    let bq_limit = RwSignal::new(String::new());
+    let bq_days = RwSignal::new(String::new());
+    let uq_limit = RwSignal::new(String::new());
+    let uq_days = RwSignal::new(String::new());
     let saving = RwSignal::new(false);
 
     let open_create = move |_| {
         editing.set(None);
         for s in [
-            username, display, email, password, mq_limit, mq_days, tq_limit, tq_days,
+            username, display, email, password, mq_limit, mq_days, tq_limit, tq_days, bq_limit, bq_days,
+            uq_limit, uq_days,
         ] {
             s.set(String::new());
         }
@@ -138,6 +143,10 @@ pub fn UsersPage() -> impl IntoView {
         mq_days.set(num(u.movie_quota_days));
         tq_limit.set(num(u.tv_quota_limit));
         tq_days.set(num(u.tv_quota_days));
+        bq_limit.set(num(u.book_quota_limit));
+        bq_days.set(num(u.book_quota_days));
+        uq_limit.set(num(u.music_quota_limit));
+        uq_days.set(num(u.music_quota_days));
         editing.set(Some(u));
         edit_open.set(true);
     };
@@ -159,6 +168,10 @@ pub fn UsersPage() -> impl IntoView {
                         movie_quota_days: opt_u32(&mq_days.get_untracked()),
                         tv_quota_limit: opt_u32(&tq_limit.get_untracked()),
                         tv_quota_days: opt_u32(&tq_days.get_untracked()),
+                        book_quota_limit: opt_u32(&bq_limit.get_untracked()),
+                        book_quota_days: opt_u32(&bq_days.get_untracked()),
+                        music_quota_limit: opt_u32(&uq_limit.get_untracked()),
+                        music_quota_days: opt_u32(&uq_days.get_untracked()),
                         password: (!pw.is_empty()).then_some(pw),
                     };
                     api::put::<_, UserDetailDto>(&format!("/users/{}", u.id), &body).await
@@ -174,6 +187,10 @@ pub fn UsersPage() -> impl IntoView {
                         movie_quota_days: opt_u32(&mq_days.get_untracked()),
                         tv_quota_limit: opt_u32(&tq_limit.get_untracked()),
                         tv_quota_days: opt_u32(&tq_days.get_untracked()),
+                        book_quota_limit: opt_u32(&bq_limit.get_untracked()),
+                        book_quota_days: opt_u32(&bq_days.get_untracked()),
+                        music_quota_limit: opt_u32(&uq_limit.get_untracked()),
+                        music_quota_days: opt_u32(&uq_days.get_untracked()),
                     };
                     api::post::<_, UserDetailDto>("/users", &body).await
                 }
@@ -294,6 +311,18 @@ pub fn UsersPage() -> impl IntoView {
                                         m.map(|v| v.to_string()).unwrap_or_else(|| "∞".into()),
                                         t.map(|v| v.to_string()).unwrap_or_else(|| "∞".into())),
                                 };
+                                let content_quota = [
+                                    u.book_quota_limit.map(|v| format!("{v} books")),
+                                    u.music_quota_limit.map(|v| format!("{v} albums")),
+                                ]
+                                .into_iter()
+                                .flatten()
+                                .collect::<Vec<_>>();
+                                let quota = if content_quota.is_empty() {
+                                    quota
+                                } else {
+                                    format!("{quota} · {}", content_quota.join(" · "))
+                                };
                                 let tone = if u.permissions.is_admin() { Tone::Accent } else { Tone::Neutral };
                                 let is_me = Some(u.id) == me;
                                 let (ue, ud) = (u.clone(), u.clone());
@@ -385,6 +414,10 @@ pub fn UsersPage() -> impl IntoView {
                         <label>"per days"<input class="input input-sm" type="number" min="1" placeholder="days" prop:value=move || mq_days.get() on:input=move |e| mq_days.set(event_target_value(&e)) /></label>
                         <label>"Seasons"<input class="input input-sm" type="number" min="0" placeholder="limit" prop:value=move || tq_limit.get() on:input=move |e| tq_limit.set(event_target_value(&e)) /></label>
                         <label>"per days"<input class="input input-sm" type="number" min="1" placeholder="days" prop:value=move || tq_days.get() on:input=move |e| tq_days.set(event_target_value(&e)) /></label>
+                        <label>"Books"<input class="input input-sm" type="number" min="0" placeholder="limit" prop:value=move || bq_limit.get() on:input=move |e| bq_limit.set(event_target_value(&e)) /></label>
+                        <label>"per days"<input class="input input-sm" type="number" min="1" placeholder="days" prop:value=move || bq_days.get() on:input=move |e| bq_days.set(event_target_value(&e)) /></label>
+                        <label>"Albums"<input class="input input-sm" type="number" min="0" placeholder="limit" prop:value=move || uq_limit.get() on:input=move |e| uq_limit.set(event_target_value(&e)) /></label>
+                        <label>"per days"<input class="input input-sm" type="number" min="1" placeholder="days" prop:value=move || uq_days.get() on:input=move |e| uq_days.set(event_target_value(&e)) /></label>
                     </div>
                 </div>
                 <div class="modal-footer">

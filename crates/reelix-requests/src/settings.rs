@@ -29,7 +29,11 @@ impl RequestService {
                 "series_type must be standard, daily or anime".into(),
             ));
         }
-        if s.movie_quota_days == 0 || s.tv_quota_days == 0 {
+        if s.movie_quota_days == 0
+            || s.tv_quota_days == 0
+            || s.book_quota_days == 0
+            || s.music_quota_days == 0
+        {
             return Err(Error::Validation("quota days must be at least 1".into()));
         }
         if s.default_permissions.is_admin() {

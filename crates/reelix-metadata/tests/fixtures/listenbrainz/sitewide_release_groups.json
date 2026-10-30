@@ -1,0 +1,7 @@
+{"payload": {"count": 2, "offset": 0, "range": "week", "from_ts": 1, "to_ts": 2, "last_updated": 3, "total_release_group_count": 100, "release_groups": [
+ {"artist_mbids": ["0d79fe8e-ba27-4859-bb8c-2f255f346853"], "artist_name": "BTS", "caa_id": 44649468687, "caa_release_mbid": "909d000d-56e9-4b38-aa3f-008d38436ea2", "listen_count": 284182, "release_group_mbid": "21159e3f-172e-43f6-aa7d-8e06a81fea49", "release_group_name": "ARIRANG"},
+ {"artist_mbids": ["0d79fe8e-ba27-4859-bb8c-2f255f346853"], "artist_name": "BTS", "caa_id": 44649468687, "caa_release_mbid": "909d000d-56e9-4b38-aa3f-008d38436ea2", "listen_count": 211727, "release_group_mbid": "21159e3f-172e-43f6-aa7d-8e06a81fea49", "release_group_name": "ARIRANG"},
+ {"artist_mbids": ["0d79fe8e-ba27-4859-bb8c-2f255f346853"], "artist_name": "bts", "listen_count": 100, "release_group_mbid": "other-arirang-id", "release_group_name": "Arirang"},
+ {"artist_mbids": [], "artist_name": "Unknown", "listen_count": 10, "release_group_mbid": "", "release_group_name": "No id"},
+ {"artist_mbids": ["a74b1b7f-71a5-4011-9441-d0b5e4122711"], "artist_name": "Radiohead", "caa_id": null, "caa_release_mbid": null, "listen_count": 1000, "release_group_mbid": "b1392450-e666-3926-a536-22c65f834433", "release_group_name": "OK Computer"}
+]}}

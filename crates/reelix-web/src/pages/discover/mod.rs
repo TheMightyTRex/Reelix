@@ -1,17 +1,22 @@
 //! `/discover` — the requester home: hero carousel, feed rows, genres, networks and studios —
-//! and `/discover/{feed}` ("see all" grids with paging).
+//! and `/discover/{feed}` ("see all" grids with paging). `/discover?tab=books|music` shows the
+//! book / music search (users with REQUEST_BOOK / REQUEST_MUSIC).
+
+pub mod content;
 
 use std::time::Duration;
 
 use leptos::prelude::*;
 use leptos_router::components::A;
-use leptos_router::hooks::use_params_map;
-use reelix_api_types::requests::{DiscoverItemDto, DiscoverPageDto, GenreDto};
+use leptos_router::hooks::{use_params_map, use_query_map};
+use reelix_api_types::Permissions;
+use reelix_api_types::requests::{ContentRequestKind, DiscoverItemDto, DiscoverPageDto, GenreDto};
 
 use crate::api;
 use crate::components::media_card::{MediaBadge, MediaCard, MediaCardSkeleton, MediaGrid, MediaRow};
 use crate::components::request_status::{item_badge, kind_label, media_href};
 use crate::components::{EmptyState, ErrorBox, Icon};
+use crate::state::AuthState;
 
 /// Discover rows in display order: (feed, title).
 const ROWS: &[(&str, &str)] = &[
@@ -81,8 +86,57 @@ fn feed_url(feed: &str, page: u32) -> String {
     format!("/discover/{feed}?page={page}")
 }
 
+/// Movies & TV / Books / Music tabs; books and music only for users who may request them.
 #[component]
 pub fn DiscoverPage() -> impl IntoView {
+    let auth = AuthState::expect();
+    let query = use_query_map();
+    let tab = Memo::new(move |_| query.with(|q| q.get("tab").unwrap_or_default()));
+    let books = move || auth.has(Permissions::REQUEST_BOOK);
+    let music = move || auth.has(Permissions::REQUEST_MUSIC);
+    let tabs = move || {
+        (books() || music()).then(|| {
+            let current = tab.get();
+            let item = |value: &'static str, label: &'static str, icon: &'static str| {
+                let active =
+                    current == value || (value.is_empty() && !matches!(current.as_str(), "books" | "music"));
+                let href = if value.is_empty() {
+                    "/discover".to_string()
+                } else {
+                    format!("/discover?tab={value}")
+                };
+                view! {
+                    <A href=href attr:class=if active { "tab active" } else { "tab" } attr:role="tab"
+                        attr:aria-selected=active.to_string()>
+                        <Icon name=icon />{label}
+                    </A>
+                }
+            };
+            view! {
+                <div class="tabs" role="tablist" aria-label="What to discover">
+                    {item("", "Movies & TV", "film")}
+                    {books().then(|| item("books", "Books", "books"))}
+                    {music().then(|| item("music", "Music", "music"))}
+                </div>
+            }
+        })
+    };
+    let body = move || match tab.get().as_str() {
+        "books" if books() => view! { <content::ContentDiscover kind=ContentRequestKind::Book /> }.into_any(),
+        "music" if music() => {
+            view! { <content::ContentDiscover kind=ContentRequestKind::Music /> }.into_any()
+        }
+        _ => view! { <MoviesTvDiscover /> }.into_any(),
+    };
+    view! {
+        {tabs}
+        {body}
+    }
+}
+
+/// The movie / series discover home.
+#[component]
+fn MoviesTvDiscover() -> impl IntoView {
     let trending =
         LocalResource::new(|| async { api::get::<DiscoverPageDto>(&feed_url("trending", 1)).await });
     let movie_genres = LocalResource::new(|| api::get::<Vec<GenreDto>>("/discover/genres/movie"));
