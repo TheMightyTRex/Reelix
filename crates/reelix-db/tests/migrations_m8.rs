@@ -230,7 +230,7 @@ async fn upgrade_from_0007_keeps_every_row() {
         .fetch_all(pool)
         .await
         .unwrap();
-    assert_eq!(versions, (1..=11).collect::<Vec<i64>>());
+    assert_eq!(versions, (1..=12).collect::<Vec<i64>>());
 
     // Every old column of every table keeps every value.
     for (t, cols, rows) in &before {

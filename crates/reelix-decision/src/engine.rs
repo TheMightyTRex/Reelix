@@ -368,6 +368,32 @@ spec!(SizeWithinLimits, "size", |c, ctx, facts| {
             format!("{} is larger than the maximum size {max} MB", mb(c.size)),
         ));
     }
+    // The profile's limits, per episode for multi-episode releases.
+    let episodes = u64::from(ctx.episode_count.max(1));
+    if let Some(min) = ctx.profile.min_size_mb
+        && c.size < min.saturating_mul(1024 * 1024).saturating_mul(episodes)
+    {
+        out.push(Rejection::permanent(
+            "size",
+            format!(
+                "{} is smaller than the profile's minimum of {}",
+                mb(c.size),
+                mb(min.saturating_mul(1024 * 1024).saturating_mul(episodes))
+            ),
+        ));
+    }
+    if let Some(max) = ctx.profile.max_size_mb
+        && c.size > max.saturating_mul(1024 * 1024).saturating_mul(episodes)
+    {
+        out.push(Rejection::permanent(
+            "size",
+            format!(
+                "{} is larger than the profile's maximum of {}",
+                mb(c.size),
+                mb(max.saturating_mul(1024 * 1024).saturating_mul(episodes))
+            ),
+        ));
+    }
     let Some(runtime) = ctx.runtime_minutes.filter(|r| *r > 0) else {
         return out;
     };
@@ -742,6 +768,29 @@ mod tests {
         assert_eq!(d.format_score, -100);
         assert_eq!(d.matched_formats[0].name, "x265 (HD)");
         assert_eq!(specs(&d), vec!["custom_format_score"]);
+    }
+
+    #[test]
+    fn profile_size_limits_scale_with_episodes() {
+        let mut profile = hd1080();
+        profile.min_size_mb = Some(500);
+        profile.max_size_mb = Some(4096);
+        let ctx = DecisionContext::new(&profile, now());
+        let mut c = cand("Movie.2020.1080p.BluRay.x264-GRP");
+        c.size = 2 * 1024 * 1024 * 1024;
+        assert!(specs(&evaluate(&c, &ctx)).is_empty());
+        c.size = 100 * 1024 * 1024;
+        assert_eq!(specs(&evaluate(&c, &ctx)), vec!["size"]);
+        c.size = 5 * 1024 * 1024 * 1024;
+        assert_eq!(specs(&evaluate(&c, &ctx)), vec!["size"]);
+        // A 10-episode pack may be ten times larger.
+        let mut pack = DecisionContext::new(&profile, now());
+        pack.episode_count = 10;
+        c.size = 30 * 1024 * 1024 * 1024;
+        assert!(specs(&evaluate(&c, &pack)).is_empty());
+        // Unknown size is not rejected.
+        c.size = 0;
+        assert!(specs(&evaluate(&c, &ctx)).is_empty());
     }
 
     #[test]

@@ -263,6 +263,8 @@ async fn music_routes_flow_and_permissions() {
             format_items: vec![],
             language: None,
             family: QualityFamily::Music,
+            min_size_mb: None,
+            max_size_mb: None,
         })
         .await
         .unwrap();

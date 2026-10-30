@@ -18,7 +18,7 @@ pub struct QualityProfileRepo<'a> {
 }
 
 const COLS: &str = "id, name, items, cutoff, upgrade_allowed, min_format_score, cutoff_format_score, \
-                    min_upgrade_format_score, format_items, language, media_kind";
+                    min_upgrade_format_score, format_items, language, media_kind, min_size_mb, max_size_mb";
 
 fn map(row: &SqliteRow) -> Result<QualityProfile> {
     let language: Option<i64> = row.try_get("language")?;
@@ -39,7 +39,19 @@ fn map(row: &SqliteRow) -> Result<QualityProfile> {
             .and_then(|l| u16::try_from(l).ok())
             .and_then(Language::from_id),
         family,
+        min_size_mb: size_col(row, "min_size_mb")?,
+        max_size_mb: size_col(row, "max_size_mb")?,
     })
+}
+
+fn size_col(row: &SqliteRow, col: &str) -> Result<Option<u64>> {
+    Ok(row
+        .try_get::<Option<i64>, _>(col)?
+        .and_then(|v| u64::try_from(v).ok()))
+}
+
+fn size_bind(v: Option<u64>) -> Option<i64> {
+    v.map(|v| i64::try_from(v).unwrap_or(i64::MAX))
 }
 
 fn conflict(e: sqlx::Error, name: &str) -> DbError {
@@ -57,8 +69,9 @@ async fn insert(
     let now = now_ms();
     let res = sqlx::query(
         "INSERT INTO quality_profiles (name, items, cutoff, upgrade_allowed, min_format_score, cutoff_format_score,
-             min_upgrade_format_score, format_items, language, media_kind, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             min_upgrade_format_score, format_items, language, media_kind, min_size_mb, max_size_mb,
+             created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(p.name.trim())
     .bind(serde_json::to_string(&p.items).unwrap_or_else(|_| "[]".into()))
@@ -70,6 +83,8 @@ async fn insert(
     .bind(serde_json::to_string(&p.format_items).unwrap_or_else(|_| "[]".into()))
     .bind(p.language.map(|l| l.id() as i64))
     .bind(p.family.as_str())
+    .bind(size_bind(p.min_size_mb))
+    .bind(size_bind(p.max_size_mb))
     .bind(now)
     .bind(now)
     .execute(&mut *conn)
@@ -157,7 +172,8 @@ impl QualityProfileRepo<'_> {
     pub async fn update(&self, id: i64, p: &QualityProfile) -> Result<Option<QualityProfile>> {
         let res = sqlx::query(
             "UPDATE quality_profiles SET name = ?, items = ?, cutoff = ?, upgrade_allowed = ?, min_format_score = ?,
-                 cutoff_format_score = ?, min_upgrade_format_score = ?, format_items = ?, language = ?, updated_at = ?
+                 cutoff_format_score = ?, min_upgrade_format_score = ?, format_items = ?, language = ?, min_size_mb = ?,
+                 max_size_mb = ?, updated_at = ?
              WHERE id = ?",
         )
         .bind(p.name.trim())
@@ -169,6 +185,8 @@ impl QualityProfileRepo<'_> {
         .bind(p.min_upgrade_format_score)
         .bind(serde_json::to_string(&p.format_items)?)
         .bind(p.language.map(|l| l.id() as i64))
+        .bind(size_bind(p.min_size_mb))
+        .bind(size_bind(p.max_size_mb))
         .bind(now_ms())
         .bind(id)
         .execute(self.db.pool())

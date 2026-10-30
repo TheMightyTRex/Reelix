@@ -23,6 +23,42 @@ fn parse_i32(s: &str) -> i32 {
     s.trim().parse().unwrap_or(0)
 }
 
+/// "Size: 1–15 GB" style summary of a profile's limits.
+fn size_summary(min: Option<u64>, max: Option<u64>, family: QualityFamily) -> Option<String> {
+    let unit = if size_in_gb(family) { "GB" } else { "MB" };
+    let t = |v| size_text(Some(v), family);
+    Some(match (min, max) {
+        (None, None) => return None,
+        (Some(a), Some(b)) => format!("Size: {}–{} {unit}", t(a), t(b)),
+        (Some(a), None) => format!("Size: at least {} {unit}", t(a)),
+        (None, Some(b)) => format!("Size: at most {} {unit}", t(b)),
+    })
+}
+
+/// Size limits are edited in GB for video and in MB for books and music.
+fn size_in_gb(family: QualityFamily) -> bool {
+    family == QualityFamily::Video
+}
+
+/// A size limit (MB) as the editor shows it; empty = no limit.
+fn size_text(mb: Option<u64>, family: QualityFamily) -> String {
+    match mb {
+        None => String::new(),
+        Some(mb) if size_in_gb(family) => {
+            let gb = format!("{:.2}", mb as f64 / 1024.0);
+            gb.trim_end_matches('0').trim_end_matches('.').to_string()
+        }
+        Some(mb) => mb.to_string(),
+    }
+}
+
+/// Parses an editor size back to MB; empty, zero or invalid = no limit.
+fn parse_size(s: &str, family: QualityFamily) -> Option<u64> {
+    let v: f64 = s.trim().replace(',', ".").parse().ok()?;
+    let mb = if size_in_gb(family) { v * 1024.0 } else { v };
+    (mb.is_finite() && mb >= 1.0).then(|| mb.round() as u64)
+}
+
 /// Moves `items[from]` to index `to`.
 fn move_item<T>(items: &mut Vec<T>, from: usize, to: usize) {
     if from < items.len() && to < items.len() && from != to {
@@ -151,6 +187,8 @@ fn QualityProfilesCard() -> impl IntoView {
     let min_score = RwSignal::new(String::from("0"));
     let cutoff_score = RwSignal::new(String::from("0"));
     let min_upgrade = RwSignal::new(String::from("1"));
+    let min_size = RwSignal::new(String::new());
+    let max_size = RwSignal::new(String::new());
     let items = RwSignal::new(Vec::<ProfileItem>::new());
     let scores = RwSignal::new(Vec::<(i64, String, RwSignal<String>)>::new());
     let dragging = RwSignal::new(None::<usize>);
@@ -168,6 +206,8 @@ fn QualityProfilesCard() -> impl IntoView {
         min_score.set(p.min_format_score.to_string());
         cutoff_score.set(p.cutoff_format_score.to_string());
         min_upgrade.set(p.min_upgrade_format_score.to_string());
+        min_size.set(size_text(p.min_size_mb, p.family));
+        max_size.set(size_text(p.max_size_mb, p.family));
         items.set(p.items.clone());
         let all = formats.get().and_then(Result::ok).unwrap_or_default();
         scores.set(
@@ -208,6 +248,8 @@ fn QualityProfilesCard() -> impl IntoView {
             format_items,
             language: Language::ALL.iter().copied().find(|l| l.name() == lang),
             family: editing_family.get_untracked(),
+            min_size_mb: parse_size(&min_size.get_untracked(), editing_family.get_untracked()),
+            max_size_mb: parse_size(&max_size.get_untracked(), editing_family.get_untracked()),
         };
         if let Err(e) = p.validate() {
             toasts.error(e.to_string());
@@ -292,6 +334,7 @@ fn QualityProfilesCard() -> impl IntoView {
                                     <span class="badge tone-neutral">{if p.upgrade_allowed { "Upgrades on" } else { "No upgrades" }}</span>
                                 </header>
                                 <p class="field-hint">{format!("Cutoff: {cutoff_name}")}</p>
+                                {size_summary(p.min_size_mb, p.max_size_mb, p.family).map(|s| view! { <p class="field-hint">{s}</p> })}
                                 <div class="chip-list">
                                     {allowed.into_iter().map(|a| view! { <span class="chip">{a}</span> }).collect_view()}
                                 </div>
@@ -474,6 +517,23 @@ fn QualityProfilesCard() -> impl IntoView {
                     <p class="field-hint">"Best first. Drag or use the arrows to reorder; grouped qualities rank equally."</p>
                     <ul class="q-list">{rows}</ul>
                 </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="qp-min-size">{move || format!("Minimum size ({})", if size_in_gb(editing_family.get()) { "GB" } else { "MB" })}</label>
+                        <input id="qp-min-size" class="input" type="number" min="0" step="any" placeholder="No minimum"
+                            prop:value=move || min_size.get() on:input=move |e| min_size.set(event_target_value(&e)) />
+                    </div>
+                    <div class="field">
+                        <label for="qp-max-size">{move || format!("Maximum size ({})", if size_in_gb(editing_family.get()) { "GB" } else { "MB" })}</label>
+                        <input id="qp-max-size" class="input" type="number" min="0" step="any" placeholder="No maximum"
+                            prop:value=move || max_size.get() on:input=move |e| max_size.set(event_target_value(&e)) />
+                    </div>
+                </div>
+                <p class="field-hint">{move || if editing_family.get() == QualityFamily::Video {
+                    "Releases outside these limits are never grabbed. For TV the limits are per episode, so season packs may be larger. Leave empty for no limit."
+                } else {
+                    "Releases outside these limits are never grabbed. Leave empty for no limit."
+                }}</p>
                 <div class="field-row field-row-3">
                     <div class="field">
                         <label for="qp-min">"Minimum format score"</label>

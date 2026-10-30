@@ -101,6 +101,14 @@ pub struct QualityProfile {
     /// (omitted from JSON for video profiles, so their wire shape is unchanged).
     #[serde(default, skip_serializing_if = "is_video")]
     pub family: QualityFamily,
+    /// Smallest release to grab, in MB (per episode for multi-episode releases); `None` = no
+    /// minimum.
+    #[serde(default)]
+    pub min_size_mb: Option<u64>,
+    /// Largest release to grab, in MB (per episode for multi-episode releases); `None` = no
+    /// maximum.
+    #[serde(default)]
+    pub max_size_mb: Option<u64>,
 }
 
 fn one() -> i32 {
@@ -189,6 +197,11 @@ impl QualityProfile {
                 seen.push(q);
             }
         }
+        if let (Some(min), Some(max)) = (self.min_size_mb, self.max_size_mb)
+            && min > max
+        {
+            return err("the minimum size must not be larger than the maximum size".into());
+        }
         match self.items.iter().find(|i| i.cutoff_id() == self.cutoff) {
             Some(i) if i.allowed => Ok(()),
             Some(_) => err("the cutoff quality must be allowed".into()),
@@ -252,6 +265,8 @@ impl QualityProfile {
             format_items: Vec::new(),
             language: Some(Language::English),
             family: QualityFamily::Video,
+            min_size_mb: None,
+            max_size_mb: None,
         }
     }
     /// A profile of `family` listing every quality of the family (default order, worst → best,
@@ -287,6 +302,8 @@ impl QualityProfile {
             format_items: Vec::new(),
             language: None,
             family,
+            min_size_mb: None,
+            max_size_mb: None,
         }
     }
 

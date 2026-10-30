@@ -321,6 +321,8 @@ async fn env() -> Env {
             format_items: vec![],
             language: None,
             family: QualityFamily::Music,
+            min_size_mb: None,
+            max_size_mb: None,
         })
         .await
         .unwrap();
