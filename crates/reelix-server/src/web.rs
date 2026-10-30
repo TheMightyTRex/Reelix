@@ -197,6 +197,11 @@ fn has_src_attr(attrs: &str) -> bool {
         .any(|a| a == "src" || a.starts_with("src="))
 }
 
+/// Third-party artwork hosts: TMDB and TheTVDB posters, Open Library book covers / author photos and
+/// Cover Art Archive album art (both of which redirect to `*.archive.org`).
+const IMG_HOSTS: &str = "https://image.tmdb.org https://artworks.thetvdb.com https://covers.openlibrary.org \
+    https://coverartarchive.org https://archive.org https://*.archive.org";
+
 /// The CSP served with `index.html`.
 pub fn content_security_policy(script_hashes: &[String]) -> String {
     let mut script_src = String::from("'self' 'wasm-unsafe-eval'");
@@ -206,7 +211,7 @@ pub fn content_security_policy(script_hashes: &[String]) -> String {
     }
     format!(
         "default-src 'self'; script-src {script_src}; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data: https://image.tmdb.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+         img-src 'self' data: {IMG_HOSTS}; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
     )
 }
 
@@ -292,6 +297,9 @@ mod tests {
         assert!(csp.contains("script-src 'self' 'wasm-unsafe-eval' 'sha256-abc';"));
         assert!(csp.contains("frame-ancestors 'none'"));
         assert!(csp.contains("img-src 'self' data: https://image.tmdb.org"));
+        for host in ["https://artworks.thetvdb.com", "https://covers.openlibrary.org", "https://coverartarchive.org", "https://*.archive.org"] {
+            assert!(csp.contains(host), "{host}");
+        }
         assert!(csp.starts_with("default-src 'self';"));
     }
 
