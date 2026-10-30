@@ -223,7 +223,10 @@ fn copy_atomic(src: &Path, dst: &Path, opts: &TransferOptions) -> Result<()> {
                 io::Error::other(format!("copied {copied} of {expected} bytes")),
             ));
         }
-        std::fs::File::open(&tmp)
+        // Windows only flushes a handle opened for writing (else "Access is denied").
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp)
             .and_then(|f| f.sync_all())
             .map_err(|e| Error::io(&tmp, e))?;
         if opts.preserve_mtime
