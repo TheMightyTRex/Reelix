@@ -16,6 +16,7 @@ pub mod quality;
 pub mod requests;
 pub mod security;
 pub mod tags;
+pub mod ui;
 pub mod users;
 
 pub use custom_formats::CustomFormatsPage;
@@ -34,4 +35,5 @@ pub use quality::QualityPage;
 pub use requests::RequestSettingsPage;
 pub use security::SecuritySettingsPage;
 pub use tags::TagsPage;
+pub use ui::UiSettingsPage;
 pub use users::UsersPage;

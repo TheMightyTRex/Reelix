@@ -15,7 +15,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const RADIOHEAD: &str = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
 const OK_COMPUTER: &str = "b1392450-e666-3926-a536-22c65f834433";
 const OK_COMPUTER_CD: &str = "0b6b4ba0-d36f-47bd-b4ea-6a5b91842d29";
-const UA: &str = "Reelix/0.0-test ( https://github.com/reelix/reelix )";
+const UA: &str = "Reelix/0.0-test ( https://github.com/mvanhare/Reelix )";
 
 fn fixture(name: &str) -> String {
     let p = format!("{}/tests/fixtures/musicbrainz/{name}", env!("CARGO_MANIFEST_DIR"));

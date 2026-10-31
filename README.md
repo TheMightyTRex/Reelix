@@ -68,6 +68,11 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 
 ### System
 - Health checks, a task scheduler with manual triggers, an event log and activity history.
+- Scheduled and manual backups of the database, `config.toml` and secret key, with download, retention and one-click restore (applied on the next restart, and rolled back if the restored database won't open).
+- A log viewer with level and text filters, a live tail and log file downloads.
+- Update checks against the [GitHub releases](https://github.com/mvanhare/Reelix/releases), with release notes and a health notice when a new version is out. Reelix never updates itself.
+- Bind address, port, URL base and logging can be edited in Settings → General; they are saved to `config.toml` and apply after a restart.
+- Per-user UI settings: date and time format, relative dates, first day of the week, and default calendar and library views.
 - REST API with API keys, and interactive API documentation at `/api/docs`.
 
 ---

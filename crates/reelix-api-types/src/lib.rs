@@ -12,6 +12,7 @@ pub mod pipeline;
 pub mod profiles;
 pub mod providers;
 pub mod requests;
+pub mod system;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

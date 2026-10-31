@@ -18,6 +18,7 @@ use utoipa_scalar::{Scalar, Servable};
 pub use auth::{AuthMethod, CurrentUser, MaybeUser};
 pub use error::{ApiError, ApiResult};
 pub use routes::integrations::{IMPORT_LIST_SYNC, Integrations, IntegrationsBackend};
+pub use routes::maintenance::{LogsQuery, Maintenance, MaintenanceBackend};
 pub use routes::pipeline_activity::ActivityHealth;
 pub use routes::system::{HealthSource, HealthSources};
 pub use routes::ws::visible_to;
@@ -53,7 +54,8 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::auth_external::routes())
         .merge(routes::integrations::routes())
         .merge(routes::books::routes())
-        .merge(routes::music::routes());
+        .merge(routes::music::routes())
+        .merge(routes::maintenance::routes());
 
     Router::new()
         .nest("/api/v1", v1)
@@ -82,6 +84,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     doc.merge(routes::integrations::Api::openapi());
     doc.merge(routes::books::Api::openapi());
     doc.merge(routes::music::Api::openapi());
+    doc.merge(routes::maintenance::Api::openapi());
     doc.info.version = reelix_core::VERSION.to_owned();
     doc
 }
@@ -126,7 +129,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     tags(
         (name = "setup", description = "First-run setup"),
         (name = "auth", description = "Login, sessions and API keys"),
-        (name = "system", description = "Status, health, tasks and jobs"),
+        (name = "system", description = "Status, health, tasks, jobs, backups, logs and updates"),
         (name = "events", description = "Live WebSocket event stream"),
     )
 )]

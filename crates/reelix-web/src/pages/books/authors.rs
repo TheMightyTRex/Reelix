@@ -174,7 +174,7 @@ pub fn AuthorsPage() -> impl IntoView {
                                                 <td>{move || opts.profile_name(reelix_api_types::content::BookFormat::Audiobook, a.audio_quality_profile_id)}</td>
                                                 <td>{format!("{} ebook · {} audio", s.ebook_file_count, s.audiobook_file_count)}</td>
                                                 <td>{if s.size_on_disk > 0 { bytes(s.size_on_disk) } else { "—".into() }}</td>
-                                                <td>{a.added.format("%Y-%m-%d").to_string()}</td>
+                                                <td>{crate::format::date(a.added)}</td>
                                             </tr>
                                         }
                                     }).collect_view()}

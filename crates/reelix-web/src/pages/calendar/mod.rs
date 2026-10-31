@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use reelix_api_types::Permissions;
 use reelix_api_types::library::{CalendarEntryDto, CalendarKind, CalendarStatus, ReleaseKind};
+use reelix_api_types::system::FirstDayOfWeek;
 
 use crate::api;
 use crate::components::library_common::{Segmented, on_entity_changed, pref_get, pref_set};
@@ -108,25 +109,34 @@ fn month_start(d: NaiveDate) -> NaiveDate {
     d.with_day(1).unwrap_or(d)
 }
 
+/// First day of the week containing `d`, per the user's UI settings.
 fn week_start(d: NaiveDate) -> NaiveDate {
-    d - Duration::days(i64::from(d.weekday().num_days_from_monday()))
+    let offset = match crate::format::prefs().first_day_of_week {
+        FirstDayOfWeek::Monday => d.weekday().num_days_from_monday(),
+        FirstDayOfWeek::Sunday => d.weekday().num_days_from_sunday(),
+    };
+    d - Duration::days(i64::from(offset))
 }
 
 #[component]
 pub fn CalendarPage() -> impl IntoView {
     require_any(Permissions::MANAGE_LIBRARY | Permissions::VIEW_CALENDAR);
     let today = Utc::now().date_naive();
-    let view_mode = RwSignal::new(pref_get("calendar.view").unwrap_or_else(|| "month".into()));
+    let view_mode = RwSignal::new(
+        pref_get("calendar.view").unwrap_or_else(|| crate::format::prefs().calendar_view.as_str().into()),
+    );
     let anchor = RwSignal::new(today);
     let show_unmonitored = RwSignal::new(pref_get("calendar.unmonitored").as_deref() == Some("1"));
     let kinds = RwSignal::new("all".to_string());
 
-    Effect::new(move |_| {
-        pref_set("calendar.view", &view_mode.get());
-        pref_set(
-            "calendar.unmonitored",
-            if show_unmonitored.get() { "1" } else { "0" },
-        );
+    // Remember choices made here; until then the UI settings' default view applies.
+    Effect::new(move |prev: Option<()>| {
+        let view = view_mode.get();
+        let unmonitored = show_unmonitored.get();
+        if prev.is_some() {
+            pref_set("calendar.view", &view);
+            pref_set("calendar.unmonitored", if unmonitored { "1" } else { "0" });
+        }
     });
 
     // Visible date range for the current view.
@@ -252,15 +262,13 @@ pub fn CalendarPage() -> impl IntoView {
             days.push(d);
             d += Duration::days(1);
         }
-        let dows = [
-            Weekday::Mon,
-            Weekday::Tue,
-            Weekday::Wed,
-            Weekday::Thu,
-            Weekday::Fri,
-            Weekday::Sat,
-            Weekday::Sun,
-        ];
+        let first = match crate::format::prefs().first_day_of_week {
+            FirstDayOfWeek::Monday => Weekday::Mon,
+            FirstDayOfWeek::Sunday => Weekday::Sun,
+        };
+        let dows: Vec<Weekday> = std::iter::successors(Some(first), |w| Some(w.succ()))
+            .take(7)
+            .collect();
         view! {
             <div class="cal-grid" class:cal-week=mode == "week" role="grid" aria-label="Calendar">
                 {dows.into_iter().map(|w| view! { <div class="cal-dow" role="columnheader">{format!("{w}")}</div> }).collect_view()}

@@ -325,7 +325,7 @@ pub fn MoviesPage() -> impl IntoView {
                                                 <td>{opts.profile_name(m.quality_profile_id)}</td>
                                                 <td>{m.movie_file.as_ref().map(|f| f.file.quality_name.clone()).unwrap_or_else(|| "—".into())}</td>
                                                 <td>{if m.size_on_disk > 0 { bytes(m.size_on_disk) } else { "—".into() }}</td>
-                                                <td>{m.added.format("%Y-%m-%d").to_string()}</td>
+                                                <td>{crate::format::date(m.added)}</td>
                                                 <td><StatusBadge tone=state.tone() label=state.label() /></td>
                                             </tr>
                                         }

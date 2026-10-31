@@ -1,14 +1,20 @@
 //! System screens.
 
+pub mod backup;
 pub mod events;
 pub mod health;
+pub mod logs;
 pub mod status;
 pub mod tasks;
+pub mod updates;
 
+pub use backup::BackupPage;
 pub use events::EventsPage;
 pub use health::HealthPage;
+pub use logs::LogsPage;
 pub use status::StatusPage;
 pub use tasks::TasksPage;
+pub use updates::UpdatesPage;
 
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;

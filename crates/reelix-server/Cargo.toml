@@ -37,23 +37,29 @@ reelix-notify.workspace = true
 reelix-parser.workspace = true
 reelix-providers.workspace = true
 reelix-requests.workspace = true
+rand.workspace = true
 reqwest.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+toml_edit.workspace = true
 tokio-util.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }
 http-body-util.workspace = true
 tempfile.workspace = true
+wiremock.workspace = true
 
 [lints]
 workspace = true

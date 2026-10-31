@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod healthcheck;
 pub mod integrations;
+pub mod maintenance;
 pub mod modules;
 pub mod server;
 pub mod telemetry;

@@ -146,7 +146,7 @@ pub fn ArtistsPage() -> impl IntoView {
                                                 <td>{move || opts.profile_name(qp)}</td>
                                                 <td>{move || opts.metadata_name(mp)}</td>
                                                 <td>{if s.size_on_disk > 0 { bytes(s.size_on_disk) } else { "—".into() }}</td>
-                                                <td>{a.added.format("%Y-%m-%d").to_string()}</td>
+                                                <td>{crate::format::date(a.added)}</td>
                                             </tr>
                                         }
                                     }).collect_view()}

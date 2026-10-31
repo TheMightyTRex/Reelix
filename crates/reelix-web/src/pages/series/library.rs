@@ -296,7 +296,7 @@ pub fn SeriesPage() -> impl IntoView {
                                         <span>{format!("{} season(s)", st.season_count)}</span>
                                         <span>{opts.profile_name(s.quality_profile_id)}</span>
                                         {(st.size_on_disk > 0).then(|| view! { <span>{bytes(st.size_on_disk)}</span> })}
-                                        {s.next_airing.map(|d| view! { <span>{format!("Next: {}", d.format("%Y-%m-%d"))}</span> })}
+                                        {s.next_airing.map(|d| view! { <span>{format!("Next: {}", crate::format::date(d))}</span> })}
                                     </div>
                                     <EpisodeProgress have=st.episode_file_count total=st.episode_count />
                                     {s.overview.clone().map(|o| view! { <p class="overview-text">{o}</p> })}
@@ -348,7 +348,7 @@ pub fn SeriesPage() -> impl IntoView {
                                                 <td>{s.network.clone().unwrap_or_else(|| "—".into())}</td>
                                                 <td>{st.season_count}</td>
                                                 <td>{opts.profile_name(s.quality_profile_id)}</td>
-                                                <td>{s.next_airing.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "—".into())}</td>
+                                                <td>{s.next_airing.map(crate::format::date).unwrap_or_else(|| "—".into())}</td>
                                                 <td><EpisodeProgress have=st.episode_file_count total=st.episode_count /></td>
                                                 <td>{if st.size_on_disk > 0 { bytes(st.size_on_disk) } else { "—".into() }}</td>
                                             </tr>

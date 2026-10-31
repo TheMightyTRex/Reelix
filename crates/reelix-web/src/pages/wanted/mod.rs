@@ -175,7 +175,7 @@ fn Wanted(mode: Mode) -> impl IntoView {
                                             {it.episode_title.clone().map(|t| view! { <span class="cell-sub">{t}</span> })}
                                         </td>
                                     })}
-                                    <td>{it.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "—".into())}</td>
+                                    <td>{it.date.map(crate::format::date).unwrap_or_else(|| "—".into())}</td>
                                     <td>{opts.profile_name(it.quality_profile_id)}</td>
                                     {(mode == Mode::Cutoff).then(|| view! {
                                         <td>

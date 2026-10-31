@@ -168,7 +168,7 @@ fn MovieDetail(id: i64) -> impl IntoView {
                                 <div class="fact"><span class="fact-label">"Quality"</span><span>{f.file.quality_name.clone()}</span></div>
                             })}
                             {dates.into_iter().filter_map(|(l, d)| d.map(|d| view! {
-                                <div class="fact"><span class="fact-label">{l}</span><span>{d.format("%Y-%m-%d").to_string()}</span></div>
+                                <div class="fact"><span class="fact-label">{l}</span><span>{crate::format::date(d)}</span></div>
                             })).collect_view()}
                             {m.collection.clone().map(|c| view! {
                                 <div class="fact"><span class="fact-label">"Collection"</span><A href="/movies/collections">{c.title}</A></div>

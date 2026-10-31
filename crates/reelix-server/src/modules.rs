@@ -23,6 +23,8 @@ pub struct Deps {
     pub secrets: SecretBox,
     pub http: reqwest::Client,
     pub data_dir: PathBuf,
+    /// Resolved bootstrap configuration (paths, config file, server settings).
+    pub config: crate::config::Config,
 }
 
 /// Every domain service, built once at startup.
@@ -37,6 +39,7 @@ pub struct Modules {
     pub integrations: std::sync::Arc<crate::integrations::IntegrationsService>,
     pub search: std::sync::Arc<reelix_pipeline::search::SearchService>,
     pub activity: std::sync::Arc<reelix_pipeline::ActivityService>,
+    pub maintenance: std::sync::Arc<crate::maintenance::MaintenanceService>,
 }
 
 impl Modules {
@@ -194,6 +197,10 @@ impl Modules {
         search.set_content(books.clone(), music.clone());
         activity.set_content(books.clone(), music.clone());
         integrations.set_music(music.clone());
+        // maintenance: backups, logs, update checks, server settings
+        let maintenance =
+            crate::maintenance::MaintenanceService::new(deps.db.clone(), deps.http.clone(), &deps.config)
+                .await?;
         Ok(Self {
             deps,
             providers,
@@ -204,6 +211,7 @@ impl Modules {
             integrations,
             search,
             activity,
+            maintenance,
         })
     }
 
@@ -235,6 +243,8 @@ impl Modules {
         builder = reelix_pipeline::search::jobs::register(builder, &self.search);
         // pipeline activity (download_monitor, process_download, manual_import, prune_finished)
         builder = reelix_pipeline::monitor::jobs::register(builder, &self.activity);
+        // maintenance (backup, update_check)
+        builder = crate::maintenance::MaintenanceService::register(builder, &self.maintenance);
         builder
     }
 
@@ -262,6 +272,7 @@ impl Modules {
         let health: Vec<std::sync::Arc<dyn reelix_api::HealthSource>> = vec![
             self.providers.clone(),
             std::sync::Arc::new(reelix_api::ActivityHealth(self.activity.clone())),
+            self.maintenance.clone(),
         ];
         // integrations (health_watch uses the same sources)
         self.integrations.set_health_sources(health.clone());
@@ -270,6 +281,10 @@ impl Modules {
             self.integrations.clone(),
         )));
         state = state.with_extension(std::sync::Arc::new(reelix_api::HealthSources(health)));
+        // maintenance
+        state = state.with_extension(std::sync::Arc::new(reelix_api::Maintenance(
+            self.maintenance.clone(),
+        )));
         state
     }
 }

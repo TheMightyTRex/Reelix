@@ -51,7 +51,11 @@ pub fn App() -> impl IntoView {
                             <Route path=path!("system/health") view=pages::system::HealthPage />
                             <Route path=path!("system/tasks") view=pages::system::TasksPage />
                             <Route path=path!("system/events") view=pages::system::EventsPage />
+                            <Route path=path!("system/backup") view=pages::system::BackupPage />
+                            <Route path=path!("system/updates") view=pages::system::UpdatesPage />
+                            <Route path=path!("system/logs") view=pages::system::LogsPage />
                             <Route path=path!("settings/general") view=pages::settings::GeneralPage />
+                            <Route path=path!("settings/ui") view=pages::settings::UiSettingsPage />
                             <Route path=path!("settings/profiles") view=pages::settings::ProfilesPage />
                             <Route path=path!("settings/quality") view=pages::settings::QualityPage />
                             <Route path=path!("settings/customformats") view=pages::settings::CustomFormatsPage />
@@ -107,7 +111,7 @@ pub fn App() -> impl IntoView {
                             <Route path=path!("music/albums/:id") view=pages::music::AlbumDetailPage />
                             <Route path=path!("settings/music") view=|| view! { <Redirect path="/settings/metadata" /> } />
                             <Route path=path!("settings/metadataprofiles") view=pages::music::MetadataProfilesPage />
-                            <Route path=path!("*any") view=pages::PlaceholderPage />
+                            <Route path=path!("*any") view=pages::NotFound />
                         </ParentRoute>
                     </Routes>
                 </Show>

@@ -43,6 +43,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         None => {}
     }
 
+    // A restore staged before the last shutdown replaces the database before it is opened.
+    crate::maintenance::apply_pending_restore(&config).await;
+
     let db = Db::connect(&config.database_url)
         .await
         .context("opening database")?;
@@ -57,6 +60,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         secrets: secrets.clone(),
         http: modules::http_client()?,
         data_dir: config.data_dir.clone(),
+        config: config.clone(),
     })
     .await
     .context("starting modules")?;

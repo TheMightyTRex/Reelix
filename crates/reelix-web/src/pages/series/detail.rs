@@ -282,7 +282,7 @@ fn SeriesDetail(id: i64) -> impl IntoView {
                             <div class="fact"><span class="fact-label">"Size"</span><span>{bytes(st.size_on_disk)}</span></div>
                             <div class="fact"><span class="fact-label">"Episodes"</span><EpisodeProgress have=st.episode_file_count total=st.episode_count /></div>
                             {s.next_airing.map(|d| view! {
-                                <div class="fact"><span class="fact-label">"Next airing"</span><span>{d.format("%Y-%m-%d").to_string()}</span></div>
+                                <div class="fact"><span class="fact-label">"Next airing"</span><span>{crate::format::date(d)}</span></div>
                             })}
                             {(!tags.is_empty()).then(|| view! {
                                 <div class="fact"><span class="fact-label">"Tags"</span>
@@ -441,7 +441,7 @@ fn SeriesDetail(id: i64) -> impl IntoView {
                                                 <span class="cell-strong">{e.title.clone().unwrap_or_else(|| "TBA".into())}</span>
                                                 {e.finale.clone().map(|f| view! { <span class="badge tone-accent">{format!("{} finale", f)}</span> })}
                                             </td>
-                                            <td>{e.air_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "—".into())}</td>
+                                            <td>{e.air_date.map(crate::format::date).unwrap_or_else(|| "—".into())}</td>
                                             <td><StatusBadge tone=tone label=status /></td>
                                             <td>{size}</td>
                                             <td class="cell-actions">

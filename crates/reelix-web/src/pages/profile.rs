@@ -2,12 +2,13 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos_router::components::A;
 use reelix_api_types::Permissions;
 use reelix_api_types::requests::{NotificationPrefsDto, QuotaDto, QuotaUsageDto, USER_NOTIFICATION_EVENTS};
 
 use crate::api;
 use crate::components::request_modal::quota_line;
-use crate::components::{ApiKeysPanel, Card, PageHeader, Skeleton, StatusBadge, Tone};
+use crate::components::{ApiKeysPanel, Card, Icon, PageHeader, Skeleton, StatusBadge, Tone};
 use crate::format;
 use crate::state::auth::role_name;
 use crate::state::{AuthState, Toasts};
@@ -70,7 +71,12 @@ pub fn ProfilePage() -> impl IntoView {
     };
 
     view! {
-        <PageHeader title="Profile" subtitle="Your account and personal API keys." />
+        <PageHeader title="Profile" subtitle="Your account and personal API keys.">
+            <A href="/settings/ui" attr:class="btn btn-secondary btn-sm">
+                <Icon name="settings" />
+                "Display preferences"
+            </A>
+        </PageHeader>
         <div class="stack">
             <Card title="Account" subtitle="Ask an administrator to change your name or permissions.">
                 {account}

@@ -7,6 +7,7 @@ use leptos::ev;
 use leptos::prelude::*;
 use leptos_router::components::Outlet;
 use leptos_router::hooks::{use_location, use_navigate};
+use reelix_api_types::system::UiSettings;
 use wasm_bindgen::JsCast;
 
 use super::Spinner;
@@ -28,6 +29,30 @@ pub fn Shell() -> impl IntoView {
         _ => {}
     });
 
+    // Load the user's display preferences before showing pages, so dates render in their format.
+    let prefs_for = RwSignal::new(None::<i64>);
+    Effect::new(move |_| {
+        let Some(id) = auth.user.with(|u| u.as_ref().map(|u| u.id)) else {
+            return;
+        };
+        if prefs_for.get_untracked() == Some(id) {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            // Defaults apply when the request fails; the pages still work.
+            let prefs = crate::api::get::<UiSettings>("/settings/ui")
+                .await
+                .unwrap_or_default();
+            crate::format::set_prefs(prefs);
+            prefs_for.set(Some(id));
+        });
+    });
+    let ready = move || {
+        auth.user
+            .with(|u| u.as_ref().map(|u| u.id))
+            .is_some_and(|id| prefs_for.get() == Some(id))
+    };
+
     // Close the mobile drawer whenever the route changes.
     Effect::new(move |_| {
         location.pathname.track();
@@ -36,7 +61,7 @@ pub fn Shell() -> impl IntoView {
 
     view! {
         <Show
-            when=move || auth.is_logged_in()
+            when=ready
             fallback=|| {
                 view! {
                     <div class="splash">

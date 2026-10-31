@@ -137,12 +137,13 @@ impl ViewMode {
         }
     }
 
-    /// The remembered view for `scope` (e.g. `movies`), defaulting to posters.
+    /// The remembered view for `scope` (e.g. `movies`), defaulting to the UI settings' library view.
     pub fn load(scope: &str) -> Self {
-        let saved = pref_get(&format!("{scope}.view"));
+        let saved = pref_get(&format!("{scope}.view"))
+            .unwrap_or_else(|| crate::format::prefs().library_view.as_str().to_owned());
         Self::ALL
             .into_iter()
-            .find(|m| saved.as_deref() == Some(m.key()))
+            .find(|m| saved == m.key())
             .unwrap_or(Self::Posters)
     }
 }

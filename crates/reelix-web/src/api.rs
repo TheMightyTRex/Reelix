@@ -154,6 +154,19 @@ pub async fn put<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> Api
     finish(path, req.send().await).await
 }
 
+/// `POST {path}` with a file as the raw request body (e.g. a backup archive).
+pub async fn post_file<T: DeserializeOwned>(path: &str, file: &web_sys::File) -> ApiResult<T> {
+    let content_type = Some(file.type_()).filter(|t| !t.is_empty());
+    let req = with_headers(Request::post(&api_url(path)))
+        .header(
+            "content-type",
+            content_type.as_deref().unwrap_or("application/octet-stream"),
+        )
+        .body(wasm_bindgen::JsValue::from(file.clone()))
+        .map_err(ApiError::decode)?;
+    finish(path, req.send().await).await
+}
+
 /// `POST {path}` without a body.
 pub async fn post_empty<T: DeserializeOwned>(path: &str) -> ApiResult<T> {
     let result = with_headers(Request::post(&api_url(path))).send().await;

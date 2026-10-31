@@ -42,6 +42,7 @@ RUN chmod 0755 /app/entrypoint.sh /app/reelix
 
 ENV REELIX_DATA_DIR=/config \
     REELIX_WEB_DIR=/app/web \
+    REELIX_DOCKER=1 \
     PUID=1000 \
     PGID=1000 \
     UMASK=022

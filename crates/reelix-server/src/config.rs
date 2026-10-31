@@ -137,6 +137,8 @@ pub struct Config {
     pub log_format: LogFormat,
     /// Config file that was read, if any.
     pub config_file: Option<PathBuf>,
+    /// Settings forced by command-line flags (`port`, `bind`, `data_dir`).
+    pub cli_overrides: Vec<&'static str>,
 }
 
 impl Config {
@@ -193,7 +195,16 @@ impl Config {
         }
 
         let raw: RawConfig = figment.extract()?;
-        Self::resolve(raw, config_file)
+        let mut config = Self::resolve(raw, config_file)?;
+        config.cli_overrides = [
+            ("port", cli.port.is_some()),
+            ("bind", cli.bind.is_some()),
+            ("data_dir", cli.data_dir.is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(key, set)| set.then_some(key))
+        .collect();
+        Ok(config)
     }
 
     fn resolve(raw: RawConfig, config_file: Option<PathBuf>) -> Result<Config, ConfigError> {
@@ -222,6 +233,7 @@ impl Config {
             log_format: raw.logging.format,
             data_dir,
             config_file,
+            cli_overrides: Vec::new(),
         })
     }
 
@@ -239,7 +251,7 @@ impl Config {
 }
 
 /// Maps a `REELIX_`-stripped, lowercased env var name to its config key path.
-fn env_key(key: &str) -> Option<&'static str> {
+pub(crate) fn env_key(key: &str) -> Option<&'static str> {
     Some(match key.to_ascii_lowercase().as_str() {
         "port" => "server.port",
         "bind" => "server.bind",

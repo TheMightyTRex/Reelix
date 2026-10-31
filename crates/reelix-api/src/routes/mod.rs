@@ -4,6 +4,7 @@ pub mod books;
 pub mod discover;
 pub mod integrations;
 pub mod library;
+pub mod maintenance;
 pub mod music;
 pub mod pipeline_activity;
 pub mod pipeline_search;

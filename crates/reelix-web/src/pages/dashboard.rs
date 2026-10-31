@@ -127,46 +127,40 @@ pub fn DashboardPage() -> impl IntoView {
     };
 
     let checklist = move || {
-        let items: [(&str, Option<&str>, bool, Option<&str>); 7] = [
-            ("Create the admin account", None, true, None),
+        let items: [(&str, bool, Option<&str>); 7] = [
+            ("Create the admin account", true, None),
             (
                 "Add a root folder for movies",
-                None,
                 has_root(MediaKind::Movie),
                 Some("/settings/mediamanagement"),
             ),
             (
                 "Add a root folder for series",
-                None,
                 has_root(MediaKind::Series),
                 Some("/settings/mediamanagement"),
             ),
             (
                 "Add an indexer",
-                None,
                 any_enabled(indexers),
                 Some("/settings/indexers"),
             ),
             (
                 "Connect a download client",
-                None,
                 any_enabled(clients),
                 Some("/settings/downloadclients"),
             ),
             (
                 "Connect a media server",
-                None,
                 any_enabled(servers),
                 Some("/settings/mediaservers"),
             ),
             (
                 "Create an API key for companion apps",
-                None,
                 has_keys(),
                 Some("/settings/general"),
             ),
         ];
-        let done = items.iter().filter(|i| i.2).count();
+        let done = items.iter().filter(|i| i.1).count();
         let total = items.len();
         view! {
             <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax=total aria-valuenow=done
@@ -177,9 +171,9 @@ pub fn DashboardPage() -> impl IntoView {
             <ul class="checklist">
                 {items
                     .into_iter()
-                    .map(|(label, milestone, done, href)| {
+                    .map(|(label, done, href)| {
                         view! {
-                            <li class="check-item" class:done=done class:locked=milestone.is_some()>
+                            <li class="check-item" class:done=done>
                                 <span class="check-box" aria-hidden="true">
                                     {done.then(|| view! { <Icon name="check" /> })}
                                 </span>
@@ -190,7 +184,6 @@ pub fn DashboardPage() -> impl IntoView {
                                     }}
                                     <span class="visually-hidden">{if done { " (done)" } else { "" }}</span>
                                 </span>
-                                {milestone.map(|m| view! { <span class="badge tone-neutral">{format!("Coming in {m}")}</span> })}
                             </li>
                         }
                     })

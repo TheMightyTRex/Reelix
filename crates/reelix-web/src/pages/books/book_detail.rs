@@ -125,7 +125,7 @@ fn BookDetail(id: i64) -> impl IntoView {
                         {b.overview.clone().map(|o| view! { <p class="detail-overview">{o}</p> })}
                         <div class="detail-facts">
                             {(!series.is_empty()).then(|| view! { <div class="fact"><span class="fact-label">"Series"</span><span>{series}</span></div> })}
-                            {b.release_date.map(|d| view! { <div class="fact"><span class="fact-label">"Published"</span><span>{d.format("%Y-%m-%d").to_string()}</span></div> })}
+                            {b.release_date.map(|d| view! { <div class="fact"><span class="fact-label">"Published"</span><span>{crate::format::date(d)}</span></div> })}
                             {b.isbn13.clone().map(|i| view! { <div class="fact"><span class="fact-label">"ISBN"</span><span class="mono">{i}</span></div> })}
                             {b.asin.clone().map(|i| view! { <div class="fact"><span class="fact-label">"ASIN"</span><span class="mono">{i}</span></div> })}
                             {b.page_count.map(|p| view! { <div class="fact"><span class="fact-label">"Pages"</span><span>{p}</span></div> })}
@@ -310,7 +310,7 @@ fn FormatPanel(
                             <span class="chip-list">{f.custom_formats.iter().map(|c| view! { <span class="chip">{c.clone()}</span> }).collect_view()}</span>
                         </div>
                     })}
-                    <div class="fact"><span class="fact-label">"Added"</span><span>{f.date_added.format("%Y-%m-%d").to_string()}</span></div>
+                    <div class="fact"><span class="fact-label">"Added"</span><span>{crate::format::date(f.date_added)}</span></div>
                 </div>
                 {(f.parts.len() > 1).then(|| view! {
                     <details class="file-parts">

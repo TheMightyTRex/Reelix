@@ -11,7 +11,7 @@ pub mod login;
 pub mod media;
 pub mod movies;
 pub mod music;
-pub mod placeholder;
+pub mod not_found;
 pub mod profile;
 pub mod requests;
 pub mod search;
@@ -23,6 +23,6 @@ pub mod wanted;
 
 pub use dashboard::DashboardPage;
 pub use login::LoginPage;
-pub use placeholder::{NotFound, PlaceholderPage};
+pub use not_found::NotFound;
 pub use profile::ProfilePage;
 pub use setup::SetupPage;

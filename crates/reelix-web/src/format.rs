@@ -1,15 +1,90 @@
-//! Human-friendly formatting of times and durations.
+//! Human-friendly formatting of dates, times and durations, following the user's UI settings.
 
-use chrono::{DateTime, Local, Utc};
+use std::cell::Cell;
 
-/// `2026-10-28 14:03` in the browser's time zone.
-pub fn datetime(dt: DateTime<Utc>) -> String {
-    dt.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string()
+use chrono::{DateTime, Local, NaiveDate, Utc};
+use reelix_api_types::system::{DateFormat, TimeFormat, UiSettings};
+
+thread_local! {
+    static PREFS: Cell<UiSettings> = Cell::new(UiSettings::default());
 }
 
-/// `14:03:12` in the browser's time zone.
+/// The signed-in user's display preferences (defaults until they load).
+pub fn prefs() -> UiSettings {
+    PREFS.with(Cell::get)
+}
+
+/// Applies new display preferences to everything rendered from now on.
+pub fn set_prefs(p: UiSettings) {
+    PREFS.with(|c| c.set(p));
+}
+
+/// Runs `f` with `p` as the preferences (for previews), then restores the current ones.
+pub fn with_prefs<R>(p: UiSettings, f: impl FnOnce() -> R) -> R {
+    let saved = PREFS.with(|c| c.replace(p));
+    let out = f();
+    PREFS.with(|c| c.set(saved));
+    out
+}
+
+fn date_pattern(f: DateFormat) -> &'static str {
+    match f {
+        DateFormat::Iso => "%Y-%m-%d",
+        DateFormat::Us => "%m/%d/%Y",
+        DateFormat::Eu => "%d/%m/%Y",
+        DateFormat::Long => "%b %-d, %Y",
+    }
+}
+
+fn time_pattern(f: TimeFormat, seconds: bool) -> &'static str {
+    match (f, seconds) {
+        (TimeFormat::H24, false) => "%H:%M",
+        (TimeFormat::H24, true) => "%H:%M:%S",
+        (TimeFormat::H12, false) => "%-I:%M %p",
+        (TimeFormat::H12, true) => "%-I:%M:%S %p",
+    }
+}
+
+/// A calendar date, or a timestamp shown as its date in the browser's time zone.
+pub trait AsDate {
+    fn local_date(&self) -> NaiveDate;
+}
+
+impl AsDate for NaiveDate {
+    fn local_date(&self) -> NaiveDate {
+        *self
+    }
+}
+
+impl AsDate for DateTime<Utc> {
+    fn local_date(&self) -> NaiveDate {
+        self.with_timezone(&Local).date_naive()
+    }
+}
+
+/// `2026-10-28` (or the user's date format).
+pub fn date(d: impl AsDate) -> String {
+    d.local_date()
+        .format(date_pattern(prefs().date_format))
+        .to_string()
+}
+
+/// `2026-10-28 14:03` in the browser's time zone (or the user's formats).
+pub fn datetime(dt: DateTime<Utc>) -> String {
+    let p = prefs();
+    let local = dt.with_timezone(&Local);
+    format!(
+        "{} {}",
+        local.format(date_pattern(p.date_format)),
+        local.format(time_pattern(p.time_format, false))
+    )
+}
+
+/// `14:03:12` in the browser's time zone (or the user's time format).
 pub fn time(dt: DateTime<Utc>) -> String {
-    dt.with_timezone(&Local).format("%H:%M:%S").to_string()
+    dt.with_timezone(&Local)
+        .format(time_pattern(prefs().time_format, true))
+        .to_string()
 }
 
 /// Compact duration: `45s`, `12m`, `3h 20m`, `2d 4h`.
@@ -37,8 +112,11 @@ pub fn duration_ms(ms: i64) -> String {
     }
 }
 
-/// `in 5m`, `3h ago`, `just now`.
+/// `in 5m`, `3h ago`, `just now`; the full date and time when relative dates are turned off.
 pub fn relative(dt: DateTime<Utc>) -> String {
+    if !prefs().relative_dates {
+        return datetime(dt);
+    }
     let delta = dt.signed_duration_since(Utc::now()).num_seconds();
     if delta.abs() < 10 {
         "just now".into()

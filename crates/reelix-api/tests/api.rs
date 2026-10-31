@@ -907,3 +907,79 @@ fn audience_filtering() {
     assert!(!reelix_api::visible_to(&admin_ev, &bob));
     assert!(reelix_api::visible_to(&all_ev, &bob));
 }
+
+#[tokio::test]
+async fn ui_settings_are_per_user_and_maintenance_is_admin_only() {
+    let app = app().await;
+    let admin = setup_admin(&app).await;
+    create_regular_user(&app).await;
+    let bob = login(&app, "bob", "user-password", false).await.cookie();
+
+    let get = |cookie: &str| {
+        let cookie = cookie.to_owned();
+        let app = &app;
+        async move {
+            call(
+                app,
+                Method::GET,
+                "/api/v1/settings/ui",
+                Req {
+                    cookie: Some(&cookie),
+                    ..Default::default()
+                },
+            )
+            .await
+        }
+    };
+    let defaults = get(&bob).await;
+    assert_eq!(defaults.status, StatusCode::OK);
+    assert_eq!(defaults.body["date_format"], "iso");
+    assert_eq!(defaults.body["relative_dates"], true);
+
+    // Any signed-in user can save their own; missing fields fall back to the defaults.
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/ui",
+        Req {
+            cookie: Some(&bob),
+            csrf: true,
+            body: Some(
+                json!({"date_format": "us", "first_day_of_week": "sunday", "calendar_view": "agenda"}),
+            ),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let bob_saved = get(&bob).await;
+    assert_eq!(bob_saved.body["date_format"], "us");
+    assert_eq!(bob_saved.body["first_day_of_week"], "sunday");
+    assert_eq!(bob_saved.body["library_view"], "posters");
+    assert_eq!(
+        get(&admin).await.body["date_format"],
+        "iso",
+        "settings are per user"
+    );
+
+    // Maintenance endpoints are admin-only (checked before the backend is needed).
+    for uri in [
+        "/api/v1/system/backups",
+        "/api/v1/system/logs",
+        "/api/v1/system/logs/files",
+        "/api/v1/system/updates",
+        "/api/v1/system/settings",
+    ] {
+        let r = call(
+            &app,
+            Method::GET,
+            uri,
+            Req {
+                cookie: Some(&bob),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{uri}");
+    }
+}
