@@ -90,7 +90,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 # docker-compose.yml
 services:
   reelix:
-    image: ghcr.io/reelix/reelix:latest
+    image: ghcr.io/mvanhare/reelix:latest
     container_name: reelix
     environment:
       - PUID=1000
@@ -235,6 +235,15 @@ cargo clippy -p reelix-web --target wasm32-unknown-unknown -- -D warnings
 ```
 
 Architecture, the domain model and design decisions are described in [docs/design.md](docs/design.md).
+
+### Releasing
+
+1. Set the version in `Cargo.toml` (`[workspace.package]`), run `cargo check` to update `Cargo.lock`, and move the `Unreleased` notes in [CHANGELOG.md](CHANGELOG.md) under the new version.
+2. Commit, tag and push: `git tag v0.2.0 && git push origin master v0.2.0`.
+
+The [release workflow](.github/workflows/release.yml) then builds the Windows (x86_64) and Linux (x86_64, aarch64; glibc 2.17+) downloads, pushes a multi-arch image to `ghcr.io/mvanhare/reelix`, and publishes a GitHub release with the changelog section as notes, plus `SHA256SUMS` and an SPDX SBOM. 0.x versions and versions with a suffix (`0.2.0-rc.1`) are marked as pre-releases. Running the workflow manually from the Actions tab is a dry run that builds everything without publishing.
+
+To package locally, build the UI and a binary, then run `scripts/package.sh` (for example `scripts/package.sh linux x86_64 0.1.0 target/release/reelix crates/reelix-web/dist target/dist`).
 
 ---
 

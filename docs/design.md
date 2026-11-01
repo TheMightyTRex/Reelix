@@ -1032,7 +1032,7 @@ format = "pretty"        # pretty | json
 # docker-compose.yml
 services:
   reelix:
-    image: ghcr.io/reelix/reelix:latest
+    image: ghcr.io/mvanhare/reelix:latest
     container_name: reelix
     environment:
       - PUID=1000
@@ -1269,7 +1269,7 @@ Each milestone ends with a tagged pre-release and a working Docker image. Books 
 ### M11 — 1.0 Release
 - [ ] Documentation site (mdBook): install, migration, every setting, API, provider authoring guide
 - [ ] Stable API v1 freeze and semver policy
-- [ ] Release automation: changelog, multi-arch images, binaries, checksums, SBOM
+- [x] Release automation: changelog, multi-arch images, binaries, checksums, SBOM — *`.github/workflows/release.yml` on `v*` tags: Windows x86_64 and Linux x86_64/aarch64 (glibc 2.17) archives, a `linux/amd64` + `linux/arm64` image on GHCR, `SHA256SUMS`, an SPDX SBOM, notes from CHANGELOG.md; not yet run on GitHub*
 
 ### Post-1.0 Ideas
 - Subtitles (Bazarr-like), using OpenSubtitles and others

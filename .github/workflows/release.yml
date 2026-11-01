@@ -1,0 +1,323 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds the Windows and Linux downloads, a multi-arch Docker image,
+# checksums and an SBOM, and publishes a GitHub release with the CHANGELOG.md section as notes.
+# Running it manually does a dry run: everything is built and uploaded as workflow artifacts,
+# but nothing is published.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  ZIG_VERSION: 0.14.1
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      stable: ${{ steps.version.outputs.stable }}
+      publish: ${{ steps.version.outputs.publish }}
+      image: ${{ steps.version.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        name: check version
+        run: |
+          crate=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+            if [ "$version" != "$crate" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME doesn't match the workspace version $crate in Cargo.toml"
+              exit 1
+            fi
+            publish=true
+          else
+            version=$crate
+            publish=false
+          fi
+          # Versions with a suffix (0.2.0-rc.1) are pre-releases everywhere. 0.x versions are
+          # marked as pre-releases on GitHub but still get the Docker `latest` tag.
+          case "$version" in *-*) stable=false ;; *) stable=true ;; esac
+          case "$version" in *-* | 0.*) prerelease=true ;; *) prerelease=false ;; esac
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "stable=$stable"
+            echo "publish=$publish"
+            echo "image=ghcr.io/$owner/reelix"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version (prerelease: $prerelease, stable: $stable, publish: $publish)"
+      - name: release notes
+        run: |
+          scripts/release-notes.sh "${{ steps.version.outputs.version }}" > release-notes.md
+          cat release-notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  web:
+    name: web UI
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: trunk build
+        working-directory: crates/reelix-web
+        run: trunk build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: crates/reelix-web/dist
+
+  linux:
+    name: linux ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            docker: amd64
+          - arch: aarch64
+            docker: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch }}-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-${{ matrix.arch }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      # Linking against glibc 2.17 makes the binary run on almost any non-musl distribution.
+      - name: build
+        run: cargo zigbuild --release --locked -p reelix-server --target ${{ matrix.arch }}-unknown-linux-gnu.2.17
+      - name: check glibc requirement
+        run: |
+          bin=target/${{ matrix.arch }}-unknown-linux-gnu/release/reelix
+          max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Highest glibc symbol: $max"
+          [ "$max" = GLIBC_2.17 ] || { echo "::error::Binary needs $max, expected GLIBC_2.17"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux-${{ matrix.docker }}
+          path: target/${{ matrix.arch }}-unknown-linux-gnu/release/reelix
+          if-no-files-found: error
+
+  windows:
+    name: windows x86_64
+    needs: prepare
+    runs-on: windows-latest
+    env:
+      # Link the C runtime statically so users don't need the Visual C++ redistributable.
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+      - name: build
+        run: cargo build --release --locked -p reelix-server
+      - name: smoke test
+        shell: bash
+        run: ./target/release/reelix.exe --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-windows-x86_64
+          path: target/release/reelix.exe
+          if-no-files-found: error
+
+  package:
+    name: package
+    needs: [prepare, web, linux, windows]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: package archives
+        run: |
+          chmod +x artifacts/bin-linux-*/reelix
+          scripts/package.sh linux x86_64 "$VERSION" artifacts/bin-linux-amd64/reelix artifacts/web dist
+          scripts/package.sh linux aarch64 "$VERSION" artifacts/bin-linux-arm64/reelix artifacts/web dist
+          scripts/package.sh windows x86_64 "$VERSION" artifacts/bin-windows-x86_64/reelix.exe artifacts/web dist
+      - name: smoke test linux archive
+        run: |
+          mkdir smoke && tar -C smoke -xzf "dist/reelix-$VERSION-linux-x86_64.tar.gz"
+          cd "smoke/reelix-$VERSION-linux-x86_64"
+          ./reelix --port 7799 --data-dir "$RUNNER_TEMP/data" &
+          pid=$!
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:7799/api/v1/setup && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:7799/api/v1/setup
+          curl -fsS -o /dev/null http://127.0.0.1:7799/
+          kill "$pid"
+      # Syft reads the workspace Cargo.lock (copied alone so the fuzz crate's lockfile stays out).
+      - name: prepare SBOM input
+        run: mkdir sbom-src && cp Cargo.toml Cargo.lock sbom-src/
+      - uses: anchore/sbom-action@v0
+        with:
+          path: sbom-src
+          format: spdx-json
+          output-file: dist/reelix-${{ env.VERSION }}-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: checksums
+        working-directory: dist
+        run: |
+          sha256sum "reelix-$VERSION-sbom.spdx.json" > "reelix-$VERSION-sbom.spdx.json.sha256"
+          cat *.sha256 | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+
+  docker:
+    name: docker image
+    needs: [prepare, web, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ needs.prepare.outputs.image }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: assemble build context
+        run: |
+          mkdir -p context/bin/amd64 context/bin/arm64 context/docker
+          cp artifacts/bin-linux-amd64/reelix context/bin/amd64/
+          cp artifacts/bin-linux-arm64/reelix context/bin/arm64/
+          cp -R artifacts/web context/web
+          cp docker/entrypoint.sh context/docker/
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=v${{ env.VERSION }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ env.VERSION }},enable=${{ needs.prepare.outputs.stable == 'true' }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.stable == 'true' }}
+      - name: smoke test (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: context
+          file: docker/Dockerfile.release
+          platforms: linux/amd64
+          build-args: VERSION=${{ env.VERSION }}
+          load: true
+          tags: reelix:smoke
+      - name: run smoke test
+        run: |
+          docker run -d --name reelix -p 7700:7700 reelix:smoke
+          for i in $(seq 1 30); do
+            docker exec reelix /app/reelix healthcheck && break
+            sleep 2
+          done
+          docker exec reelix /app/reelix healthcheck
+          curl -fsS http://127.0.0.1:7700/api/v1/setup
+          docker logs reelix
+          docker rm -f reelix
+      - if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: context
+          file: docker/Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ env.VERSION }}
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+
+  publish:
+    name: publish release
+    needs: [prepare, package, docker]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: add Docker image to notes
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          {
+            cat artifacts/release-notes/release-notes.md
+            echo
+            echo "### Docker"
+            echo
+            echo '```'
+            echo "docker pull $IMAGE:$VERSION"
+            echo '```'
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Reelix ${{ needs.prepare.outputs.version }}
+          body_path: notes.md
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/dist/*.tar.gz
+            artifacts/dist/*.zip
+            artifacts/dist/*.spdx.json
+            artifacts/dist/*.sha256
+            artifacts/dist/SHA256SUMS
