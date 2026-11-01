@@ -119,6 +119,18 @@ To build the image yourself, run `docker build -f docker/Dockerfile -t reelix .`
 
 Settings and the database are stored in the `data` folder next to `reelix.exe`. Install [FFmpeg](https://ffmpeg.org/download.html) and make sure `ffprobe` is on your `PATH` so Reelix can read codec, resolution and audio details from imported files.
 
+### Linux
+
+Runs on any x86_64 distribution with glibc 2.17 or newer (CentOS 7, Ubuntu 16.04, Debian 9 and later). On Alpine or other musl-based systems, use Docker.
+
+```bash
+tar xzf reelix-<version>-linux-x86_64.tar.gz
+cd reelix-<version>-linux-x86_64
+./start-reelix.sh
+```
+
+Then open <http://localhost:7700>. Settings and the database are stored in the `data` folder next to the binary (or pass `--data-dir`). Install `ffprobe` with your package manager (e.g. `apt install ffmpeg`). The bundled `README.txt` includes an example systemd unit.
+
 ### From source
 
 Requires a stable Rust toolchain.
