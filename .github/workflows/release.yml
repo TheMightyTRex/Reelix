@@ -21,6 +21,8 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   ZIG_VERSION: 0.14.1
+  # build-push-action uploads a .dockerbuild record per build; download-artifact can't extract those.
+  DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
   prepare:
@@ -170,6 +172,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          name: web
+          path: artifacts/web
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
           path: artifacts
       - name: package archives
         run: |
@@ -226,6 +233,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          name: web
+          path: artifacts/web
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-linux-*
           path: artifacts
       - name: assemble build context
         run: |
@@ -294,7 +306,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: release-notes
+          path: artifacts/release-notes
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: artifacts/dist
       - name: add Docker image to notes
         env:
           IMAGE: ${{ needs.prepare.outputs.image }}
