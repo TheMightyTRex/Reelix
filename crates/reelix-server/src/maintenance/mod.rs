@@ -159,7 +159,7 @@ impl MaintenanceService {
 
     pub fn register(builder: JobSystemBuilder, svc: &Arc<Self>) -> JobSystemBuilder {
         builder
-            .handler(BackupJob(svc.clone()))
+            .long_running_handler(BackupJob(svc.clone()))
             .handler(UpdateCheckJob(svc.clone()))
             .task(TaskDef {
                 kind: BACKUP_TASK,

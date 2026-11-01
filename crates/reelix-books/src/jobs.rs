@@ -91,9 +91,9 @@ pub fn tasks() -> Vec<TaskDef> {
 /// Registers the books job handlers and [`tasks`].
 pub fn register(mut builder: JobSystemBuilder, svc: &Arc<BooksService>) -> JobSystemBuilder {
     builder = builder
-        .handler(RefreshAuthors(svc.clone()))
-        .handler(BookScan(svc.clone()))
-        .handler(BookRename(svc.clone()));
+        .long_running_handler(RefreshAuthors(svc.clone()))
+        .long_running_handler(BookScan(svc.clone()))
+        .long_running_handler(BookRename(svc.clone()));
     for t in tasks() {
         builder = builder.task(t);
     }

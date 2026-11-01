@@ -116,11 +116,11 @@ pub fn tasks() -> Vec<TaskDef> {
 /// Registers every library job handler and scheduled task.
 pub fn register(mut builder: JobSystemBuilder, svc: &Arc<LibraryService>) -> JobSystemBuilder {
     builder = builder
-        .handler(RefreshMovies(svc.clone()))
-        .handler(RefreshSeries(svc.clone()))
-        .handler(LibraryScan(svc.clone()))
-        .handler(RenameFiles(svc.clone()))
-        .handler(CollectionSync(svc.clone()));
+        .long_running_handler(RefreshMovies(svc.clone()))
+        .long_running_handler(RefreshSeries(svc.clone()))
+        .long_running_handler(LibraryScan(svc.clone()))
+        .long_running_handler(RenameFiles(svc.clone()))
+        .long_running_handler(CollectionSync(svc.clone()));
     for t in tasks() {
         builder = builder.task(t);
     }

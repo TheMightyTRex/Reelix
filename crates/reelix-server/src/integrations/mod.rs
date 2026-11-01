@@ -291,9 +291,9 @@ pub fn register(
     svc: &Arc<IntegrationsService>,
 ) -> reelix_jobs::JobSystemBuilder {
     builder
-        .handler(ImportListSyncJob(svc.clone()))
+        .long_running_handler(ImportListSyncJob(svc.clone()))
         .handler(HealthWatchJob(svc.clone()))
-        .handler(MediaServerAvailabilityJob(svc.clone()))
+        .long_running_handler(MediaServerAvailabilityJob(svc.clone()))
         .task(TaskDef {
             kind: IMPORT_LIST_SYNC,
             name: "Import list sync",

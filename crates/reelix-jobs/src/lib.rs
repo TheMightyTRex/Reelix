@@ -92,6 +92,19 @@ fn task_job(kind: &str) -> NewJob {
 struct Registered {
     handler: Arc<dyn JobHandler>,
     sem: Arc<Semaphore>,
+    /// Also needs a `Shared::long_slots` permit (see [`JobSystemBuilder::long_running_handler`]).
+    long_running: bool,
+}
+
+/// Global slots long-running jobs can't take, so the download monitor, RSS sync, searches and
+/// imports keep running while library refreshes or scans take hours.
+const RESERVED_SLOTS: usize = 2;
+
+/// The permits a running job holds; released when it finishes.
+struct Permits {
+    _global: OwnedSemaphorePermit,
+    _kind: OwnedSemaphorePermit,
+    _long: Option<OwnedSemaphorePermit>,
 }
 
 struct Config {
@@ -106,6 +119,7 @@ struct Shared {
     handlers: HashMap<&'static str, Registered>,
     kinds: Vec<&'static str>,
     global: Arc<Semaphore>,
+    long_slots: Arc<Semaphore>,
     cfg: Config,
 }
 
@@ -119,7 +133,7 @@ pub struct JobSystem {
 pub struct JobSystemBuilder {
     db: Db,
     events: EventBus,
-    handlers: Vec<Arc<dyn JobHandler>>,
+    handlers: Vec<(Arc<dyn JobHandler>, bool)>,
     tasks: Vec<TaskDef>,
     global_concurrency: usize,
     cfg: Config,
@@ -127,7 +141,15 @@ pub struct JobSystemBuilder {
 
 impl JobSystemBuilder {
     pub fn handler(mut self, h: impl JobHandler) -> Self {
-        self.handlers.push(Arc::new(h));
+        self.handlers.push((Arc::new(h), false));
+        self
+    }
+
+    /// Registers a handler whose jobs can run for minutes or hours (library refreshes, scans,
+    /// renames, backups). Long-running jobs together never use more than the global limit minus
+    /// two slots, so short jobs aren't starved.
+    pub fn long_running_handler(mut self, h: impl JobHandler) -> Self {
+        self.handlers.push((Arc::new(h), true));
         self
     }
 
@@ -177,10 +199,18 @@ impl JobSystemBuilder {
             }),
         };
         let mut handlers = HashMap::new();
-        for h in self.handlers {
+        for (h, long_running) in self.handlers {
             let sem = Arc::new(Semaphore::new(h.concurrency().max(1)));
-            handlers.insert(h.kind(), Registered { handler: h, sem });
+            handlers.insert(
+                h.kind(),
+                Registered {
+                    handler: h,
+                    sem,
+                    long_running,
+                },
+            );
         }
+        let long_slots = self.global_concurrency.saturating_sub(RESERVED_SLOTS).max(1);
         let mut kinds: Vec<_> = handlers.keys().copied().collect();
         kinds.sort_unstable();
         JobSystem {
@@ -189,6 +219,7 @@ impl JobSystemBuilder {
                 handlers,
                 kinds,
                 global: Arc::new(Semaphore::new(self.global_concurrency)),
+                long_slots: Arc::new(Semaphore::new(long_slots)),
                 cfg: self.cfg,
             }),
             tasks: self.tasks,
@@ -316,11 +347,24 @@ async fn dispatch(
             let Ok(local) = reg.sem.clone().try_acquire_owned() else {
                 break;
             };
+            let long = if reg.long_running {
+                match shared.long_slots.clone().try_acquire_owned() {
+                    Ok(p) => Some(p),
+                    Err(_) => break,
+                }
+            } else {
+                None
+            };
             match shared.queue.inner.db.jobs().claim(kind, now_ms()).await {
                 Ok(Some(job)) => {
                     let shared = shared.clone();
                     let cancel = cancel.child_token();
-                    tracker.spawn(execute(shared, job, (global, local), cancel));
+                    let permits = Permits {
+                        _global: global,
+                        _kind: local,
+                        _long: long,
+                    };
+                    tracker.spawn(execute(shared, job, permits, cancel));
                 }
                 Ok(None) => break,
                 Err(e) => {
@@ -332,12 +376,7 @@ async fn dispatch(
     }
 }
 
-async fn execute(
-    shared: Arc<Shared>,
-    job: Job,
-    permits: (OwnedSemaphorePermit, OwnedSemaphorePermit),
-    cancel: CancellationToken,
-) {
+async fn execute(shared: Arc<Shared>, job: Job, permits: Permits, cancel: CancellationToken) {
     let inner = &shared.queue.inner;
     let kind = job.kind.clone();
     let handler = shared.handlers[kind.as_str()].handler.clone();

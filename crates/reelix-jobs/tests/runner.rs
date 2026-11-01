@@ -76,6 +76,24 @@ impl JobHandler for Slow {
     }
 }
 
+/// Counts its starts, then runs until shutdown is requested.
+struct Blocks {
+    kind: &'static str,
+    started: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl JobHandler for Blocks {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+    async fn run(&self, ctx: &JobContext, _payload: Value) -> anyhow::Result<()> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        ctx.cancel.cancelled().await;
+        Ok(())
+    }
+}
+
 /// Runs until shutdown is requested.
 struct WaitsForCancel;
 
@@ -425,6 +443,62 @@ async fn concurrency_limits_are_respected() {
     // "many" gets at most global(3) - 0..1 slots.
     assert!(peak_all.load(Ordering::SeqCst) <= 3);
     assert!(peak_all.load(Ordering::SeqCst) >= 2);
+    cancel.cancel();
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn long_running_jobs_leave_slots_for_short_jobs() {
+    let db = Db::in_memory().await.unwrap();
+    let bus = EventBus::default();
+    let mut rx = bus.subscribe();
+    let started = Arc::new(AtomicUsize::new(0));
+    let runs = Arc::new(AtomicUsize::new(0));
+    let mut builder = fast(&db, &bus).global_concurrency(4);
+    for kind in ["refresh-a", "refresh-b", "refresh-c", "refresh-d"] {
+        builder = builder.long_running_handler(Blocks {
+            kind,
+            started: started.clone(),
+        });
+    }
+    let sys = builder
+        .handler(Counter {
+            kind: "count",
+            runs: runs.clone(),
+        })
+        .build();
+    let queue = sys.queue();
+    for kind in ["refresh-a", "refresh-b", "refresh-c", "refresh-d"] {
+        queue
+            .enqueue(NewJob::new(kind, json!({})))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let cancel = CancellationToken::new();
+    let handle = sys.start(cancel.clone());
+    // Four jobs that never finish would take every slot without the reservation.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while started.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("long-running jobs didn't start");
+    for _ in 0..3 {
+        let id = queue
+            .enqueue(NewJob::new("count", json!({})))
+            .await
+            .unwrap()
+            .unwrap();
+        wait_for(&mut rx, finished(id, JobStatus::Completed)).await;
+    }
+    assert_eq!(runs.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        2,
+        "only global - 2 long-running jobs at once"
+    );
     cancel.cancel();
     handle.await.unwrap();
 }

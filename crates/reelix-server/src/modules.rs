@@ -242,7 +242,7 @@ impl Modules {
         builder = builder
             .handler(reelix_providers::jobs::IndexerHealthJob(self.providers.clone()))
             .handler(reelix_providers::jobs::ClientHealthJob(self.providers.clone()))
-            .handler(reelix_providers::jobs::DefinitionsSyncJob(self.providers.clone()));
+            .long_running_handler(reelix_providers::jobs::DefinitionsSyncJob(self.providers.clone()));
         for t in reelix_providers::jobs::tasks() {
             builder = builder.task(t);
         }

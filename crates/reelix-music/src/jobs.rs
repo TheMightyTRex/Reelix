@@ -82,9 +82,9 @@ pub fn tasks() -> Vec<TaskDef> {
 /// Registers the music job handlers and [`tasks`].
 pub fn register(mut builder: JobSystemBuilder, svc: &Arc<MusicService>) -> JobSystemBuilder {
     builder = builder
-        .handler(RefreshArtists(svc.clone()))
-        .handler(MusicScan(svc.clone()))
-        .handler(MusicRename(svc.clone()));
+        .long_running_handler(RefreshArtists(svc.clone()))
+        .long_running_handler(MusicScan(svc.clone()))
+        .long_running_handler(MusicRename(svc.clone()));
     for t in tasks() {
         builder = builder.task(t);
     }
