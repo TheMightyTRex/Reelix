@@ -1,0 +1,15 @@
+# Keep LF everywhere, including Windows checkouts. sqlx embeds a checksum of each migration's
+# exact bytes, so a CRLF checkout builds a binary that rejects databases created by LF builds
+# ("migration 1 was previously applied but has been modified").
+* text=auto eol=lf
+
+# cmd.exe needs CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.ico binary
+*.wasm binary
+
+# Real exports use CRLF; keep the fixture byte-for-byte.
+crates/reelix-lists/tests/fixtures/*.csv -text
