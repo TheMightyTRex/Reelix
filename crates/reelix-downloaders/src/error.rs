@@ -42,6 +42,8 @@ pub enum ClientError {
 
 impl From<reqwest::Error> for ClientError {
     fn from(e: reqwest::Error) -> Self {
+        // Strip the URL: download client API keys can be in the query string.
+        let e = e.without_url();
         if e.is_decode() {
             return Self::Parse(e.to_string());
         }

@@ -31,6 +31,45 @@ pub fn IndexerSettingsPage() -> impl IntoView {
             Some(Ok(s)) => view! { <IndexerSettingsForm initial=s /> }.into_any(),
         }}
         <DefinitionsCard />
+        <AggregatorCard />
+    }
+}
+
+/// Feed URLs other apps use to search every indexer through Reelix.
+#[component]
+fn AggregatorCard() -> impl IntoView {
+    let origin = api::origin();
+    let row = move |label: &'static str, path: &'static str| {
+        let url = format!("{origin}{}{path}", api::base_path());
+        let text = Signal::derive({
+            let url = url.clone();
+            move || url.clone()
+        });
+        view! {
+            <div class="field">
+                <label>{label}</label>
+                <div class="lib-toolbar">
+                    <input class="input grow mono" type="text" readonly aria-label=label prop:value=url />
+                    <CopyButton text=text label="Copy link" />
+                </div>
+            </div>
+        }
+    };
+    view! {
+        <Card
+            title="Use Reelix as an indexer"
+            subtitle="Add Reelix to another app (Sonarr, Radarr, Lidarr, Readarr, LazyLibrarian…) as a single Torznab or Newznab indexer that searches every indexer here."
+        >
+            <div class="form">
+                {row("Torznab (torrents)", "/api/torznab/all")}
+                {row("Newznab (Usenet)", "/api/newznab/all")}
+            </div>
+            <p class="field-hint">
+                "Use an API key from Settings → General as the indexer's API key; its user needs the Manage library permission. "
+                "To add a single indexer, replace "<code>"all"</code>" with the indexer's id. "
+                "Download links point back at Reelix, so the other app never sees indexer passkeys."
+            </p>
+        </Card>
     }
 }
 

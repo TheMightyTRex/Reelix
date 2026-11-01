@@ -9,7 +9,7 @@ use crate::state::{ToastKind, Toasts};
 pub fn ToastHost() -> impl IntoView {
     let toasts = Toasts::expect();
     view! {
-        <div class="toast-region" role="region" aria-label="Notifications" aria-live="polite">
+        <div class="toast-region" role="region" aria-label="Notifications">
             <For each=move || toasts.items.get() key=|t| t.id let:toast>
                 {
                     let (class, icon) = match toast.kind {

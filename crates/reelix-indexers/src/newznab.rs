@@ -164,7 +164,8 @@ impl NewznabIndexer {
         self.guard.check(&url).await?;
         let resp = self.client.get(url).send().await?;
         let status_err = status_error(&resp);
-        let body = resp.text().await?;
+        let bytes = crate::http::read_limited(resp, crate::http::MAX_PAGE_BYTES).await?;
+        let body = String::from_utf8_lossy(&bytes).into_owned();
         // Many indexers send a Newznab <error> document with a non-200 status; prefer it.
         if let Ok(root) = xml::parse(&body) {
             check_error(&root)?;
@@ -583,7 +584,7 @@ impl Indexer for NewznabIndexer {
         if let Some(e) = status_error(&resp) {
             return Err(e);
         }
-        let bytes = resp.bytes().await?.to_vec();
+        let bytes = crate::http::read_limited(resp, crate::http::MAX_DOWNLOAD_BYTES).await?;
         // Newznab indexers report quota/auth problems on the download endpoint as XML.
         if bytes.len() < 4096
             && let Ok(text) = std::str::from_utf8(&bytes)

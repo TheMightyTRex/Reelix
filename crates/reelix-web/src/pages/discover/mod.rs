@@ -106,18 +106,18 @@ pub fn DiscoverPage() -> impl IntoView {
                     format!("/discover?tab={value}")
                 };
                 view! {
-                    <A href=href attr:class=if active { "tab active" } else { "tab" } attr:role="tab"
-                        attr:aria-selected=active.to_string()>
+                    <A href=href attr:class=if active { "tab active" } else { "tab" }
+                        attr:aria-current=active.then_some("page")>
                         <Icon name=icon />{label}
                     </A>
                 }
             };
             view! {
-                <div class="tabs" role="tablist" aria-label="What to discover">
+                <nav class="tabs" aria-label="What to discover">
                     {item("", "Movies & TV", "film")}
                     {books().then(|| item("books", "Books", "books"))}
                     {music().then(|| item("music", "Music", "music"))}
-                </div>
+                </nav>
             }
         })
     };
@@ -265,10 +265,17 @@ fn FeedRow(
 fn Hero(items: Vec<DiscoverItemDto>) -> impl IntoView {
     let count = items.len();
     let index = RwSignal::new(0usize);
+    // Hover/focus pause temporarily; the button (and reduced motion) stops rotation for good.
     let paused = RwSignal::new(false);
+    let reduced_motion = window()
+        .match_media("(prefers-reduced-motion: reduce)")
+        .ok()
+        .flatten()
+        .is_some_and(|m| m.matches());
+    let stopped = RwSignal::new(reduced_motion);
     let handle = set_interval_with_handle(
         move || {
-            if !paused.get_untracked() {
+            if !paused.get_untracked() && !stopped.get_untracked() {
                 index.update(|i| *i = (*i + 1) % count);
             }
         },
@@ -320,11 +327,19 @@ fn Hero(items: Vec<DiscoverItemDto>) -> impl IntoView {
             on:mouseenter=move |_| paused.set(true) on:mouseleave=move |_| paused.set(false)
             on:focusin=move |_| paused.set(true) on:focusout=move |_| paused.set(false)>
             {slide}
-            <button type="button" class="hero-nav prev" aria-label="Previous"
+            <button type="button" class="hero-pause icon-btn icon-btn-sm"
+                aria-pressed=move || stopped.get().to_string()
+                aria-label=move || if stopped.get() { "Play slideshow" } else { "Pause slideshow" }
+                on:click=move |_| stopped.update(|s| *s = !*s)>
+                <Show when=move || stopped.get() fallback=|| view! { <span aria-hidden="true">"❚❚"</span> }>
+                    <Icon name="play" />
+                </Show>
+            </button>
+            <button type="button" class="hero-nav prev" aria-label="Previous slide"
                 on:click=move |_| index.update(|i| *i = (*i + count - 1) % count)>
                 <Icon name="chevron" class="flip" />
             </button>
-            <button type="button" class="hero-nav next" aria-label="Next"
+            <button type="button" class="hero-nav next" aria-label="Next slide"
                 on:click=move |_| index.update(|i| *i = (*i + 1) % count)>
                 <Icon name="chevron" />
             </button>

@@ -81,6 +81,8 @@ fn Entry(entry: CalendarEntryDto, #[prop(optional)] full: bool) -> impl IntoView
             .unwrap_or_default()
     );
     let class = format!("cal-entry {}", status_class(entry.status));
+    // The colour shows status visually; say it for screen readers too.
+    let status_text = format!(" ({})", status_label(entry.status));
     let content = if full {
         view! {
             <strong>{main}</strong>
@@ -88,12 +90,14 @@ fn Entry(entry: CalendarEntryDto, #[prop(optional)] full: bool) -> impl IntoView
             <span class="cal-sub">{sub}</span>
             {entry.network.clone().map(|n| view! { <span class="cal-sub">{format!(" · {n}")}</span> })}
             {entry.quality.clone().map(|q| view! { <span class="badge tone-success">{q}</span> })}
+            <span class="visually-hidden">{status_text}</span>
         }
         .into_any()
     } else {
         view! {
             {main}
             {(!sub.is_empty()).then(|| view! { <span class="cal-sub">{format!(" {sub}")}</span> })}
+            <span class="visually-hidden">{status_text}</span>
         }
         .into_any()
     };
@@ -270,17 +274,17 @@ pub fn CalendarPage() -> impl IntoView {
             .take(7)
             .collect();
         view! {
-            <div class="cal-grid" class:cal-week=mode == "week" role="grid" aria-label="Calendar">
-                {dows.into_iter().map(|w| view! { <div class="cal-dow" role="columnheader">{format!("{w}")}</div> }).collect_view()}
+            <div class="cal-grid" class:cal-week=mode == "week">
+                {dows.into_iter().map(|w| view! { <div class="cal-dow" aria-hidden="true">{format!("{w}")}</div> }).collect_view()}
                 {days.into_iter().map(|day| {
                     let items: Vec<_> = list.iter().filter(|e| e.date == day).cloned().collect();
                     let other = mode == "month" && day.month() != month;
                     view! {
-                        <div class="cal-day" class:other=other class:today=day == today role="gridcell"
-                            aria-label=day.format("%A %B %-d").to_string()>
-                            <span class="cal-date">{day.day()}</span>
+                        <section class="cal-day" class:other=other class:today=day == today>
+                            <h3 class="visually-hidden">{day.format("%A %B %-d").to_string()}</h3>
+                            <span class="cal-date" aria-hidden="true">{day.day()}</span>
                             {items.into_iter().map(|e| view! { <Entry entry=e /> }).collect_view()}
-                        </div>
+                        </section>
                     }
                 }).collect_view()}
             </div>
@@ -326,12 +330,17 @@ pub fn CalendarPage() -> impl IntoView {
         });
     };
 
+    let period_name = move || match view_mode.get().as_str() {
+        "week" => "week",
+        "agenda" => "period",
+        _ => "month",
+    };
     view! {
         <PageHeader title="Calendar" subtitle="Upcoming episodes and movie releases." />
         <div class="cal-toolbar">
-            <button type="button" class="btn btn-sm btn-secondary" aria-label="Previous" on:click=move |_| step(-1)>"‹"</button>
+            <button type="button" class="btn btn-sm btn-secondary" aria-label=move || format!("Previous {}", period_name()) on:click=move |_| step(-1)>"‹"</button>
             <button type="button" class="btn btn-sm btn-secondary" on:click=move |_| anchor.set(today)>"Today"</button>
-            <button type="button" class="btn btn-sm btn-secondary" aria-label="Next" on:click=move |_| step(1)>"›"</button>
+            <button type="button" class="btn btn-sm btn-secondary" aria-label=move || format!("Next {}", period_name()) on:click=move |_| step(1)>"›"</button>
             <h2 class="cal-title" aria-live="polite">{title}</h2>
             <Segmented value=view_mode label="Calendar view" options=vec![("month", "Month"), ("week", "Week"), ("agenda", "Agenda")] />
             <Segmented value=kinds label="Show" options=vec![("all", "All"), ("movies", "Movies"), ("episodes", "Episodes")] />

@@ -11,7 +11,6 @@ use reelix_db::{Db, from_ms, now_ms};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
-use super::files::{self, FileTable};
 use super::{misc, placeholders};
 use crate::convert::{clean_title, date_str, date_utc, enum_str, from_json, json, parse_date, parse_enum};
 use crate::error::Result;
@@ -75,6 +74,39 @@ struct EpFact {
 }
 
 /// Series (all, or `ids`) with seasons, statistics, tags and alternative titles.
+/// Every series with tags and alternative titles but no seasons or statistics, for filtering
+/// and sorting a list; load the page itself with [`hydrate`].
+pub async fn load_light(db: &Db) -> Result<Vec<SeriesDto>> {
+    let sql = format!("SELECT {COLS} FROM series ORDER BY sort_title");
+    let mut list: Vec<SeriesDto> = sqlx::query(&sql)
+        .fetch_all(db.pool())
+        .await?
+        .iter()
+        .map(map)
+        .collect::<Result<_>>()?;
+    let mut tags = misc::tags_of(db, MediaKind::Series).await?;
+    let mut alts = misc::alt_titles_of(db, MediaKind::Series).await?;
+    for s in &mut list {
+        s.tags = tags.remove(&s.id).unwrap_or_default();
+        s.alternative_titles = alts.remove(&s.id).unwrap_or_default();
+    }
+    Ok(list)
+}
+
+/// Replaces light rows with fully loaded ones, keeping their order.
+pub async fn hydrate(db: &Db, light: Vec<SeriesDto>, today: NaiveDate) -> Result<Vec<SeriesDto>> {
+    if light.is_empty() {
+        return Ok(light);
+    }
+    let ids: Vec<i64> = light.iter().map(|s| s.id).collect();
+    let mut full: HashMap<i64, SeriesDto> = load(db, Some(&ids), today)
+        .await?
+        .into_iter()
+        .map(|s| (s.id, s))
+        .collect();
+    Ok(ids.iter().filter_map(|id| full.remove(id)).collect())
+}
+
 pub async fn load(db: &Db, ids: Option<&[i64]>, today: NaiveDate) -> Result<Vec<SeriesDto>> {
     let sql = match ids {
         Some(ids) => format!(
@@ -154,11 +186,29 @@ pub async fn load(db: &Db, ids: Option<&[i64]>, today: NaiveDate) -> Result<Vec<
             })
         })
         .collect::<Result<_>>()?;
-    let file_sizes: HashMap<i64, u64> = files::list(db, FileTable::Episode, filter)
+    // Sizes only: building full file rows (quality/format JSON) for every file is wasted here.
+    let size_sql = match filter {
+        Some(f) => format!(
+            "SELECT id, size FROM episode_files WHERE series_id IN ({})",
+            placeholders(f.len())
+        ),
+        None => "SELECT id, size FROM episode_files".into(),
+    };
+    let mut q = sqlx::query(&size_sql);
+    for id in filter.unwrap_or_default() {
+        q = q.bind(id);
+    }
+    let file_sizes: HashMap<i64, u64> = q
+        .fetch_all(db.pool())
         .await?
-        .into_iter()
-        .map(|f| (f.id, f.size))
-        .collect();
+        .iter()
+        .map(|r| {
+            Ok((
+                r.try_get::<i64, _>("id")?,
+                r.try_get::<i64, _>("size")?.max(0) as u64,
+            ))
+        })
+        .collect::<Result<_>>()?;
 
     let mut stats: HashMap<(i64, u32), (SeasonStatistics, std::collections::HashSet<i64>)> = HashMap::new();
     for e in &facts {
@@ -451,6 +501,68 @@ pub async fn episodes(db: &Db, series_id: i64, season: Option<u32>) -> Result<Ve
 
 pub async fn episodes_by_ids(db: &Db, ids: &[i64]) -> Result<Vec<EpisodeDto>> {
     episodes_where(db, &format!("id IN ({})", placeholders(ids.len())), ids).await
+}
+
+/// One page of wanted/missing episodes, filtered, sorted and paged in SQL; returns the page
+/// and the total. `sort` is `date` (default), `title` or `added`.
+pub async fn missing_episodes_page(
+    db: &Db,
+    today: NaiveDate,
+    only_monitored: bool,
+    sort: &str,
+    desc: bool,
+    limit: Option<u32>,
+    offset: u64,
+) -> Result<(Vec<EpisodeDto>, u64)> {
+    let filter = format!(
+        "e.season_number > 0 AND e.episode_file_id IS NULL AND e.air_date IS NOT NULL AND e.air_date <= ?{}",
+        if only_monitored {
+            " AND e.monitored = 1 AND s.monitored = 1"
+        } else {
+            ""
+        }
+    );
+    let total: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM episodes e JOIN series s ON s.id = e.series_id WHERE {filter}"
+    ))
+    .bind(date_str(Some(today)))
+    .fetch_one(db.pool())
+    .await?;
+    let dir = if desc { "DESC" } else { "ASC" };
+    let key = match sort {
+        "title" => format!("s.title COLLATE NOCASE {dir}"),
+        "added" => format!("s.created_at {dir}"),
+        _ => format!("e.air_date {dir}"),
+    };
+    let cols = EP_COLS
+        .split(',')
+        .map(|c| format!("e.{}", c.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT {cols} FROM episodes e JOIN series s ON s.id = e.series_id WHERE {filter}
+         ORDER BY {key}, s.title {dir}, e.season_number {dir}, e.episode_number {dir}
+         LIMIT ? OFFSET ?"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(date_str(Some(today)))
+        .bind(limit.map_or(-1, i64::from))
+        .bind(offset as i64)
+        .fetch_all(db.pool())
+        .await?;
+    Ok((
+        rows.iter().map(map_episode).collect::<Result<_>>()?,
+        total.max(0) as u64,
+    ))
+}
+
+/// Episodes that have a file, grouped by series, in one query.
+pub async fn episodes_with_files(db: &Db) -> Result<HashMap<i64, Vec<EpisodeDto>>> {
+    let mut out: HashMap<i64, Vec<EpisodeDto>> = HashMap::new();
+    for e in episodes_where(db, "episode_file_id IS NOT NULL", &[]).await? {
+        out.entry(e.series_id).or_default().push(e);
+    }
+    Ok(out)
 }
 
 /// Episodes airing in `[start, end]` (dates as text compare correctly).

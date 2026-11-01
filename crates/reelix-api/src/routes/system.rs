@@ -34,7 +34,9 @@ pub async fn status(State(state): State<AppState>, _user: CurrentUser) -> ApiJso
     })
 }
 
-/// Health checks. Anonymous callers only get the overall status; HTTP 503 when it is `error`.
+/// Health checks. Callers without Manage library (anonymous and request-only users) only get
+/// the overall status, since check messages name indexers, clients and paths; HTTP 503 when it
+/// is `error`.
 #[utoipa::path(get, path = "/api/v1/system/health", tag = "system",
     responses(
         (status = 200, description = "Healthy or degraded", body = HealthReport),
@@ -48,7 +50,10 @@ pub async fn health(State(state): State<AppState>, MaybeUser(user): MaybeUser) -
     } else {
         StatusCode::OK
     };
-    let checks = if user.is_some() { checks } else { Vec::new() };
+    let detailed = user
+        .as_ref()
+        .is_some_and(|u| u.require(Permissions::MANAGE_LIBRARY).is_ok());
+    let checks = if detailed { checks } else { Vec::new() };
     (code, ApiJson(HealthReport { status, checks })).into_response()
 }
 

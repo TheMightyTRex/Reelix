@@ -93,7 +93,7 @@ pub fn MediaCard(
         None => title.clone(),
     };
     view! {
-        <A href=href attr:class="media-card" attr:aria-label=label>
+        <A href=href attr:class="media-card" attr:title=label>
             <div class="media-poster">
                 {match src {
                     Some(src) => {

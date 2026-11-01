@@ -232,9 +232,10 @@ pub fn SetupPage() -> impl IntoView {
                         <input id="setup-username" class="input" type="text" autocomplete="username"
                             autocapitalize="none" spellcheck="false" maxlength="64" required autofocus
                             aria-invalid=move || username_err().is_some().to_string()
+                            aria-describedby="setup-username-hint"
                             prop:value=move || username.get()
                             on:input=move |e| username.set(event_target_value(&e)) />
-                        <p class="field-hint">{move || username_err().unwrap_or("Letters, digits, dots, dashes and underscores.")}</p>
+                        <p id="setup-username-hint" class="field-hint">{move || username_err().unwrap_or("Letters, digits, dots, dashes and underscores.")}</p>
                     </div>
                     <div class="field">
                         <label for="setup-email">"Email " <span class="optional">"(optional)"</span></label>
@@ -247,17 +248,19 @@ pub fn SetupPage() -> impl IntoView {
                             <label for="setup-password">"Password"</label>
                             <input id="setup-password" class="input" type="password" autocomplete="new-password" required
                                 aria-invalid=move || password_err().is_some().to_string()
+                            aria-describedby="setup-password-hint"
                                 prop:value=move || password.get()
                                 on:input=move |e| password.set(event_target_value(&e)) />
-                            <p class="field-hint">{move || password_err().unwrap_or("At least 8 characters.")}</p>
+                            <p id="setup-password-hint" class="field-hint">{move || password_err().unwrap_or("At least 8 characters.")}</p>
                         </div>
                         <div class="field" class:invalid=move || confirm_err().is_some()>
                             <label for="setup-confirm">"Confirm password"</label>
                             <input id="setup-confirm" class="input" type="password" autocomplete="new-password" required
                                 aria-invalid=move || confirm_err().is_some().to_string()
+                            aria-describedby="setup-confirm-hint"
                                 prop:value=move || confirm.get()
                                 on:input=move |e| confirm.set(event_target_value(&e)) />
-                            <p class="field-hint">{move || confirm_err().unwrap_or(" ")}</p>
+                            <p id="setup-confirm-hint" class="field-hint">{move || confirm_err().unwrap_or(" ")}</p>
                         </div>
                     </div>
                     <div class="wizard-actions">
@@ -323,7 +326,7 @@ pub fn SetupPage() -> impl IntoView {
     };
 
     view! {
-        <div class="wizard-page">
+        <main class="wizard-page">
             <div class="wizard">
                 <aside class="wizard-side">
                     <div class="auth-brand">
@@ -338,7 +341,7 @@ pub fn SetupPage() -> impl IntoView {
                 </aside>
                 <section class="wizard-main" aria-live="polite">{body}</section>
             </div>
-        </div>
+        </main>
     }
 }
 

@@ -296,7 +296,7 @@ pub fn LoginPage() -> impl IntoView {
     };
 
     view! {
-        <div class="auth-page">
+        <main class="auth-page">
             <div class="auth-card">
                 <div class="auth-brand">
                     <Logo />
@@ -370,6 +370,6 @@ pub fn LoginPage() -> impl IntoView {
                     </button>
                 </Show>
             </div>
-        </div>
+        </main>
     }
 }

@@ -75,6 +75,11 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 - Per-user UI settings: date and time format, relative dates, first day of the week, and default calendar and library views.
 - REST API with API keys, and interactive API documentation at `/api/docs`.
 
+### Migration and compatibility
+- **Migrate from the \*arr stack** (System → Migrate): connect to Radarr, Sonarr, Prowlarr, Readarr, Lidarr or Jellyseerr with its URL and API key, preview what will be added, reused or skipped, then import tags, root folders, quality profiles, indexers, download clients, remote path mappings, movies, series, authors, artists, users and requests. Path rewrites cover different volume mounts, hidden passwords can be entered in the preview, and running it again doesn't duplicate anything.
+- **Use Reelix as an indexer**: `/api/torznab/all` (torrents) and `/api/newznab/all` (Usenet) search every indexer configured in Reelix; add them to other apps as one Torznab/Newznab indexer. Download links go through Reelix, so passkeys never leave it.
+- **\*arr-compatible APIs** for tools such as Homepage, Bazarr, LunaSea, nzb360 and Recyclarr: point a Radarr client at `http://reelix:7700/radarr`, a Sonarr client at `/sonarr`, Readarr at `/readarr` and Lidarr at `/lidarr`, with a Reelix API key.
+
 ---
 
 ## Installation

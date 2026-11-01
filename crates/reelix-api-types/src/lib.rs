@@ -7,6 +7,7 @@ pub mod books;
 pub mod content;
 pub mod integrations;
 pub mod library;
+pub mod migrate;
 pub mod music;
 pub mod pipeline;
 pub mod profiles;

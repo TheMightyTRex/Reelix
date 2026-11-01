@@ -31,12 +31,28 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-fn opf_path<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Result<String, String> {
-    let mut container = String::new();
-    zip.by_name("META-INF/container.xml")
-        .map_err(err)?
-        .read_to_string(&mut container)
+/// Largest container.xml / OPF read from an EPUB (they're a few KB; this stops zip bombs).
+const MAX_XML_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Reads a zip entry as text, failing when it's bigger than [`MAX_XML_BYTES`].
+fn read_entry<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>, name: &str) -> Result<String, String> {
+    let entry = zip.by_name(name).map_err(err)?;
+    let mut text = String::new();
+    entry
+        .take(MAX_XML_BYTES + 1)
+        .read_to_string(&mut text)
         .map_err(err)?;
+    if text.len() as u64 > MAX_XML_BYTES {
+        return Err(format!(
+            "{name} is larger than {} MB",
+            MAX_XML_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(text)
+}
+
+fn opf_path<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Result<String, String> {
+    let container = read_entry(zip, "META-INF/container.xml")?;
     let mut reader = Reader::from_str(&container);
     loop {
         match reader.read_event().map_err(err)? {
@@ -72,11 +88,7 @@ fn isbn_digits(text: &str) -> Option<String> {
 pub fn read_info(path: &Path) -> Result<EpubInfo, String> {
     let mut zip = ZipArchive::new(File::open(path).map_err(err)?).map_err(err)?;
     let opf = opf_path(&mut zip)?;
-    let mut xml = String::new();
-    zip.by_name(&opf)
-        .map_err(err)?
-        .read_to_string(&mut xml)
-        .map_err(err)?;
+    let xml = read_entry(&mut zip, &opf)?;
     let mut reader = Reader::from_str(&xml);
     let mut info = EpubInfo::default();
     let mut current: Option<Vec<u8>> = None;
@@ -268,11 +280,7 @@ pub(crate) fn rewrite_opf(xml: &str, t: &BookTags, cover: Option<(&str, &str)>) 
 pub fn write(path: &Path, t: &BookTags) -> Result<(), String> {
     let mut zip = ZipArchive::new(File::open(path).map_err(err)?).map_err(err)?;
     let opf = opf_path(&mut zip)?;
-    let mut xml = String::new();
-    zip.by_name(&opf)
-        .map_err(err)?
-        .read_to_string(&mut xml)
-        .map_err(err)?;
+    let xml = read_entry(&mut zip, &opf)?;
     let cover = t.cover.as_ref().and_then(|c| image_mime(c).map(|m| (c, m)));
     let cover_name = cover.map(|(_, m)| {
         if m == "image/png" {
@@ -335,6 +343,22 @@ pub fn write(path: &Path, t: &BookTags) -> Result<(), String> {
         let _ = std::fs::remove_file(&tmp);
         err(e)
     })
+}
+
+/// Fuzzing entry point: rewrites an untrusted OPF document with and without a cover. Must
+/// never panic.
+#[doc(hidden)]
+pub fn fuzz_rewrite_opf(xml: &str) {
+    let t = BookTags {
+        title: "T".into(),
+        authors: vec!["A".into()],
+        isbn: Some("9780000000002".into()),
+        series: Some("S".into()),
+        series_position: Some("1".into()),
+        ..BookTags::default()
+    };
+    let _ = rewrite_opf(xml, &t, None);
+    let _ = rewrite_opf(xml, &t, Some(("cover.jpg", "image/jpeg")));
 }
 
 #[cfg(test)]

@@ -23,6 +23,7 @@ pub fn Modal(
         }
     };
     let dialog_ref = NodeRef::<html::Div>::new();
+    super::focus::restore_focus_on_close(open);
 
     // Move focus into the dialog when it opens so keyboard users land inside it.
     Effect::new(move |_| {
@@ -49,6 +50,8 @@ pub fn Modal(
         if e.key() == "Escape" {
             e.stop_propagation();
             close();
+        } else if let Some(el) = dialog_ref.get() {
+            super::focus::trap_tab(&el, &e);
         }
     };
 

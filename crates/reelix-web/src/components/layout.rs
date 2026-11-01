@@ -53,10 +53,19 @@ pub fn Shell() -> impl IntoView {
             .is_some_and(|id| prefs_for.get() == Some(id))
     };
 
-    // Close the mobile drawer whenever the route changes.
-    Effect::new(move |_| {
-        location.pathname.track();
+    // On navigation: close the mobile drawer and move focus to the new page's content
+    // (not on first load, which would skip the skip link).
+    Effect::new(move |prev: Option<String>| {
+        let path = location.pathname.get();
         drawer_open.set(false);
+        if prev.is_some_and(|p| p != path)
+            && let Some(main) = document()
+                .get_element_by_id("main")
+                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            let _ = main.focus();
+        }
+        path
     });
 
     view! {

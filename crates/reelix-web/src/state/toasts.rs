@@ -52,8 +52,11 @@ impl Toasts {
                 items.remove(0);
             }
         });
-        let this = *self;
-        set_timeout(move || this.dismiss(id), AUTO_DISMISS);
+        // Errors stay until dismissed so there's time to read them (WCAG 2.2.1).
+        if kind != ToastKind::Error {
+            let this = *self;
+            set_timeout(move || this.dismiss(id), AUTO_DISMISS);
+        }
     }
 
     pub fn success(&self, message: impl Into<String>) {

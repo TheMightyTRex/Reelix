@@ -184,7 +184,7 @@ async fn fetch(http: &reqwest::Client, url: &str, title: &str) -> Result<Torrent
                 "fetching torrent failed: HTTP {status}"
             )));
         }
-        let bytes = resp.bytes().await?.to_vec();
+        let bytes = crate::common::read_limited(resp, crate::common::MAX_DOWNLOAD_BYTES).await?;
         return Ok(TorrentSource::File {
             hash: info_hash(&bytes)?,
             name: format!("{}.torrent", crate::common::sanitize_file_name(title)),

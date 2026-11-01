@@ -278,7 +278,7 @@ fn MovieDetail(id: i64) -> impl IntoView {
         {header}
         <div class="card">
             <div class="card-body">
-                <div class="tabs" role="tablist">
+                <div class="tabs" role="tablist" aria-label="Details sections">
                     {tab_btn("files", "Files")}
                     {tab_btn("cast", "Cast")}
                     {tab_btn("history", "History")}

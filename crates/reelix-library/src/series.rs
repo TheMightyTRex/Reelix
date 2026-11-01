@@ -106,7 +106,14 @@ fn blank_series() -> SeriesDto {
 
 impl LibraryService {
     pub async fn list_series(&self, q: &SeriesListQuery) -> Result<Paged<SeriesDto>> {
-        let mut items = repo::load(&self.db, None, self.today()).await?;
+        // Statistics (episode counts, size) are only needed to filter or sort by them;
+        // otherwise filter, sort and page light rows and fully load just the page.
+        let light = q.missing.is_none() && !matches!(q.sort.as_deref(), Some("size" | "progress"));
+        let mut items = if light {
+            repo::load_light(&self.db).await?
+        } else {
+            repo::load(&self.db, None, self.today()).await?
+        };
         let needle = q.q.as_deref().map(str::to_lowercase).filter(|s| !s.is_empty());
         items.retain(|s| {
             needle.as_ref().is_none_or(|n| {
@@ -158,7 +165,11 @@ impl LibraryService {
         if q.dir == Some(SortDir::Desc) {
             items.reverse();
         }
-        Ok(paginate(items, q.page, q.page_size))
+        let mut page = paginate(items, q.page, q.page_size);
+        if light {
+            page.items = repo::hydrate(&self.db, page.items, self.today()).await?;
+        }
+        Ok(page)
     }
 
     pub(crate) async fn series_row(&self, id: i64) -> Result<SeriesDto> {

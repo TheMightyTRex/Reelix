@@ -18,11 +18,13 @@
   --surface-3: #232a3b;
   --border: #252d3f;
   --border-strong: #34405a;
+  /* Form control borders: at least 3:1 against the card surface. */
+  --border-input: #5c6780;
   --overlay: rgba(4, 6, 12, 0.66);
 
   --text: #e8ebf3;
   --text-muted: #9aa3b8;
-  --text-faint: #6b748a;
+  --text-faint: #8a93a8;
 
   --success: #3ccf91;
   --success-soft: rgba(60, 207, 145, 0.13);
@@ -84,21 +86,22 @@
   --surface-3: #e9ebf2;
   --border: #e2e5ee;
   --border-strong: #c9cedb;
+  --border-input: #878e9f;
   --overlay: rgba(20, 24, 40, 0.42);
 
   --text: #161a26;
   --text-muted: #5a6276;
-  --text-faint: #8a91a3;
+  --text-faint: #616a7c;
 
-  --success: #12935e;
+  --success: #0c7a4d;
   --success-soft: rgba(18, 147, 94, 0.1);
-  --warning: #b77707;
+  --warning: #8f5d00;
   --warning-soft: rgba(183, 119, 7, 0.11);
-  --danger: #d23a4e;
+  --danger: #c0293f;
   --danger-soft: rgba(210, 58, 78, 0.1);
-  --info: #1d7fc4;
+  --info: #1668a3;
   --info-soft: rgba(29, 127, 196, 0.1);
-  --neutral: #687186;
+  --neutral: #5e6679;
   --neutral-soft: rgba(104, 113, 134, 0.1);
 
   --shadow-sm: 0 1px 2px rgba(20, 24, 40, 0.06);
@@ -161,7 +164,9 @@ textarea {
 }
 
 :focus-visible {
-  outline: none;
+  /* Transparent outline: invisible normally, drawn in forced-colors (High Contrast) mode. */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus);
   border-radius: var(--radius-sm);
 }
@@ -264,6 +269,14 @@ textarea {
 
 .btn-primary {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--brand-b)));
+}
+
+/* Keep white label text above 4.5:1 across the light theme's gradient. */
+:root[data-theme="light"] .btn-primary {
+  background: linear-gradient(135deg, var(--accent-strong), color-mix(in srgb, var(--accent-strong) 80%, var(--brand-b)));
+}
+
+.btn-primary {
   color: var(--accent-contrast);
   box-shadow: 0 6px 18px -8px var(--accent);
 }
@@ -295,6 +308,11 @@ textarea {
 .btn-danger {
   background: var(--danger);
   color: #fff;
+}
+
+/* White on the dark theme's light red is ~3:1; dark text is 6.5:1. */
+:root:not([data-theme="light"]) .btn-danger {
+  color: #1a0b0e;
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -391,7 +409,7 @@ textarea {
   height: 40px;
   padding: 0 var(--space-3);
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-input);
   border-radius: var(--radius);
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
@@ -405,7 +423,7 @@ textarea {
 }
 
 .input:focus {
-  outline: none;
+  outline: 2px solid transparent;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -518,6 +536,7 @@ textarea {
 }
 
 .chip {
+  min-height: 24px;
   padding: 2px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -632,7 +651,7 @@ textarea {
   max-width: 1440px;
   margin: 0 auto;
   padding: var(--space-5) var(--space-6) var(--space-7);
-  outline: none;
+  outline: 2px solid transparent;
 }
 
 /* Sidebar */
@@ -777,7 +796,7 @@ textarea {
   height: 38px;
   padding: 0 40px 0 38px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-input);
   border-radius: var(--radius);
   color: var(--text-muted);
   cursor: default;
@@ -785,7 +804,7 @@ textarea {
 }
 
 .search-input:focus {
-  outline: none;
+  outline: 2px solid transparent;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -1584,7 +1603,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  outline: none;
+  outline: 2px solid transparent;
   animation: pop 180ms var(--ease);
 }
 
@@ -1874,13 +1893,17 @@ textarea {
     inset: 0 auto 0 0;
     width: min(var(--sidebar-w), 84vw);
     transform: translateX(-100%);
-    transition: transform 220ms var(--ease);
+    /* Hidden (and out of the tab order) once the slide-out finishes. */
+    visibility: hidden;
+    transition: transform 220ms var(--ease), visibility 0s 220ms;
     box-shadow: var(--shadow-lg);
     z-index: 60;
   }
 
   .sidebar.open {
     transform: none;
+    visibility: visible;
+    transition-delay: 0s;
   }
 
   .sidebar-scrim {
@@ -2011,6 +2034,7 @@ textarea {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -2286,7 +2310,7 @@ select.input {
 .seg-btn:hover { color: var(--text); }
 .seg-btn.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 .seg-btn:focus-visible, .th-sort:focus-visible, .poster-link:focus-visible, .season-toggle:focus-visible,
-.cal-entry:focus-visible, .lib-row:focus-visible { outline: none; box-shadow: var(--focus); }
+.cal-entry:focus-visible, .lib-row:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus); }
 
 /* Posters */
 .poster-grid {
@@ -2522,7 +2546,7 @@ select.input {
   white-space: nowrap;
 }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.tab:focus-visible { outline: none; box-shadow: var(--focus); }
+.tab:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus); }
 
 .cast-row { display: grid; grid-auto-flow: column; grid-auto-columns: 110px; gap: var(--space-3); overflow-x: auto; padding-bottom: var(--space-2); }
 .cast-card { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-xs); }
@@ -2567,7 +2591,7 @@ select.input {
 .monitor-btn.off { color: var(--text-faint); }
 .monitor-btn:hover { background: var(--surface-2); }
 .monitor-btn .icon { width: 17px; height: 17px; }
-.monitor-btn:focus-visible { outline: none; box-shadow: var(--focus); }
+.monitor-btn:focus-visible { outline: 2px solid transparent; box-shadow: var(--focus); }
 
 /* Add / lookup results */
 .lookup-list { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -2738,8 +2762,8 @@ select.input {
 .hero-nav.prev { left: var(--space-3); }
 .hero-nav.next { right: var(--space-3); }
 .hero-dots { position: absolute; right: var(--space-5); bottom: var(--space-5); display: flex; gap: 6px; }
-.hero-dot { width: 8px; height: 8px; padding: 0; border: 0; border-radius: var(--radius-pill); background: rgba(255, 255, 255, 0.4); cursor: pointer; transition: width var(--dur) var(--ease); }
-.hero-dot.active { width: 22px; background: #fff; }
+.hero-dot { width: 8px; height: 8px; padding: 8px; box-sizing: content-box; background-clip: content-box; border: 0; border-radius: var(--radius-pill); background: rgba(255, 255, 255, 0.4); cursor: pointer; transition: width var(--dur) var(--ease); }
+.hero-dot.active { width: 22px; background: #fff; background-clip: content-box; }
 
 /* Rows and cards */
 .media-row { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
@@ -2773,7 +2797,7 @@ select.input {
 }
 .media-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .media-card:hover .media-poster, .media-card:focus-visible .media-poster { transform: translateY(-3px); box-shadow: var(--shadow-md); }
-.media-card:focus-visible { outline: none; }
+.media-card:focus-visible { outline: 2px solid transparent; }
 .media-card:focus-visible .media-poster { box-shadow: var(--focus); }
 .media-poster-fallback {
   display: grid;
@@ -2821,12 +2845,12 @@ select.input {
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
-.media-badge .media-badge-label { display: none; }
+.media-badge .media-badge-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .media-badge.large { position: static; height: 26px; padding: 0 10px; font-size: var(--text-xs); }
-.media-badge.large .media-badge-label { display: inline; }
-.media-badge.available { background: #1f9e6a; }
-.media-badge.partial { background: #2a8bb8; }
-.media-badge.requested { background: #b5841f; }
+.media-badge.large .media-badge-label { position: static; width: auto; height: auto; overflow: visible; clip: auto; clip-path: none; display: inline; }
+.media-badge.available { background: #167a52; }
+.media-badge.partial { background: #1f6f96; }
+.media-badge.requested { background: #8a6212; }
 .media-badge.processing { background: #6b5ce0; }
 .row-error { padding: var(--space-4) 0; }
 
@@ -2991,7 +3015,7 @@ select.input {
   background: var(--surface);
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
-  outline: none;
+  outline: 2px solid transparent;
   animation: drawer-in 200ms var(--ease);
 }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } }
@@ -3308,3 +3332,23 @@ select.input {
   .log-body { grid-column: 1 / -1; }
 }
 /* ---- end System ---- */
+
+/* Migration */
+.migrate-group { margin-top: var(--space-4); }
+.migrate-group > .checkbox,
+.migrate-group > summary { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-2); cursor: pointer; }
+.migrate-group .input-sm { max-width: 14rem; margin-top: var(--space-1); }
+
+/* A button that looks like inline text/link (keyboard-reachable row actions). */
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+.cell-sub .link-btn { color: var(--accent-strong); }
+.hero-pause { position: absolute; top: var(--space-3); right: var(--space-3); z-index: 2; background: rgba(0, 0, 0, 0.45); color: #fff; }

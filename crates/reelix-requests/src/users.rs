@@ -244,6 +244,15 @@ impl RequestService {
         if permissions.is_admin() && !actor.permissions.is_admin() {
             return Err(Error::Forbidden("only admins can create admins".into()));
         }
+        // Explicit permissions beyond the actor's own need an admin (the defaults are fine).
+        if dto.permissions.is_some()
+            && !actor.permissions.is_admin()
+            && !actor.permissions.contains(permissions)
+        {
+            return Err(Error::Forbidden(
+                "you can only grant permissions your own account has".into(),
+            ));
+        }
         let created = self
             .db
             .users()
@@ -307,6 +316,13 @@ impl RequestService {
                 }
                 if permissions.is_admin() && !target.permissions.is_admin() {
                     return Err(Error::Forbidden("only admins can grant ADMIN".into()));
+                }
+                // User managers can only hand out permissions they hold themselves.
+                let added = permissions.difference(target.permissions);
+                if !actor.permissions.contains(added) {
+                    return Err(Error::Forbidden(
+                        "you can only grant permissions your own account has".into(),
+                    ));
                 }
             }
         } else {

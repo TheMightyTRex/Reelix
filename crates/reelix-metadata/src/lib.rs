@@ -52,8 +52,10 @@ pub enum MetaError {
     RateLimited { retry_after_secs: Option<u64> },
     #[error("provider returned HTTP {status}: {message}")]
     Status { status: u16, message: String },
+    /// Transport error; the URL is stripped so API keys and tokens in it never leak into
+    /// messages, health checks or logs.
     #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(reqwest::Error),
     #[error("unexpected response: {0}")]
     Decode(String),
     #[error("{0} is not supported by this provider")]
@@ -264,6 +266,12 @@ pub fn build(
             )))
         }
         _ => unreachable!("schema lookup covers every implementation"),
+    }
+}
+
+impl From<reqwest::Error> for MetaError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Http(e.without_url())
     }
 }
 

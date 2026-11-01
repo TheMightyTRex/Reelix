@@ -1,0 +1,74 @@
+# libFuzzer targets for the untrusted-input parsers. Needs nightly and cargo-fuzz:
+#   cargo install cargo-fuzz
+#   cargo +nightly fuzz run release_name -- -max_total_time=300
+# The same entry points run as stable property tests in each crate's tests/fuzz_props.rs.
+[package]
+name = "reelix-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+reelix-parser = { path = "../crates/reelix-parser" }
+reelix-indexers = { path = "../crates/reelix-indexers" }
+reelix-downloaders = { path = "../crates/reelix-downloaders" }
+reelix-books = { path = "../crates/reelix-books" }
+
+# Not part of the main workspace (it needs nightly).
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "release_name"
+path = "fuzz_targets/release_name.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "newznab_xml"
+path = "fuzz_targets/newznab_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "indexer_definition"
+path = "fuzz_targets/indexer_definition.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "definition_template"
+path = "fuzz_targets/definition_template.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "selector_and_dates"
+path = "fuzz_targets/selector_and_dates.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xmlrpc"
+path = "fuzz_targets/xmlrpc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "epub_opf"
+path = "fuzz_targets/epub_opf.rs"
+test = false
+doc = false
+bench = false

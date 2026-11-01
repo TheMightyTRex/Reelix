@@ -90,10 +90,11 @@ pub fn BlocklistPage() -> impl IntoView {
                         <tbody>
                             {p.items.into_iter().map(|b| {
                                 let id = b.id;
+                                let select_label = format!("Select {}", b.source_title);
                                 view! {
                                     <tr class:is-selected=move || selected.with(|s| s.contains(&id))>
                                         <td class="col-check">
-                                            <input type="checkbox" aria-label="Select"
+                                            <input type="checkbox" aria-label=select_label.clone()
                                                 prop:checked=move || selected.with(|s| s.contains(&id))
                                                 on:change=move |_| toggle_id(selected, id) />
                                         </td>

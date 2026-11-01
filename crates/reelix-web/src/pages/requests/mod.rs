@@ -342,6 +342,7 @@ pub fn RequestsPage() -> impl IntoView {
                                 let failed = r.status == RequestStatus::Failed;
                                 let is_own = auth.user.with_untracked(|u| u.as_ref().is_some_and(|u| u.id == r.requested_by.id));
                                 let can_delete = manage || (is_own && pending);
+                                let details_label = format!("Details for {}", r.title);
                                 let sub = [Some(kind_label(r.kind).to_string()), r.year.map(|y| y.to_string()),
                                     Some(seasons_label(&r)).filter(|s| !s.is_empty())]
                                     .into_iter().flatten().collect::<Vec<_>>().join(" · ");
@@ -369,6 +370,16 @@ pub fn RequestsPage() -> impl IntoView {
                                                     <div class="cell-sub">
                                                         {sub}
                                                         {r.is_4k.then(|| view! { <span class="badge tone-accent badge-xs">"4K"</span> })}
+                                                        " · "
+                                                        <button type="button" class="link-btn"
+                                                            aria-label=details_label.clone()
+                                                            on:click=move |e| {
+                                                                e.stop_propagation();
+                                                                drawer_item.set(Some(row.get_value()));
+                                                                drawer_open.set(true);
+                                                            }>
+                                                            "Details"
+                                                        </button>
                                                     </div>
                                                 </div>
                                             </div>

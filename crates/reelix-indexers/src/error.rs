@@ -11,8 +11,10 @@ pub enum IndexerError {
     Config(String),
     #[error("unknown indexer implementation `{0}`")]
     UnknownImplementation(String),
+    /// Transport error; the URL is stripped so API keys and tokens in it never leak into
+    /// messages, health checks or logs.
     #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(reqwest::Error),
     #[error("indexer returned HTTP {status}")]
     Status { status: u16 },
     /// Bad API key, wrong credentials, suspended account or login rejected.
@@ -60,5 +62,11 @@ impl IndexerError {
                 | Self::MagnetRedirect(_)
                 | Self::NotFound(_)
         )
+    }
+}
+
+impl From<reqwest::Error> for IndexerError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Http(e.without_url())
     }
 }

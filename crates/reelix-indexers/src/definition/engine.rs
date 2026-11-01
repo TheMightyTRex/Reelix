@@ -160,6 +160,26 @@ impl DefinitionIndexer {
             .map_err(|e| IndexerError::Config(format!("bad path `{path}`: {e}")))
     }
 
+    /// Whether `url` is on the tracker itself (its base URL or one of the definition's links,
+    /// or a subdomain of either). Session cookies and definition headers are only sent there,
+    /// so a download link or redirect pointing elsewhere can't capture them.
+    fn own_host(&self, url: &Url) -> bool {
+        let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
+            return false;
+        };
+        let related = |known: &str| {
+            let known = known.to_ascii_lowercase();
+            host == known || host.ends_with(&format!(".{known}")) || known.ends_with(&format!(".{host}"))
+        };
+        self.base.host_str().is_some_and(related)
+            || self
+                .def
+                .links
+                .iter()
+                .filter_map(|l| Url::parse(l).ok())
+                .any(|l| l.host_str().is_some_and(related))
+    }
+
     /// Sends a request, following redirects manually so cookies set on 3xx are kept.
     async fn send(
         &self,
@@ -184,14 +204,19 @@ impl DefinitionIndexer {
                 s.last_request = Some(Instant::now());
             }
             let mut rb = self.client.request(method.clone(), url.clone());
-            for (k, v) in headers {
+            let own = self.own_host(&url);
+            for (k, v) in headers.iter().filter(|_| own) {
                 if k.eq_ignore_ascii_case("cookie") {
                     continue;
                 }
                 rb = rb.header(k.as_str(), v.as_str());
             }
-            let mut cookie = s.jar.header();
-            if let Some((_, c)) = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("cookie")) {
+            let mut cookie = if own { s.jar.header() } else { None };
+            if let Some((_, c)) = headers
+                .iter()
+                .filter(|_| own)
+                .find(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            {
                 cookie = Some(match cookie {
                     Some(j) => format!("{c}; {j}"),
                     None => c.clone(),
@@ -210,7 +235,9 @@ impl DefinitionIndexer {
                 rb = rb.body(b.clone());
             }
             let resp = rb.send().await?;
-            s.jar.absorb(resp.headers());
+            if own {
+                s.jar.absorb(resp.headers());
+            }
             if !resp.status().is_redirection() {
                 return Ok((url, resp));
             }
@@ -250,7 +277,7 @@ impl DefinitionIndexer {
             .and_then(|v| v.to_str().ok())
             .and_then(|ct| ct.split(';').find_map(|p| p.trim().strip_prefix("charset=")))
             .map(|c| c.trim_matches('"').to_string());
-        let bytes = resp.bytes().await?;
+        let bytes = crate::http::read_limited(resp, crate::http::MAX_PAGE_BYTES).await?;
         let text = decode(&bytes, charset.as_deref().unwrap_or(&self.def.encoding));
         if is_cloudflare_challenge(status, &resp_headers, &text) {
             let fs = self.flaresolverr.as_ref().ok_or_else(|| {
@@ -995,7 +1022,7 @@ impl DefinitionIndexer {
         if let Some(e) = status_error(&resp) {
             return Err(e);
         }
-        let bytes = resp.bytes().await?.to_vec();
+        let bytes = crate::http::read_limited(resp, crate::http::MAX_DOWNLOAD_BYTES).await?;
         if bytes.is_empty() {
             return Err(IndexerError::Parse("empty download".into()));
         }

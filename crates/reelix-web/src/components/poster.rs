@@ -164,7 +164,7 @@ pub fn PosterCard(
         view! {
             <div class="poster-wrap">
                 <Poster title=title.clone() url=poster.clone() />
-                <span class=format!("poster-state {}", state.class()) title=state.label()></span>
+                <span class=format!("poster-state {}", state.class()) title=state.label()><span class="visually-hidden">{state.label()}</span></span>
                 {badge.clone().map(|b| view! { <span class="poster-badge">{b}</span> })}
                 {monitored.map(|m| view! {
                     <span class="poster-monitor" class:off=!m title=if m { "Monitored" } else { "Unmonitored" }>

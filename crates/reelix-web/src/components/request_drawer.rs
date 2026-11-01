@@ -13,6 +13,7 @@ pub fn Drawer(
     children: ChildrenFn,
 ) -> impl IntoView {
     let panel = NodeRef::<html::Aside>::new();
+    super::focus::restore_focus_on_close(open);
     Effect::new(move |_| {
         if open.get()
             && let Some(el) = panel.get()
@@ -24,6 +25,8 @@ pub fn Drawer(
         if e.key() == "Escape" {
             e.stop_propagation();
             open.set(false);
+        } else if let Some(el) = panel.get() {
+            super::focus::trap_tab(&el, &e);
         }
     };
     let children = StoredValue::new(children);

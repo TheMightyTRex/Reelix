@@ -310,7 +310,7 @@ impl DownloadClient for Blackhole {
                                 resp.status()
                             )));
                         }
-                        resp.bytes().await?.to_vec()
+                        crate::common::read_limited(resp, crate::common::MAX_DOWNLOAD_BYTES).await?
                     }
                     other => {
                         return Err(ClientError::InvalidPayload(format!(

@@ -11,6 +11,33 @@ use url::Url;
 
 use crate::IndexerError;
 
+/// Largest search/caps/page response read from an indexer.
+pub const MAX_PAGE_BYTES: usize = 32 * 1024 * 1024;
+/// Largest `.torrent` / `.nzb` download.
+pub const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
+
+/// Reads a response body, failing once it exceeds `limit` bytes (a hostile or broken
+/// indexer can't make Reelix buffer gigabytes).
+pub async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, IndexerError> {
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(IndexerError::Parse(format!(
+            "response larger than {} MB",
+            limit / (1024 * 1024)
+        )));
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > limit {
+            return Err(IndexerError::Parse(format!(
+                "response larger than {} MB",
+                limit / (1024 * 1024)
+            )));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
 /// Proxy kind supported per indexer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -256,7 +256,34 @@ pub fn build_app(api: Router, web: Arc<WebUi>, url_base: &str) -> Router {
         HeaderValue::from_static("DENY"),
     ))
     .layer(CompressionLayer::new())
-    .layer(TraceLayer::new_for_http())
+    .layer(TraceLayer::new_for_http().make_span_with(redacted_span))
+}
+
+/// Request span with the query string's secrets (`apikey`, `api_key`, `token`, `passkey`)
+/// redacted, so debug logs never contain API keys passed as `?apikey=`.
+fn redacted_span(req: &axum::http::Request<axum::body::Body>) -> tracing::Span {
+    let uri = req.uri();
+    let query = uri.query().map(|q| {
+        q.split('&')
+            .map(|pair| {
+                let key = pair.split('=').next().unwrap_or_default();
+                let secret = ["apikey", "api_key", "token", "passkey", "link"]
+                    .iter()
+                    .any(|k| key.eq_ignore_ascii_case(k));
+                if secret {
+                    format!("{key}=REDACTED")
+                } else {
+                    pair.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("&")
+    });
+    let shown = match query {
+        Some(q) => format!("{}?{q}", uri.path()),
+        None => uri.path().to_owned(),
+    };
+    tracing::debug_span!("request", method = %req.method(), uri = %shown, version = ?req.version())
 }
 
 #[cfg(test)]

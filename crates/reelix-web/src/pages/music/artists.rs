@@ -136,7 +136,7 @@ pub fn ArtistsPage() -> impl IntoView {
                                         let (qp, mp) = (a.quality_profile_id, a.metadata_profile_id);
                                         view! {
                                             <tr>
-                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()></span></td>
+                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()><span class="visually-hidden">{state.label()}</span></span></td>
                                                 <td class="cell-strong">
                                                     <A href=format!("/music/artists/{}", a.id)>{a.name.clone()}</A>
                                                     {a.disambiguation.clone().map(|d| view! { <span class="cell-sub">{d}</span> })}

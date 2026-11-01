@@ -207,7 +207,15 @@ pub fn ContentRequestTable(
                                                     {thumb.map(|src| view! { <img src=src alt="" loading="lazy" /> })}
                                                 </span>
                                                 <div>
-                                                    <span class="cell-strong">{r.title.clone()}</span>
+                                                    // A real button so keyboard users can open the details too.
+                                                    <button type="button" class="link-btn cell-strong"
+                                                        on:click=move |e| {
+                                                            e.stop_propagation();
+                                                            drawer_item.set(Some(row.get_value()));
+                                                            drawer_open.set(true);
+                                                        }>
+                                                        {r.title.clone()}
+                                                    </button>
                                                     <div class="cell-sub">{subline(&r)}</div>
                                                 </div>
                                             </div>

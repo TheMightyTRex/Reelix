@@ -1,11 +1,39 @@
 [package]
 name = "reelix-migrate"
-description = "Reelix migrate"
+description = "Migration from Radarr, Sonarr, Prowlarr, Readarr, Lidarr and Jellyseerr"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+chrono.workspace = true
+reelix-api-types.workspace = true
+reelix-books.workspace = true
+reelix-core.workspace = true
+reelix-db.workspace = true
+reelix-decision.workspace = true
+reelix-indexers.workspace = true
+reelix-library.workspace = true
+reelix-metadata.workspace = true
+reelix-music.workspace = true
+reelix-parser.workspace = true
+reelix-providers.workspace = true
+reelix-requests.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+reelix-core = { workspace = true, features = ["bus"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

@@ -67,13 +67,24 @@ pub fn verify_password(password: &str, hash: Option<&str>) -> bool {
         && real
 }
 
+/// At most this many argon2 hashes run at once (each uses ~19 MiB); a flood of logins queues
+/// instead of exhausting memory.
+const MAX_CONCURRENT_HASHES: usize = 4;
+
+fn hash_permits() -> &'static tokio::sync::Semaphore {
+    static PERMITS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    PERMITS.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_HASHES))
+}
+
 pub(crate) async fn hash_password_blocking(password: String) -> ApiResult<String> {
+    let _permit = hash_permits().acquire().await.map_err(ApiError::internal)?;
     tokio::task::spawn_blocking(move || hash_password(&password))
         .await
         .map_err(ApiError::internal)?
 }
 
 pub(crate) async fn verify_password_blocking(password: String, hash: Option<String>) -> ApiResult<bool> {
+    let _permit = hash_permits().acquire().await.map_err(ApiError::internal)?;
     tokio::task::spawn_blocking(move || verify_password(&password, hash.as_deref()))
         .await
         .map_err(ApiError::internal)
@@ -148,6 +159,41 @@ pub(crate) fn clear_cookie(state: &AppState, headers: &HeaderMap) -> HeaderValue
         c.push_str("; Secure");
     }
     HeaderValue::from_str(&c).expect("cookie is ASCII")
+}
+
+/// How long a pending external login (Plex PIN, OIDC redirect) stays bound to the browser.
+const FLOW_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// `Set-Cookie` binding a pending external login to this browser: `value` is sealed with the
+/// server secret, so the cookie can't be forged, and the flow can only be finished by the
+/// browser that started it (a PIN id or OIDC state seen elsewhere is useless).
+pub(crate) fn flow_cookie(
+    state: &AppState,
+    headers: &HeaderMap,
+    name: &str,
+    value: &str,
+) -> ApiResult<HeaderValue> {
+    let sealed = state
+        .secrets()
+        .encrypt(&format!("login-flow\n{name}\n{value}"))
+        .map_err(ApiError::internal)?;
+    let mut c = format!(
+        "{name}={sealed}; Path={}; HttpOnly; SameSite=Lax; Max-Age={}",
+        cookie_path(state),
+        FLOW_TTL.as_secs()
+    );
+    if is_https(headers) {
+        c.push_str("; Secure");
+    }
+    HeaderValue::from_str(&c).map_err(ApiError::internal)
+}
+
+/// Whether the request carries the [`flow_cookie`] `name` for exactly `value`.
+pub(crate) fn flow_matches(state: &AppState, headers: &HeaderMap, name: &str, value: &str) -> bool {
+    CookieJar::from_headers(headers)
+        .get(name)
+        .and_then(|c| state.secrets().decrypt(c.value()).ok())
+        .is_some_and(|plain| plain == format!("login-flow\n{name}\n{value}"))
 }
 
 /// Creates a session row and returns the `Set-Cookie` header value.

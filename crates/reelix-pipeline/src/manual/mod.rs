@@ -190,7 +190,7 @@ impl ActivityService {
                 && tracked_row
                     .as_ref()
                     .and_then(|t| t.output_path.as_ref())
-                    .is_none_or(|o| !path.starts_with(o))
+                    .is_none_or(|o| !inside(&path, Path::new(o)))
             {
                 fail(&mut report, "file is not inside an allowed folder".into());
                 mark_failed(&mut downloads, tracked_row);
@@ -293,5 +293,15 @@ fn mark_failed(downloads: &mut BTreeMap<String, (TrackedDownload, bool)>, t: Opt
             .entry(t.download_id.clone())
             .and_modify(|e| e.1 = false)
             .or_insert((t, false));
+    }
+}
+
+/// Whether `path` is really inside `root`: both are resolved first, so `..` segments and
+/// symlinks can't reach files outside the download folder (a lexical `starts_with` can be
+/// fooled by `<root>/../../secret.key`).
+fn inside(path: &Path, root: &Path) -> bool {
+    match (std::fs::canonicalize(path), std::fs::canonicalize(root)) {
+        (Ok(p), Ok(r)) => p.starts_with(r),
+        _ => false,
     }
 }

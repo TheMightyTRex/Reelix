@@ -102,7 +102,8 @@ pub fn Spinner(#[prop(optional, into)] label: Option<String>) -> impl IntoView {
 #[component]
 pub fn Skeleton(#[prop(default = 3)] lines: usize) -> impl IntoView {
     view! {
-        <div class="skeleton-group" aria-busy="true" aria-label="Loading">
+        <div class="skeleton-group" role="status" aria-busy="true">
+            <span class="visually-hidden">"Loading…"</span>
             {(0..lines).map(|i| view! { <div class="skeleton" class:short=i % 3 == 2></div> }).collect_view()}
         </div>
     }
@@ -170,6 +171,8 @@ pub fn PageHeader(
     #[prop(optional, into)] subtitle: Option<String>,
     #[prop(optional)] children: Option<Children>,
 ) -> impl IntoView {
+    // Each page names the browser tab, so screen-reader users hear where they landed.
+    document().set_title(&format!("{title} · Reelix"));
     view! {
         <div class="page-header">
             <div>

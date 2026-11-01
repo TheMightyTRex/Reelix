@@ -311,15 +311,16 @@ pub fn MoviesPage() -> impl IntoView {
                                         let id = m.id;
                                         let state = movie_state(&m);
                                         let is_sel = move || selected.with(|s| s.contains(&id));
+                                        let select_label = format!("Select {}", m.title);
                                         view! {
                                             <tr class:is-selected=is_sel>
                                                 {move || selecting.get().then(|| view! {
                                                     <td class="col-check">
-                                                        <input type="checkbox" aria-label=format!("Select movie {id}") prop:checked=is_sel
+                                                        <input type="checkbox" aria-label=select_label.clone() prop:checked=is_sel
                                                             on:change=move |_| toggle_id(selected, id) />
                                                     </td>
                                                 })}
-                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()></span></td>
+                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()><span class="visually-hidden">{state.label()}</span></span></td>
                                                 <td class="cell-strong"><A href=format!("/movies/{id}")>{m.title.clone()}</A></td>
                                                 <td>{m.year.map(|y| y.to_string()).unwrap_or_default()}</td>
                                                 <td>{opts.profile_name(m.quality_profile_id)}</td>

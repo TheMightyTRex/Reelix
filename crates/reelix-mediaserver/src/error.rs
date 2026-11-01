@@ -7,8 +7,10 @@ pub enum MsError {
     UnknownImplementation(String),
     #[error("invalid settings: {0}")]
     InvalidSettings(String),
+    /// Transport error; the URL is stripped so API keys and tokens in it never leak into
+    /// messages, health checks or logs.
     #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(reqwest::Error),
     /// The API key/token was rejected.
     #[error("unauthorized: check the API key or token")]
     Unauthorized,
@@ -52,4 +54,10 @@ pub(crate) async fn check(resp: reqwest::Response) -> Result<reqwest::Response, 
 pub(crate) async fn json<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Result<T, MsError> {
     let bytes = check(resp).await?.bytes().await?;
     serde_json::from_slice(&bytes).map_err(|e| MsError::Parse(e.to_string()))
+}
+
+impl From<reqwest::Error> for MsError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Http(e.without_url())
+    }
 }

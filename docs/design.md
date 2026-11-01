@@ -15,7 +15,7 @@ Reelix combines six tools into one Rust service with one web UI:
 
 Running it means **one binary, one database, one config, one login, one API**. You don't have to wire API keys between six apps, keep their state in sync, or run six containers.
 
-> **Status:** Pre-alpha. Movies and TV (M0–M7), books (M8) and music (M9) are implemented, with the gaps listed under [Current Progress](#current-progress). Next up: migration, compatibility and hardening (M10), then the 1.0 release (M11). Nothing has been tested against real indexers, download clients or media servers yet.
+> **Status:** Pre-alpha. Movies and TV (M0–M7), books (M8) and music (M9) are implemented, with the gaps listed under [Current Progress](#current-progress). Most of M10 (migration, compatibility, hardening) is done; PostgreSQL support is not. Next up: the 1.0 release (M11). Nothing has been tested against real indexers, download clients or media servers yet.
 >
 > **Known issue:** in manual testing, an approved movie request was not searched for automatically and did not move from *Requested* to *Available* after downloading. The cause is still under investigation. See [Current Progress](#current-progress).
 
@@ -1088,7 +1088,7 @@ The import runs through the **API** of the running source app, with a fallback t
 
 ## Current Progress
 
-*Last updated 2026-10-29.*
+*Last updated 2026-10-31.*
 
 **Working (movies and TV, M0–M7):** setup wizard, login and users; quality profiles, custom formats and the decision engine; movie and series libraries with scan, import, rename and metadata refresh; Torznab/Newznab indexers with health, stats and manual search; SABnzbd, NZBGet, qBittorrent, Transmission, Deluge and blackhole clients; the search → grab → track → import pipeline with manual import, history and blocklist; calendar and iCal feed; discovery, requests, approvals, quotas and issues; Jellyfin/Emby/Plex login and refresh; eleven notifiers; import lists and watchlist sync.
 
@@ -1122,7 +1122,9 @@ The import runs through the **API** of the running source app, with a fallback t
 
 **System screens (done ahead of M10):** scheduled and manual backups (`VACUUM INTO` snapshot + `config.toml` + secret key in a zip, retention for scheduled ones), download, delete and restore (stored or uploaded; staged and applied on the next start before the database opens, rolled back if the restored database won't open); a log viewer over the rolling log files (pretty and JSON) with level/text filters, a live tail and downloads; update checks against the `mvanhare/Reelix` GitHub releases (twice a day when enabled, with a health notice; no self-update); editing bind address, port, URL base and logging in `config.toml` from Settings → General; and per-user UI settings (date/time format, relative dates, first day of week, default calendar and library views).
 
-**Not started:** the rest of M10 (`reelix-migrate` is a placeholder, and there are no API shims, no Torznab aggregator and no PostgreSQL support).
+**Migration, compatibility and hardening (M10):** the `reelix-migrate` tool (System → Migrate) for Radarr, Sonarr, Prowlarr, Readarr, Lidarr and Jellyseerr; a Torznab/Newznab aggregator; Radarr/Sonarr/Readarr/Lidarr-compatible APIs; a performance pass (lists filter and sort on light rows and load only the page; all library endpoints under 150 ms p95 with 10k movies, 100k episodes and 100k tracks); an accessibility pass (contrast, focus handling in dialogs, keyboard access, landmarks, page titles, status text); and a security review with fixes, a threat model ([security.md](security.md)), property tests and libFuzzer targets for every parser.
+
+**Not started:** PostgreSQL support (all ~470 queries are written for SQLite).
 
 ---
 
@@ -1254,13 +1256,13 @@ Each milestone ends with a tagged pre-release and a working Docker image. Books 
 **Exit criteria:** A 20k-track library imports and matches at least 95% of albums automatically, and a requested album is searched, grabbed, tagged and imported with no manual steps.
 
 ### M10 — Migration, Compatibility & Hardening
-- [ ] `reelix-migrate` for Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
-- [ ] Radarr/Sonarr v3 and Readarr/Lidarr v1 API shims (subset needed by Bazarr, Recyclarr, Homepage, LunaSea)
-- [ ] Torznab aggregator endpoint
+- [x] `reelix-migrate` for Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr — *over each app's API, with preview, path rewrites and hidden-secret entry; Readarr authors are matched on Open Library by name. Tested against mocked APIs only*
+- [x] Radarr/Sonarr v3 and Readarr/Lidarr v1 API shims (subset needed by Bazarr, Recyclarr, Homepage, LunaSea) — *at `/radarr`, `/sonarr`, `/readarr`, `/lidarr`; Readarr/Lidarr are mostly read-only*
+- [x] Torznab aggregator endpoint — *`/api/torznab/{all|id}` and `/api/newznab/{all|id}`, with proxied, sealed download links*
 - [ ] PostgreSQL support and CI matrix
 - [x] Backups/restore, update checks, log viewer, server settings — *restore needs a restart; updates are checked, not installed*
-- [ ] Performance pass (10k movies / 2k series / 100k tracks fixtures), accessibility pass (WCAG AA)
-- [ ] Security review, threat model, fuzzing on all parsers (XML, YAML, release names)
+- [x] Performance pass (10k movies / 2k series / 100k tracks fixtures), accessibility pass (WCAG AA) — *`cargo test --release -p reelix-api --test perf -- --ignored`: every library endpoint < 150 ms p95; accessibility fixes from a code audit, not yet checked with a screen reader*
+- [x] Security review, threat model, fuzzing on all parsers (XML, YAML, release names) — *see [security.md](security.md); four low findings open*
 
 **Exit criteria:** A real user's full *arr stack migrates with no data loss, the performance targets are met, and there are no known critical bugs.
 

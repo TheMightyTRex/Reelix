@@ -209,6 +209,7 @@ pub const NAV: &[&[NavItem]] = &[
                 ("Health", "/system/health"),
                 ("Tasks", "/system/tasks"),
                 ("Backup", "/system/backup"),
+                ("Migrate", "/system/migrate"),
                 ("Updates", "/system/updates"),
                 ("Events", "/system/events"),
                 ("Logs", "/system/logs"),
@@ -313,7 +314,20 @@ pub fn Sidebar(open: RwSignal<bool>) -> impl IntoView {
 
     view! {
         <div class="sidebar-scrim" class:visible=move || open.get() on:click=close aria-hidden="true"></div>
-        <aside id="app-sidebar" class="sidebar" class:open=move || open.get() aria-label="Primary">
+        <aside id="app-sidebar" class="sidebar" class:open=move || open.get() aria-label="Primary"
+            on:keydown=move |e: leptos::ev::KeyboardEvent| {
+                if e.key() == "Escape" && open.get_untracked() {
+                    open.set(false);
+                    if let Some(t) = document()
+                        .query_selector(".drawer-toggle")
+                        .ok()
+                        .flatten()
+                        .and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok())
+                    {
+                        let _ = t.focus();
+                    }
+                }
+            }>
             <div class="sidebar-brand">
                 <A href="/" attr:class="brand" attr:aria-label="Reelix home" on:click=close>
                     <Logo />

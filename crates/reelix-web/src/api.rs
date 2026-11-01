@@ -65,6 +65,13 @@ pub fn api_url(path: &str) -> String {
     format!("{}/api/v1{}", base_path(), path)
 }
 
+/// `scheme://host[:port]` of the page.
+pub fn origin() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().origin().ok())
+        .unwrap_or_default()
+}
+
 /// WebSocket URL of the live event stream.
 pub fn ws_url() -> String {
     let location = web_sys::window().map(|w| w.location());

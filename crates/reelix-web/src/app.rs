@@ -54,6 +54,7 @@ pub fn App() -> impl IntoView {
                             <Route path=path!("system/backup") view=pages::system::BackupPage />
                             <Route path=path!("system/updates") view=pages::system::UpdatesPage />
                             <Route path=path!("system/logs") view=pages::system::LogsPage />
+                            <Route path=path!("system/migrate") view=pages::system::MigratePage />
                             <Route path=path!("settings/general") view=pages::settings::GeneralPage />
                             <Route path=path!("settings/ui") view=pages::settings::UiSettingsPage />
                             <Route path=path!("settings/profiles") view=pages::settings::ProfilesPage />
@@ -137,7 +138,7 @@ fn Splash() -> impl IntoView {
 fn Offline() -> impl IntoView {
     let auth = AuthState::expect();
     view! {
-        <div class="auth-page">
+        <main class="auth-page">
             <div class="auth-card">
                 <div class="auth-brand">
                     <Logo />
@@ -155,6 +156,6 @@ fn Offline() -> impl IntoView {
                     "Try again"
                 </button>
             </div>
-        </div>
+        </main>
     }
 }

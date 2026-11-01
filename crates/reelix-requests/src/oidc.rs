@@ -68,7 +68,15 @@ impl OidcState {
 /// Only allows relative in-app paths as post-login targets (no open redirects).
 pub fn safe_return_to(r: Option<&str>) -> String {
     match r {
-        Some(p) if p.starts_with('/') && !p.starts_with("//") && !p.contains('\\') && !p.contains("://") => {
+        // Printable ASCII only: browsers drop tabs/newlines, so `/\t/evil.com` would
+        // otherwise become `//evil.com`.
+        Some(p)
+            if p.starts_with('/')
+                && !p.starts_with("//")
+                && !p.contains('\\')
+                && !p.contains("://")
+                && p.bytes().all(|b| b.is_ascii_graphic()) =>
+        {
             p.to_owned()
         }
         _ => "/".to_owned(),
@@ -233,6 +241,8 @@ mod tests {
         assert_eq!(safe_return_to(Some("//evil.com")), "/");
         assert_eq!(safe_return_to(Some("https://evil.com")), "/");
         assert_eq!(safe_return_to(Some("/\\evil")), "/");
+        assert_eq!(safe_return_to(Some("/\t/evil.com")), "/");
+        assert_eq!(safe_return_to(Some("/caf\u{e9}")), "/");
         assert_eq!(safe_return_to(None), "/");
     }
 }

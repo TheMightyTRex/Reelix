@@ -40,6 +40,7 @@ pub struct Modules {
     pub search: std::sync::Arc<reelix_pipeline::search::SearchService>,
     pub activity: std::sync::Arc<reelix_pipeline::ActivityService>,
     pub maintenance: std::sync::Arc<crate::maintenance::MaintenanceService>,
+    pub migrate: std::sync::Arc<reelix_migrate::MigrateService>,
 }
 
 impl Modules {
@@ -54,6 +55,7 @@ impl Modules {
         )
         .await?;
         // library (TMDB resolved per call from the providers' metadata settings)
+        let library_metadata;
         let library = {
             let p = providers.clone();
             let metadata = reelix_library::DynMetadata::new(move || {
@@ -64,10 +66,12 @@ impl Modules {
                         .map_err(|_| reelix_library::MetaError::NotConfigured("TMDB"))
                 }
             });
+            let metadata = std::sync::Arc::new(metadata);
+            library_metadata = metadata.clone();
             std::sync::Arc::new(reelix_library::LibraryService::new(
                 deps.db.clone(),
                 deps.events.clone(),
-                std::sync::Arc::new(metadata),
+                metadata,
             ))
         };
         // books (Open Library metadata, no API key); the client is shared with book Discover rows
@@ -201,6 +205,22 @@ impl Modules {
         let maintenance =
             crate::maintenance::MaintenanceService::new(deps.db.clone(), deps.http.clone(), &deps.config)
                 .await?;
+        // migration from Radarr/Sonarr/Prowlarr/Readarr/Lidarr/Jellyseerr
+        let migrate = {
+            let p = providers.clone();
+            std::sync::Arc::new(reelix_migrate::MigrateService::new(
+                reelix_migrate::Targets {
+                    db: deps.db.clone(),
+                    providers: providers.clone(),
+                    library: Some(library.clone()),
+                    books: Some(books.clone()),
+                    music: Some(music.clone()),
+                    metadata: library_metadata,
+                    metadata_ready: std::sync::Arc::new(move || p.metadata().is_ok()),
+                },
+                deps.http.clone(),
+            ))
+        };
         Ok(Self {
             deps,
             providers,
@@ -212,6 +232,7 @@ impl Modules {
             search,
             activity,
             maintenance,
+            migrate,
         })
     }
 
@@ -285,6 +306,7 @@ impl Modules {
         state = state.with_extension(std::sync::Arc::new(reelix_api::Maintenance(
             self.maintenance.clone(),
         )));
+        state = state.with_extension(self.migrate.clone());
         state
     }
 }

@@ -99,7 +99,7 @@ fn found<T>(v: Option<T>, what: &str) -> ApiResult<ApiJson<T>> {
 
 // ---------------- quality profiles ----------------
 
-async fn validate_profile(state: &AppState, p: &QualityProfile) -> ApiResult<()> {
+pub(crate) async fn validate_profile(state: &AppState, p: &QualityProfile) -> ApiResult<()> {
     p.validate().map_err(|e| ApiError::validation(e.to_string()))?;
     let formats = state.db().custom_formats().list().await?;
     if let Some(bad) = p

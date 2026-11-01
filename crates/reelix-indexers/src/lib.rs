@@ -7,6 +7,8 @@
 pub mod categories;
 pub mod definition;
 mod error;
+#[doc(hidden)]
+pub mod fuzz;
 pub mod http;
 pub mod manager;
 pub mod model;

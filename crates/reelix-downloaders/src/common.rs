@@ -360,6 +360,26 @@ pub fn snippet(s: &str) -> String {
     }
 }
 
+/// Largest `.torrent` / `.nzb` fetched from a URL.
+pub const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
+
+/// Reads a response body, failing once it exceeds `limit` bytes.
+pub async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, ClientError> {
+    let too_big =
+        || ClientError::InvalidPayload(format!("download larger than {} MB", limit / (1024 * 1024)));
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(too_big());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > limit {
+            return Err(too_big());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
 /// Fails with `Http` unless the status is 2xx; returns the body text.
 pub async fn ok_text(resp: reqwest::Response) -> Result<String, ClientError> {
     let status = resp.status();

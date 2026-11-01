@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use chrono::NaiveDate;
 use reelix_api_types::library::{CollectionRefDto, MovieDto, MovieFileDto, MovieStatus};
 use reelix_core::MediaKind;
 use reelix_db::{Db, from_ms, now_ms};
@@ -75,6 +76,64 @@ fn map(r: &SqliteRow) -> Result<MovieDto> {
     })
 }
 
+/// Columns list filtering/sorting and the wanted/calendar views need (no overview, credits,
+/// links…): decoding 10k full rows is most of a list request's cost.
+const LIGHT_COLS: &str = "m.id, m.tmdb_id, m.title, m.original_title, m.sort_title, m.year, m.status, m.runtime, \
+    m.genres, m.images, m.ratings, m.in_cinemas, m.digital_release, m.physical_release, m.monitored, \
+    m.minimum_availability, m.quality_profile_id, m.root_folder_id, m.path, m.collection_id, m.created_at";
+
+fn map_light(r: &SqliteRow) -> Result<MovieDto> {
+    let status: MovieStatus = parse_enum(&r.try_get::<String, _>("status")?).unwrap_or(MovieStatus::Tba);
+    let min = parse_enum(&r.try_get::<String, _>("minimum_availability")?).unwrap_or_default();
+    Ok(MovieDto {
+        id: r.try_get("id")?,
+        tmdb_id: r.try_get::<i64, _>("tmdb_id")? as u32,
+        imdb_id: None,
+        title: r.try_get("title")?,
+        original_title: r.try_get("original_title")?,
+        sort_title: r.try_get("sort_title")?,
+        year: r.try_get::<Option<i64>, _>("year")?.map(|y| y as i32),
+        overview: None,
+        tagline: None,
+        status,
+        runtime_minutes: r.try_get::<Option<i64>, _>("runtime")?.map(|v| v as u32),
+        studio: None,
+        genres: from_json(r.try_get("genres")?),
+        certification: None,
+        original_language: None,
+        images: from_json(r.try_get("images")?),
+        ratings: from_json(r.try_get("ratings")?),
+        alternative_titles: Vec::new(),
+        in_cinemas: parse_date(r.try_get("in_cinemas")?),
+        digital_release: parse_date(r.try_get("digital_release")?),
+        physical_release: parse_date(r.try_get("physical_release")?),
+        youtube_trailer: None,
+        homepage: None,
+        monitored: r.try_get("monitored")?,
+        minimum_availability: min,
+        is_available: is_available(status, min),
+        quality_profile_id: r.try_get("quality_profile_id")?,
+        root_folder_id: r.try_get("root_folder_id")?,
+        path: r.try_get("path")?,
+        // Only the id matters for filtering; the page is reloaded in full.
+        collection: r
+            .try_get::<Option<i64>, _>("collection_id")?
+            .map(|id| CollectionRefDto {
+                id,
+                tmdb_id: 0,
+                title: String::new(),
+            }),
+        tags: Vec::new(),
+        added_by_request_id: None,
+        has_file: false,
+        size_on_disk: 0,
+        movie_file: None,
+        cast: Vec::new(),
+        added: from_ms(r.try_get("created_at")?),
+        last_refreshed: None,
+    })
+}
+
 /// Movies (all, or `ids`) with tags, alternative titles and their primary file.
 pub async fn load(db: &Db, ids: Option<&[i64]>, profiles: &ProfileCache) -> Result<Vec<MovieDto>> {
     let base = format!("SELECT {COLS} FROM movies m LEFT JOIN collections c ON c.id = m.collection_id");
@@ -120,6 +179,77 @@ pub async fn load(db: &Db, ids: Option<&[i64]>, profiles: &ProfileCache) -> Resu
         }
     }
     Ok(movies)
+}
+
+/// Every movie with the fields lists filter and sort on (tags, alternative titles,
+/// `has_file`, `size_on_disk`) but without file details: cheap enough to run per page
+/// request. Load the page itself with [`load`].
+pub async fn load_light(db: &Db) -> Result<Vec<MovieDto>> {
+    let sql = format!("SELECT {LIGHT_COLS} FROM movies m ORDER BY m.sort_title");
+    let mut movies: Vec<MovieDto> = sqlx::query(&sql)
+        .fetch_all(db.pool())
+        .await?
+        .iter()
+        .map(map_light)
+        .collect::<Result<_>>()?;
+    let sizes: HashMap<i64, i64> =
+        sqlx::query("SELECT movie_id, SUM(size) AS size FROM movie_files GROUP BY movie_id")
+            .fetch_all(db.pool())
+            .await?
+            .iter()
+            .map(|r| {
+                Ok((
+                    r.try_get("movie_id")?,
+                    r.try_get::<Option<i64>, _>("size")?.unwrap_or(0),
+                ))
+            })
+            .collect::<Result<_>>()?;
+    let mut tags = misc::tags_of(db, MediaKind::Movie).await?;
+    let mut alts = misc::alt_titles_of(db, MediaKind::Movie).await?;
+    for m in &mut movies {
+        m.tags = tags.remove(&m.id).unwrap_or_default();
+        m.alternative_titles = alts.remove(&m.id).unwrap_or_default();
+        if let Some(size) = sizes.get(&m.id) {
+            m.has_file = true;
+            m.size_on_disk = *size as u64;
+        }
+    }
+    Ok(movies)
+}
+
+/// Ids of movies with a cinema, digital or physical release in `[start, end]`.
+pub async fn released_between(
+    db: &Db,
+    start: NaiveDate,
+    end: NaiveDate,
+    unmonitored: bool,
+) -> Result<Vec<i64>> {
+    let (a, b) = (date_str(Some(start)), date_str(Some(end)));
+    let sql = format!(
+        "SELECT id FROM movies WHERE ((in_cinemas >= ?1 AND in_cinemas <= ?2)
+            OR (digital_release >= ?1 AND digital_release <= ?2)
+            OR (physical_release >= ?1 AND physical_release <= ?2)){}",
+        if unmonitored { "" } else { " AND monitored = 1" }
+    );
+    Ok(sqlx::query_scalar(&sql)
+        .bind(a)
+        .bind(b)
+        .fetch_all(db.pool())
+        .await?)
+}
+
+/// Replaces light rows with fully loaded ones, keeping their order.
+pub async fn hydrate(db: &Db, light: Vec<MovieDto>, profiles: &ProfileCache) -> Result<Vec<MovieDto>> {
+    if light.is_empty() {
+        return Ok(light);
+    }
+    let ids: Vec<i64> = light.iter().map(|m| m.id).collect();
+    let mut full: HashMap<i64, MovieDto> = load(db, Some(&ids), profiles)
+        .await?
+        .into_iter()
+        .map(|m| (m.id, m))
+        .collect();
+    Ok(ids.iter().filter_map(|id| full.remove(id)).collect())
 }
 
 pub async fn get(db: &Db, id: i64, profiles: &ProfileCache) -> Result<Option<MovieDto>> {

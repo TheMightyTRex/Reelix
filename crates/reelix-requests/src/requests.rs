@@ -687,6 +687,21 @@ impl RequestService {
             if set.is_empty() {
                 return Err(Error::Validation("at least one season is required".into()));
             }
+            // Adding seasons costs quota like a new request would (managers are exempt).
+            let extra = set.len().saturating_sub(row.seasons.len()) as u32;
+            if !manager && extra > 0 {
+                let settings = self.request_settings().await?;
+                let owner_record = self.user_record(row.user_id).await?;
+                let q = self.quota_of(&owner_record, &settings).await?;
+                if let Some(limit) = q.tv.limit
+                    && q.tv.used + extra > limit
+                {
+                    return Err(Error::Forbidden(format!(
+                        "season request quota exceeded ({} of {limit} used in the last {} days)",
+                        q.tv.used, q.tv.days
+                    )));
+                }
+            }
             row.seasons = set.into_iter().collect();
         }
         if let Some(b) = dto.is_4k

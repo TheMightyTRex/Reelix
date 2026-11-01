@@ -562,7 +562,7 @@ fn SeriesDetail(id: i64) -> impl IntoView {
 
     view! {
         {header}
-        <div class="tabs" role="tablist">
+        <div class="tabs" role="tablist" aria-label="Details sections">
             {tab_btn("seasons", "Seasons")}
             {tab_btn("files", "Files")}
             {tab_btn("cast", "Cast")}

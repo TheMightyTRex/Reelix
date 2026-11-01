@@ -340,7 +340,7 @@ pub fn SeriesPage() -> impl IntoView {
                                                             on:change=move |_| toggle_id(selected, id) />
                                                     </td>
                                                 })}
-                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()></span></td>
+                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()><span class="visually-hidden">{state.label()}</span></span></td>
                                                 <td class="cell-strong">
                                                     <A href=format!("/series/{id}")>{s.title.clone()}</A>
                                                     <span class="cell-sub">{series_status_label(s.status)}</span>

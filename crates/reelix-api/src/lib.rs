@@ -1,6 +1,8 @@
 //! Reelix HTTP API: axum router, authentication, WebSocket event stream and OpenAPI docs.
 //!
 //! All routes live under `/api/...`; the server nests the router below `url_base`.
+// The *arr compatibility JSON (`routes::arr`) nests deeply in `json!`.
+#![recursion_limit = "256"]
 
 pub mod auth;
 pub mod error;
@@ -55,10 +57,16 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::integrations::routes())
         .merge(routes::books::routes())
         .merge(routes::music::routes())
-        .merge(routes::maintenance::routes());
+        .merge(routes::maintenance::routes())
+        .merge(routes::migrate::routes());
+
+    // Compatibility endpoints for other apps (Torznab/Newznab aggregator), outside /api/v1.
+    let compat = Router::new().merge(routes::torznab::routes());
 
     Router::new()
         .nest("/api/v1", v1)
+        .nest("/api", compat)
+        .merge(routes::arr::routes())
         .with_state(state)
         .merge(Scalar::with_url("/api/docs", openapi()))
 }
@@ -85,6 +93,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     doc.merge(routes::books::Api::openapi());
     doc.merge(routes::music::Api::openapi());
     doc.merge(routes::maintenance::Api::openapi());
+    doc.merge(routes::migrate::Api::openapi());
     doc.info.version = reelix_core::VERSION.to_owned();
     doc
 }

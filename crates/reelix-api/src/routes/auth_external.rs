@@ -2,7 +2,7 @@
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use reelix_api_types::ApiErrorBody;
@@ -18,7 +18,8 @@ use utoipa::OpenApi;
 
 use super::requests::svc;
 use crate::auth::{
-    CurrentUser, LoginLimiter, RequestMeta, session_token, sha256_hex, start_session, user_dto,
+    CurrentUser, LoginLimiter, RequestMeta, flow_cookie, flow_matches, session_token, sha256_hex,
+    start_session, user_dto,
 };
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult};
 use crate::state::AppState;
@@ -140,6 +141,10 @@ pub async fn emby(
     media_login(state, meta, MediaServerKind::Emby, req).await
 }
 
+/// Cookies binding a pending Plex PIN / OIDC login to the browser that started it.
+const PLEX_FLOW: &str = "reelix_plex_pin";
+const OIDC_FLOW: &str = "reelix_oidc_state";
+
 /// Starts a Plex PIN login; open `auth_url` in a popup and poll `POST /auth/plex/pin/{id}`.
 #[utoipa::path(post, path = "/api/v1/auth/plex/pin", tag = "auth", request_body = PlexPinRequestDto,
     responses(
@@ -148,11 +153,12 @@ pub async fn emby(
     ))]
 pub async fn plex_pin(
     State(state): State<AppState>,
+    meta: RequestMeta,
     ApiJson(req): ApiJson<PlexPinRequestDto>,
-) -> ApiResult<ApiJson<PlexPinDto>> {
-    Ok(ApiJson(
-        svc(&state)?.plex_create_pin(req.forward_url.as_deref()).await?,
-    ))
+) -> ApiResult<Response> {
+    let pin = svc(&state)?.plex_create_pin(req.forward_url.as_deref()).await?;
+    let cookie = flow_cookie(&state, &meta.headers, PLEX_FLOW, &pin.id.to_string())?;
+    Ok(([(header::SET_COOKIE, cookie)], ApiJson(pin)).into_response())
 }
 
 /// Checks a Plex PIN; once approved the account must own or be a friend of a configured Plex
@@ -172,6 +178,10 @@ pub async fn plex_exchange(
     let remember = serde_json::from_slice::<PlexPinExchangeDto>(&body)
         .map(|b| b.remember_me)
         .unwrap_or(false);
+    // Only the browser that created this PIN may exchange it.
+    if !flow_matches(&state, &meta.headers, PLEX_FLOW, &id.to_string()) {
+        return Err(ApiError::Forbidden);
+    }
     match svc(&state)?.plex_check_pin(id).await? {
         None => Ok(ApiJson(PlexPinStatusDto {
             authenticated: false,
@@ -263,7 +273,24 @@ pub async fn oidc_login(
         None => callback_url(&state, &meta.headers)?,
     };
     let url = svc.oidc_begin(&cb, q.redirect.as_deref()).await?;
-    Ok(redirect(&url))
+    // Bind the `state` to this browser so a callback URL can't be replayed in another one.
+    let st = url::Url::parse(&url)
+        .ok()
+        .and_then(|u| {
+            u.query_pairs()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.into_owned())
+        })
+        .ok_or_else(|| ApiError::internal("identity provider URL has no state"))?;
+    let cookie = flow_cookie(&state, &meta.headers, OIDC_FLOW, &st)?;
+    Ok((
+        StatusCode::FOUND,
+        [
+            (header::LOCATION, url),
+            (header::SET_COOKIE, cookie.to_str().unwrap_or_default().to_owned()),
+        ],
+    )
+        .into_response())
 }
 
 /// Identity provider callback: verifies the ID token, starts a session and redirects into
@@ -286,6 +313,9 @@ pub async fn oidc_callback(
     let (Some(code), Some(st)) = (q.code, q.state) else {
         return fail("missing code or state".into());
     };
+    if !flow_matches(&state, &meta.headers, OIDC_FLOW, &st) {
+        return fail("this sign-in was started in another browser; try again".into());
+    }
     let svc = svc(&state)?;
     match svc.oidc_complete(&code, &st).await {
         Ok((user, to)) => {
@@ -297,7 +327,11 @@ pub async fn oidc_callback(
                 StatusCode::FOUND,
                 [
                     (header::SET_COOKIE, cookie),
-                    (header::LOCATION, format!("{base}{to}").parse().expect("ascii")),
+                    (
+                        header::LOCATION,
+                        HeaderValue::from_str(&format!("{base}{to}"))
+                            .unwrap_or(HeaderValue::from_static("/")),
+                    ),
                 ],
             )
                 .into_response())

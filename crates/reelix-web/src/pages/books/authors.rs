@@ -167,7 +167,7 @@ pub fn AuthorsPage() -> impl IntoView {
                                         let s = a.statistics.clone();
                                         view! {
                                             <tr>
-                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()></span></td>
+                                                <td><span class=format!("status-dot {}", state.class()) title=state.label()><span class="visually-hidden">{state.label()}</span></span></td>
                                                 <td class="cell-strong"><A href=format!("/books/authors/{}", a.id)>{a.name.clone()}</A></td>
                                                 <td>{format!("{} ({} monitored)", s.book_count, s.monitored_count)}</td>
                                                 <td>{move || opts.profile_name(reelix_api_types::content::BookFormat::Ebook, a.quality_profile_id)}</td>

@@ -32,6 +32,7 @@ reelix-pipeline.workspace = true
 reelix-lists.workspace = true
 reelix-mediaserver.workspace = true
 reelix-metadata.workspace = true
+reelix-migrate.workspace = true
 reelix-music.workspace = true
 reelix-notify.workspace = true
 reelix-parser.workspace = true

@@ -67,7 +67,14 @@ impl LibraryService {
         let today = self.today();
         let cache = self.profiles().await?;
         let mut out = Vec::new();
-        for m in movies::load(&self.db, None, &cache).await? {
+        // Find the movies with a release in range in SQL, then load just those.
+        let in_range = movies::released_between(&self.db, start, end, unmonitored).await?;
+        let ranged = if in_range.is_empty() {
+            Vec::new()
+        } else {
+            movies::load(&self.db, Some(&in_range), &cache).await?
+        };
+        for m in ranged {
             if !unmonitored && !m.monitored {
                 continue;
             }
@@ -102,13 +109,22 @@ impl LibraryService {
         }
         let eps = series::episodes_between(&self.db, start, end).await?;
         if !eps.is_empty() {
-            let all = series::load(&self.db, None, today).await?;
-            let by_id: HashMap<i64, &SeriesDto> = all.iter().map(|s| (s.id, s)).collect();
-            let qualities: HashMap<i64, String> = files::list(&self.db, files::FileTable::Episode, None)
+            let mut series_ids: Vec<i64> = eps.iter().map(|e| e.series_id).collect();
+            series_ids.sort_unstable();
+            series_ids.dedup();
+            // Calendar rows only show titles, networks and posters: light rows suffice.
+            let all: Vec<SeriesDto> = series::load_light(&self.db)
                 .await?
                 .into_iter()
-                .map(|f| (f.id, f.quality.quality.name().to_owned()))
+                .filter(|s| series_ids.binary_search(&s.id).is_ok())
                 .collect();
+            let by_id: HashMap<i64, &SeriesDto> = all.iter().map(|s| (s.id, s)).collect();
+            let qualities: HashMap<i64, String> =
+                files::list(&self.db, files::FileTable::Episode, Some(&series_ids))
+                    .await?
+                    .into_iter()
+                    .map(|f| (f.id, f.quality.quality.name().to_owned()))
+                    .collect();
             for e in eps {
                 let Some(s) = by_id.get(&e.series_id) else {
                     continue;
@@ -213,7 +229,13 @@ impl LibraryService {
         let mut items: Vec<(WantedItemDto, chrono::DateTime<chrono::Utc>)> = Vec::new();
         match q.kind.unwrap_or(CalendarKind::Movie) {
             CalendarKind::Movie => {
-                for m in movies::load(&self.db, None, &cache).await? {
+                // Missing needs no file details, so light rows do; cutoff compares files.
+                let list = if cutoff {
+                    movies::load(&self.db, None, &cache).await?
+                } else {
+                    movies::load_light(&self.db).await?
+                };
+                for m in list {
                     if only_monitored && !m.monitored {
                         continue;
                     }
@@ -249,13 +271,79 @@ impl LibraryService {
                     ));
                 }
             }
+            CalendarKind::Episode if !cutoff => {
+                // Filter, sort and page in SQL; build rows for just this page.
+                let sort = q.sort.as_deref().unwrap_or("date");
+                let desc = match q.dir {
+                    Some(d) => d == SortDir::Desc,
+                    None => sort == "date" || sort == "added",
+                };
+                let size = q.page_size.unwrap_or(20);
+                let page = q.page.unwrap_or(1).max(1);
+                let (limit, offset) = if size == 0 {
+                    (None, 0)
+                } else {
+                    (Some(size), u64::from(page - 1) * u64::from(size))
+                };
+                let (eps, total) =
+                    series::missing_episodes_page(&self.db, today, only_monitored, sort, desc, limit, offset)
+                        .await?;
+                let wanted_ids: std::collections::HashSet<i64> = eps.iter().map(|e| e.series_id).collect();
+                let shows: HashMap<i64, SeriesDto> = series::load_light(&self.db)
+                    .await?
+                    .into_iter()
+                    .filter(|s| wanted_ids.contains(&s.id))
+                    .map(|s| (s.id, s))
+                    .collect();
+                let items = eps
+                    .into_iter()
+                    .filter_map(|e| {
+                        let s = shows.get(&e.series_id)?;
+                        Some(WantedItemDto {
+                            kind: CalendarKind::Episode,
+                            id: e.id,
+                            movie_id: None,
+                            series_id: Some(s.id),
+                            title: s.title.clone(),
+                            year: s.year,
+                            season_number: Some(e.season_number),
+                            episode_number: Some(e.episode_number),
+                            episode_title: e.title.clone(),
+                            date: e.air_date,
+                            monitored: e.monitored && s.monitored,
+                            poster: s.images.poster.clone(),
+                            quality_profile_id: s.quality_profile_id,
+                            quality: None,
+                            custom_format_score: None,
+                            cutoff: cutoff_name(cache.profile(s.quality_profile_id)),
+                        })
+                    })
+                    .collect();
+                return Ok(Paged {
+                    items,
+                    total,
+                    page: if size == 0 { 1 } else { page },
+                    page_size: size,
+                });
+            }
             CalendarKind::Episode => {
-                let all = series::load(&self.db, None, today).await?;
+                // Cutoff unmet: one query for the episodes with files instead of one per series.
+                let mut by_series = series::episodes_with_files(&self.db).await?;
+                // Titles, posters and profiles are all a wanted row shows: light rows suffice.
+                let all: Vec<SeriesDto> = if by_series.is_empty() {
+                    Vec::new()
+                } else {
+                    series::load_light(&self.db)
+                        .await?
+                        .into_iter()
+                        .filter(|s| by_series.contains_key(&s.id))
+                        .collect()
+                };
                 for s in &all {
                     if only_monitored && !s.monitored {
                         continue;
                     }
-                    let eps = series::episodes(&self.db, s.id, None).await?;
+                    let eps = by_series.remove(&s.id).unwrap_or_default();
                     let file_map: HashMap<i64, reelix_api_types::library::EpisodeFileDto> = if cutoff {
                         self.episode_files_of(s)
                             .await?

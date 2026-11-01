@@ -23,10 +23,12 @@ reelix-decision.workspace = true
 reelix-parser.workspace = true
 reelix-jobs.workspace = true
 reelix-library.workspace = true
+reelix-migrate.workspace = true
 reelix-music.workspace = true
 reelix-pipeline.workspace = true
 reelix-requests.workspace = true
 reelix-indexers.workspace = true
+url.workspace = true
 reelix-providers.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -39,7 +41,9 @@ utoipa.workspace = true
 utoipa-scalar.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 http-body-util.workspace = true
+reelix-metadata.workspace = true
 reqwest.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true

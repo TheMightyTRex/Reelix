@@ -595,7 +595,7 @@ pub fn CustomFormatsPage() -> impl IntoView {
 
         <Modal open=export_open title="Export (TRaSH JSON)">
             <div class="form">
-                <textarea class="input textarea mono" rows="14" readonly prop:value=move || export_text.get()></textarea>
+                <textarea class="input textarea mono" rows="14" readonly aria-label="Exported custom formats (JSON)" prop:value=move || export_text.get()></textarea>
                 <div class="modal-footer">
                     <CopyButton text=Signal::derive(move || export_text.get()) />
                     <button type="button" class="btn btn-primary" on:click=move |_| export_open.set(false)>"Done"</button>

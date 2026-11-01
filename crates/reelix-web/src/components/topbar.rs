@@ -78,9 +78,19 @@ pub fn Topbar(drawer_open: RwSignal<bool>) -> impl IntoView {
     };
     let status_label = move || format!("Live updates: {}", live.status.get().label());
 
+    // A disclosure (button + list of links), not an ARIA menu: Escape closes it and puts focus
+    // back on the button.
     let on_menu_keydown = move |e: ev::KeyboardEvent| {
-        if e.key() == "Escape" {
+        if e.key() == "Escape" && menu_open.get_untracked() {
             menu_open.set(false);
+            if let Some(b) = document()
+                .query_selector(".user-button")
+                .ok()
+                .flatten()
+                .and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok())
+            {
+                let _ = b.focus();
+            }
         }
     };
 
@@ -150,7 +160,7 @@ pub fn Topbar(drawer_open: RwSignal<bool>) -> impl IntoView {
                     <button
                         type="button"
                         class="user-button"
-                        aria-haspopup="menu"
+                        aria-label=move || format!("Account menu, {}", display_name())
                         aria-expanded=move || menu_open.get().to_string()
                         aria-controls="user-menu"
                         on:click=move |_| menu_open.update(|o| *o = !*o)
@@ -162,7 +172,7 @@ pub fn Topbar(drawer_open: RwSignal<bool>) -> impl IntoView {
                     </button>
                     <Show when=move || menu_open.get()>
                         <div class="menu-scrim" on:click=move |_| menu_open.set(false)></div>
-                        <div class="menu" id="user-menu" role="menu">
+                        <div class="menu" id="user-menu">
                             <div class="menu-header">
                                 <strong>{display_name}</strong>
                                 <span>"@" {username} " · " {role}</span>
@@ -170,13 +180,12 @@ pub fn Topbar(drawer_open: RwSignal<bool>) -> impl IntoView {
                             <A
                                 href="/profile"
                                 attr:class="menu-item"
-                                attr:role="menuitem"
                                 on:click=move |_| menu_open.set(false)
                             >
                                 <Icon name="user" />
                                 "Profile & API keys"
                             </A>
-                            <button type="button" class="menu-item" role="menuitem" on:click=logout.clone()>
+                            <button type="button" class="menu-item" on:click=logout.clone()>
                                 <Icon name="logout" />
                                 "Sign out"
                             </button>

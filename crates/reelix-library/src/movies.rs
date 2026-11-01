@@ -193,7 +193,14 @@ fn blank_movie() -> MovieDto {
 impl LibraryService {
     pub async fn list_movies(&self, q: &MovieListQuery) -> Result<Paged<MovieDto>> {
         let profiles = self.profiles().await?;
-        let mut items = movies::load(&self.db, None, &profiles).await?;
+        // Filter, sort and page on light rows; only the page returned is fully loaded. The
+        // quality filter needs file details, so it loads everything.
+        let light = q.quality.is_none();
+        let mut items = if light {
+            movies::load_light(&self.db).await?
+        } else {
+            movies::load(&self.db, None, &profiles).await?
+        };
         let needle = q.q.as_deref().map(str::to_lowercase).filter(|s| !s.is_empty());
         items.retain(|m| {
             needle.as_ref().is_none_or(|n| {
@@ -246,7 +253,11 @@ impl LibraryService {
         if q.dir == Some(SortDir::Desc) {
             items.reverse();
         }
-        Ok(paginate(items, q.page, q.page_size))
+        let mut page = paginate(items, q.page, q.page_size);
+        if light {
+            page.items = movies::hydrate(&self.db, page.items, &profiles).await?;
+        }
+        Ok(page)
     }
 
     /// One movie including cast.

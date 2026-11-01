@@ -3,6 +3,7 @@
 pub mod api_keys;
 pub mod books;
 pub mod feedback;
+pub mod focus;
 pub mod history_table;
 pub mod icon;
 pub mod interactive_search;

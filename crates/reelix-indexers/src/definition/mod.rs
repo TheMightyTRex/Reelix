@@ -6,11 +6,11 @@
 //! (or, for login captchas, fail at login with a clear message).
 
 mod engine;
-mod filters;
+pub(crate) mod filters;
 mod jsonsel;
 pub mod model;
 mod re;
-mod selector;
+pub(crate) mod selector;
 pub mod template;
 
 use std::collections::HashMap;

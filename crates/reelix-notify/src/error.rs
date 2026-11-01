@@ -7,8 +7,10 @@ pub enum NotifyError {
     UnknownImplementation(String),
     #[error("invalid settings: {0}")]
     InvalidSettings(String),
+    /// Transport error; the URL is stripped so API keys and tokens in it never leak into
+    /// messages, health checks or logs.
     #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(reqwest::Error),
     /// The service answered with a non-success status.
     #[error("service returned HTTP {status}: {body}")]
     Status { status: u16, body: String },
@@ -29,5 +31,11 @@ pub enum NotifyError {
 impl NotifyError {
     pub(crate) fn settings(msg: impl Into<String>) -> Self {
         Self::InvalidSettings(msg.into())
+    }
+}
+
+impl From<reqwest::Error> for NotifyError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Http(e.without_url())
     }
 }
