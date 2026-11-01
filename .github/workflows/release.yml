@@ -170,11 +170,27 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - id: dl1
+        uses: actions/download-artifact@v5
+        continue-on-error: true
         with:
           name: web
           path: artifacts/web
-      - uses: actions/download-artifact@v4
+      - name: retry download (web)
+        if: steps.dl1.outcome == 'failure'
+        uses: actions/download-artifact@v5
+        with:
+          name: web
+          path: artifacts/web
+      - id: dl2
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: bin-*
+          path: artifacts
+      - name: retry download (bin-*)
+        if: steps.dl2.outcome == 'failure'
+        uses: actions/download-artifact@v5
         with:
           pattern: bin-*
           path: artifacts
@@ -231,11 +247,27 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - id: dl3
+        uses: actions/download-artifact@v5
+        continue-on-error: true
         with:
           name: web
           path: artifacts/web
-      - uses: actions/download-artifact@v4
+      - name: retry download (web)
+        if: steps.dl3.outcome == 'failure'
+        uses: actions/download-artifact@v5
+        with:
+          name: web
+          path: artifacts/web
+      - id: dl4
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: bin-linux-*
+          path: artifacts
+      - name: retry download (bin-linux-*)
+        if: steps.dl4.outcome == 'failure'
+        uses: actions/download-artifact@v5
         with:
           pattern: bin-linux-*
           path: artifacts
@@ -304,11 +336,27 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - id: dl5
+        uses: actions/download-artifact@v5
+        continue-on-error: true
         with:
           name: release-notes
           path: artifacts/release-notes
-      - uses: actions/download-artifact@v4
+      - name: retry download (release-notes)
+        if: steps.dl5.outcome == 'failure'
+        uses: actions/download-artifact@v5
+        with:
+          name: release-notes
+          path: artifacts/release-notes
+      - id: dl6
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          name: dist
+          path: artifacts/dist
+      - name: retry download (dist)
+        if: steps.dl6.outcome == 'failure'
+        uses: actions/download-artifact@v5
         with:
           name: dist
           path: artifacts/dist
