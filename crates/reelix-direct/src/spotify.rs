@@ -76,12 +76,21 @@ pub async fn login(path: &Path, client_id: Option<&str>, redirect_uri: &str) -> 
         .get_access_token_async()
         .await
         .context("Spotify OAuth login failed")?;
+    save_session(path, config, &token.access_token).await?;
+    Ok(())
+}
+
+/// Exchange an OAuth access token for reusable session credentials, written atomically
+/// to `path`. Returns the account's username.
+pub(crate) async fn save_session(path: &Path, config: SessionConfig, access_token: &str) -> Result<String> {
     let session = SpotifySession(Session::new(config, None));
-    session
-        .0
-        .connect(Credentials::with_access_token(token.access_token), false)
-        .await
-        .map_err(|_| anyhow::anyhow!("Spotify rejected the authenticated session"))?;
+    tokio::time::timeout(
+        Duration::from_secs(45),
+        session.0.connect(Credentials::with_access_token(access_token), false),
+    )
+    .await
+    .context("Spotify login timed out")?
+    .map_err(|_| anyhow::anyhow!("Spotify rejected the authenticated session"))?;
     let credentials = Credentials {
         username: Some(session.0.username()),
         auth_type:
@@ -107,7 +116,7 @@ pub async fn login(path: &Path, client_id: Option<&str>, redirect_uri: &str) -> 
     file.sync_all().await?;
     drop(file);
     tokio::fs::rename(&temporary, path).await?;
-    Ok(())
+    Ok(session.0.username())
 }
 
 fn uri(r: &DirectRequest) -> Result<SpotifyUri> {

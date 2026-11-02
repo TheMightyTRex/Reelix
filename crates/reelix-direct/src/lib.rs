@@ -1,6 +1,7 @@
 //! A durable, single-worker queue independent of torrent/Usenet clients.
 mod process;
 pub mod spotify;
+mod spotify_login;
 #[cfg(test)]
 mod tests;
 mod transfer;
@@ -26,6 +27,9 @@ pub struct DirectService {
     /// Serialises mutations with claiming and process completion.
     gate: Mutex<()>,
     http: reqwest::Client,
+    login: std::sync::Mutex<spotify_login::LoginState>,
+    /// Spotify accounts service base URL; tests point it at a mock server.
+    spotify_accounts: String,
 }
 
 impl DirectService {
@@ -40,6 +44,8 @@ impl DirectService {
                 .read_timeout(Duration::from_secs(30))
                 .build()
                 .expect("valid HTTP client configuration"),
+            login: Default::default(),
+            spotify_accounts: spotify_login::ACCOUNTS_URL.into(),
         }
     }
 

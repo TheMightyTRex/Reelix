@@ -54,7 +54,27 @@ playlist URLs, select account-supported Vorbis quality, request the authorized a
 key, transfer/decrypt the CDN stream, remove Spotify's container prefix, and write
 tags/artwork before publishing the completed file.
 
-Create reusable session credentials with Reelix's native PKCE login command:
+### Connect from the web UI
+
+On **Downloads → Download settings**, click **Connect Spotify**, open the link and
+approve Reelix. Spotify only redirects librespot's client to
+`http://127.0.0.1:8898/login`, so:
+
+- If the browser runs on the Reelix machine, Reelix is listening on that address
+  (loopback only) and the login finishes by itself.
+- Otherwise, including Docker, the redirect page fails to load. Copy its address
+  from the address bar, paste it into **Redirected address** and click **Finish login**.
+
+Each login uses PKCE and a one-time state value and expires after 10 minutes; only
+the newest attempt's address is accepted. Reelix saves the reusable session as
+`spotify-credentials.json` in its data directory and fills in **Spotify credentials
+file**. **Disconnect** clears the setting and deletes that file (a file configured
+by hand is left in place). The administrator-only API is `/api/v1/downloads/spotify`
+(status), `/login`, `/login/finish` and `/disconnect`.
+
+### Command-line login
+
+Alternatively, create reusable session credentials with Reelix's native PKCE login command:
 
 ```powershell
 reelix.exe spotify-login --credentials C:\Reelix\data\spotify-credentials.json

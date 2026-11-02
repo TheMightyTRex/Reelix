@@ -218,10 +218,136 @@ fn DownloadSettings(s: DirectSettings) -> impl IntoView {
                 <label class="field">"Spotify credentials file"<input class="input" prop:value=move || credentials.get() on:input=move |e| credentials.set(event_target_value(&e)) /></label>
             </div>
             <p class="muted">"YouTube uses yt-dlp when a path is set; keep it current with yt-dlp -U, and install Deno so it can read every YouTube format. Clear the path to use the built-in extractor, which breaks more often when YouTube changes."</p>
-            <p class="muted">"Run reelix spotify-login --credentials /absolute/path/credentials.json to connect your account, then enter that file path. Spotify list imports remain configured separately under Import Lists."</p>
+            <SpotifyAccount credentials=credentials />
             <p class="muted">"Files are saved in a separate folder for each job. Use Music → Import Library to match downloaded music into your library."</p>
             <button class="btn btn-primary" disabled=move || busy.get() on:click=save>{move || if busy.get() { "Checking…" } else { "Save and check tools" }}</button>
             <ul>{move || health.get().into_iter().map(|h| view! { <li>{format!("{}: {} — {}", h.tool, if h.available { "OK" } else { "Needs setup" }, h.detail)}</li> }).collect_view()}</ul>
         </Card>
+    }
+}
+
+/// Browser login: Reelix finishes automatically when the browser runs on the server
+/// machine, otherwise from the redirected address pasted back here.
+#[component]
+fn SpotifyAccount(credentials: RwSignal<String>) -> impl IntoView {
+    let toasts = Toasts::expect();
+    let status = RwSignal::new(None::<SpotifyStatus>);
+    let login = RwSignal::new(None::<SpotifyLoginStart>);
+    let pasted = RwSignal::new(String::new());
+    let busy = RwSignal::new(false);
+    let connected = move |s: SpotifyStatus| {
+        credentials.set(s.credentials_path.clone());
+        toasts.success(format!(
+            "Spotify connected as {}",
+            s.username.clone().unwrap_or_else(|| "your account".into())
+        ));
+        login.set(None);
+        pasted.set(String::new());
+        status.set(Some(s));
+    };
+    spawn_local(async move {
+        if let Ok(s) = api::get::<SpotifyStatus>("/downloads/spotify").await {
+            status.set(Some(s));
+        }
+    });
+    // Watch for the automatic loopback callback while a login is open.
+    let timer = set_interval_with_handle(
+        move || {
+            if login.get_untracked().is_none() {
+                return;
+            }
+            spawn_local(async move {
+                let Ok(s) = api::get::<SpotifyStatus>("/downloads/spotify").await else { return };
+                if login.get_untracked().is_none() || s.pending {
+                    return;
+                }
+                if let Some(error) = s.error.clone() {
+                    toasts.error(error);
+                    login.set(None);
+                    status.set(Some(s));
+                } else if s.connected {
+                    connected(s);
+                }
+            });
+        },
+        std::time::Duration::from_secs(2),
+    )
+    .ok();
+    on_cleanup(move || {
+        if let Some(t) = timer {
+            t.clear();
+        }
+    });
+    let start = move |_| {
+        busy.set(true);
+        spawn_local(async move {
+            match api::post_empty::<SpotifyLoginStart>("/downloads/spotify/login").await {
+                Ok(l) => login.set(Some(l)),
+                Err(e) => toasts.error(e.to_string()),
+            }
+            busy.set(false);
+        });
+    };
+    let finish = move |_| {
+        busy.set(true);
+        let body = SpotifyLoginFinish { redirect_url: pasted.get_untracked() };
+        spawn_local(async move {
+            match api::post::<_, SpotifyStatus>("/downloads/spotify/login/finish", &body).await {
+                Ok(s) => connected(s),
+                Err(e) => toasts.error(e.to_string()),
+            }
+            busy.set(false);
+        });
+    };
+    let disconnect = move |_| {
+        busy.set(true);
+        spawn_local(async move {
+            match api::post_empty::<SpotifyStatus>("/downloads/spotify/disconnect").await {
+                Ok(s) => {
+                    credentials.set(s.credentials_path.clone());
+                    status.set(Some(s));
+                    toasts.success("Spotify disconnected");
+                }
+                Err(e) => toasts.error(e.to_string()),
+            }
+            busy.set(false);
+        });
+    };
+    view! {
+        <h3>"Spotify account"</h3>
+        <p>{move || match status.get() {
+            Some(SpotifyStatus { connected: true, username, .. }) =>
+                format!("Connected as {}", username.unwrap_or_else(|| "a Spotify account".into())),
+            Some(_) => "Not connected".to_owned(),
+            None => "Checking…".to_owned(),
+        }}</p>
+        <div class="form-actions">
+            <button class="btn btn-secondary" disabled=move || busy.get() on:click=start>
+                {move || if status.get().is_some_and(|s| s.connected) { "Reconnect Spotify" } else { "Connect Spotify" }}
+            </button>
+            <Show when=move || status.get().is_some_and(|s| s.connected)>
+                <button class="btn btn-secondary" disabled=move || busy.get() on:click=disconnect>"Disconnect"</button>
+            </Show>
+        </div>
+        {move || login.get().map(|l| view! {
+            <ol>
+                <li><a href=l.auth_url target="_blank" rel="noopener noreferrer">"Open Spotify and approve Reelix"</a></li>
+                <li>{if l.automatic {
+                    "If this browser runs on the Reelix server, the login finishes by itself. Otherwise Spotify's redirect page will not load: copy its address (it starts with http://127.0.0.1:8898/login) and paste it here."
+                } else {
+                    "Spotify's redirect page will not load. Copy its address (it starts with http://127.0.0.1:8898/login) and paste it here."
+                }}</li>
+            </ol>
+            <div class="field-row">
+                <label class="field">"Redirected address"
+                    <input class="input" placeholder="http://127.0.0.1:8898/login?code=…" prop:value=move || pasted.get()
+                        on:input=move |e| pasted.set(event_target_value(&e)) />
+                </label>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" disabled=move || busy.get() || pasted.get().trim().is_empty() on:click=finish>"Finish login"</button>
+            </div>
+        })}
+        <p class="muted">"Reelix saves a reusable session, never your password. You can also run reelix spotify-login --credentials /absolute/path/credentials.json and enter that path in Spotify credentials file. Spotify list imports are configured separately under Import Lists."</p>
     }
 }

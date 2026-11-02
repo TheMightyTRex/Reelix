@@ -88,3 +88,34 @@ pub struct DirectPreview {
     pub items: Vec<String>,
     pub truncated: bool,
 }
+
+/// A started browser login: open `auth_url`, approve, and Reelix finishes it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SpotifyLoginStart {
+    pub auth_url: String,
+    /// Reelix is listening on the loopback callback, so a browser on the server
+    /// machine finishes without pasting the redirected URL.
+    pub automatic: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SpotifyLoginFinish {
+    /// The `http://127.0.0.1:8898/login?code=…&state=…` address Spotify redirected to.
+    pub redirect_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SpotifyStatus {
+    /// The configured credentials file parses.
+    pub connected: bool,
+    pub username: Option<String>,
+    pub credentials_path: String,
+    /// A browser login is waiting for Spotify's redirect.
+    pub pending: bool,
+    /// Why the last automatic login attempt failed.
+    pub error: Option<String>,
+}

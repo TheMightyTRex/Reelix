@@ -495,3 +495,126 @@ printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan"}}\n' "$file" "
     let args = tokio::fs::read_to_string(&log).await.unwrap();
     assert_eq!(args.matches("watch?v=aaaaaaaaaaa").count(), 1);
 }
+
+#[test]
+fn spotify_login_parses_redirects_and_derives_pkce_challenge() {
+    // Cross-checked with Python's hashlib + base64.urlsafe_b64encode.
+    assert_eq!(
+        spotify_login::challenge("dBjftJeZ4CVP-mJ92K9gGr6idmTw9sQKkhoSkpSB2dsJ5Os"),
+        "AyBqLtPLE8iRaZZPvidswhB_UDCV4TBo7-gY9b1xDFg"
+    );
+    let pair = |code: &str, state: &str| (code.to_owned(), state.to_owned());
+    assert_eq!(
+        spotify_login::parse_redirect(" http://127.0.0.1:8898/login?code=abc&state=xyz ").unwrap(),
+        pair("abc", "xyz")
+    );
+    assert_eq!(spotify_login::parse_redirect("?code=abc&state=xyz").unwrap(), pair("abc", "xyz"));
+    assert!(
+        spotify_login::parse_redirect("http://127.0.0.1:8898/login?error=access_denied&state=xyz")
+            .unwrap_err()
+            .to_string()
+            .contains("access_denied")
+    );
+    assert!(spotify_login::parse_redirect("http://127.0.0.1:8898/login?state=xyz").is_err());
+}
+
+#[tokio::test]
+async fn spotify_login_is_single_use_and_tied_to_the_newest_attempt() {
+    let (_dir, s) = service().await;
+    assert!(s.spotify_login_finish("?code=c&state=none").await.is_err());
+    let first = s.spotify_login_start().await.unwrap();
+    let second = s.spotify_login_start().await.unwrap();
+    let state = |start: &SpotifyLoginStart| {
+        url::Url::parse(&start.auth_url)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned()
+    };
+    let auth = url::Url::parse(&second.auth_url).unwrap();
+    let query: std::collections::HashMap<_, _> = auth.query_pairs().into_owned().collect();
+    assert_eq!(auth.host_str(), Some("accounts.spotify.com"));
+    assert_eq!(query["redirect_uri"], spotify_login::REDIRECT_URI);
+    assert_eq!(query["code_challenge_method"], "S256");
+    assert_eq!(query["scope"], "streaming user-read-private");
+    assert_ne!(state(&first), state(&second));
+    assert!(s.spotify_status().await.unwrap().pending);
+
+    let stale = s
+        .spotify_login_finish(&format!("?code=c&state={}", state(&first)))
+        .await
+        .unwrap_err();
+    assert!(stale.to_string().contains("different Spotify login"));
+    assert!(s.spotify_status().await.unwrap().pending);
+
+    // The loopback callback answers the browser and ignores unrelated requests.
+    if second.automatic {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let get = |path: String| async move {
+            let mut stream = tokio::net::TcpStream::connect("127.0.0.1:8898").await.unwrap();
+            stream
+                .write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())
+                .await
+                .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).await.unwrap();
+            response
+        };
+        assert!(get("/favicon.ico".into()).await.starts_with("HTTP/1.1 404"));
+        let page = get(format!("/login?code=c&state={}", state(&first))).await;
+        assert!(page.contains("Spotify login failed") && page.contains("different Spotify login"));
+        assert!(s.spotify_status().await.unwrap().pending);
+    }
+    s.spotify_disconnect().await.unwrap();
+    assert!(!s.spotify_status().await.unwrap().pending);
+}
+
+#[tokio::test]
+async fn spotify_code_exchange_sends_pkce_verifier() {
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_string_contains, method, path},
+    };
+    let (_dir, s) = service().await;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/token"))
+        .and(body_string_contains("grant_type=authorization_code"))
+        .and(body_string_contains("code=the-code"))
+        .and(body_string_contains("code_verifier=the-verifier"))
+        .and(body_string_contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8898%2Flogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "token", "token_type": "Bearer", "expires_in": 3600
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let token = s
+        .exchange_code(&server.uri(), "client", "the-code", "the-verifier")
+        .await
+        .unwrap();
+    assert_eq!(token, "token");
+    let error = s
+        .exchange_code(&server.uri(), "client", "other", "the-verifier")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("HTTP 404"));
+}
+
+#[tokio::test]
+async fn spotify_disconnect_deletes_only_the_managed_session_file() {
+    let (_dir, s) = service().await;
+    let managed = s.data_dir.join("spotify-credentials.json");
+    let manual = s.data_dir.join("manual.json");
+    for (path, kept) in [(&manual, true), (&managed, false)] {
+        tokio::fs::write(path, "{}").await.unwrap();
+        let mut settings = s.settings().await.unwrap();
+        settings.spotify_credentials = path.to_string_lossy().into_owned();
+        s.save_settings(settings).await.unwrap();
+        let status = s.spotify_disconnect().await.unwrap();
+        assert!(!status.connected && status.credentials_path.is_empty());
+        assert_eq!(path.exists(), kept);
+    }
+}

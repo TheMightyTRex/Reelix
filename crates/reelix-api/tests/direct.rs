@@ -104,7 +104,7 @@ async fn downloads_require_admin_and_csrf_and_roundtrip_jobs() {
         true,
     )
     .await;
-    for path in ["/downloads", "/downloads/settings", "/downloads/health"] {
+    for path in ["/downloads", "/downloads/settings", "/downloads/health", "/downloads/spotify"] {
         assert_eq!(
             call(&r, "GET", path, "", Value::Null, true).await.0,
             StatusCode::UNAUTHORIZED
@@ -114,6 +114,15 @@ async fn downloads_require_admin_and_csrf_and_roundtrip_jobs() {
             StatusCode::FORBIDDEN
         );
     }
+    for path in ["/downloads/spotify/login", "/downloads/spotify/disconnect"] {
+        assert_eq!(
+            call(&r, "POST", path, &manager, Value::Null, true).await.0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    let (status, spotify, _) = call(&r, "GET", "/downloads/spotify", &admin, Value::Null, true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(spotify["connected"], json!(false));
     let request = json!({"url":"https://youtu.be/abcdefghijk", "source":"youtube", "mode":"audio", "format":"mp3", "max_height":null,"playlist":false});
     assert_eq!(
         call(&r, "POST", "/downloads", &admin, request.clone(), false)

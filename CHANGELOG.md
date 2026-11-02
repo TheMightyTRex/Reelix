@@ -6,6 +6,9 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+### Added
+- Connect Spotify from Download settings: a browser PKCE login that finishes by itself on the Reelix machine, or from the redirected address pasted back from any other device. Disconnect removes the saved session.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added

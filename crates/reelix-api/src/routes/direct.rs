@@ -18,11 +18,28 @@ pub fn routes() -> Router<AppState> {
         .route("/downloads/preview", post(preview))
         .route("/downloads/{id}/cancel", post(cancel))
         .route("/downloads/{id}/retry", post(retry))
+        .route("/downloads/spotify", get(spotify_status))
+        .route("/downloads/spotify/login", post(spotify_login))
+        .route("/downloads/spotify/login/finish", post(spotify_login_finish))
+        .route("/downloads/spotify/disconnect", post(spotify_disconnect))
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(list, enqueue, settings, save_settings, health, preview, cancel, retry),
+    paths(
+        list,
+        enqueue,
+        settings,
+        save_settings,
+        health,
+        preview,
+        cancel,
+        retry,
+        spotify_status,
+        spotify_login,
+        spotify_login_finish,
+        spotify_disconnect
+    ),
     components(schemas(
         DirectSettings,
         DirectSource,
@@ -30,7 +47,10 @@ pub fn routes() -> Router<AppState> {
         DirectRequest,
         DirectDownload,
         DirectHealth,
-        DirectPreview
+        DirectPreview,
+        SpotifyLoginStart,
+        SpotifyLoginFinish,
+        SpotifyStatus
     ))
 )]
 pub struct Api;
@@ -130,4 +150,52 @@ async fn retry(State(s): State<AppState>, user: CurrentUser, Path(id): Path<i64>
         .await
         .map_err(|e| ApiError::validation(e.to_string()))?;
     Ok(ApiJson(()))
+}
+
+#[utoipa::path(get, path="/api/v1/downloads/spotify", tag="downloads", security(("session"=[]),("api_key"=[])), responses((status=200,body=SpotifyStatus)))]
+async fn spotify_status(State(s): State<AppState>, user: CurrentUser) -> ApiResult<ApiJson<SpotifyStatus>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(
+        s.ext::<DirectService>()?
+            .spotify_status()
+            .await
+            .map_err(ApiError::internal)?,
+    ))
+}
+
+#[utoipa::path(post, path="/api/v1/downloads/spotify/login", tag="downloads", security(("session"=[]),("api_key"=[])), responses((status=200,body=SpotifyLoginStart)))]
+async fn spotify_login(State(s): State<AppState>, user: CurrentUser) -> ApiResult<ApiJson<SpotifyLoginStart>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(
+        s.ext::<DirectService>()?
+            .spotify_login_start()
+            .await
+            .map_err(ApiError::internal)?,
+    ))
+}
+
+#[utoipa::path(post, path="/api/v1/downloads/spotify/login/finish", tag="downloads", request_body=SpotifyLoginFinish, security(("session"=[]),("api_key"=[])), responses((status=200,body=SpotifyStatus)))]
+async fn spotify_login_finish(
+    State(s): State<AppState>,
+    user: CurrentUser,
+    ApiJson(r): ApiJson<SpotifyLoginFinish>,
+) -> ApiResult<ApiJson<SpotifyStatus>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(
+        s.ext::<DirectService>()?
+            .spotify_login_finish(&r.redirect_url)
+            .await
+            .map_err(|e| ApiError::validation(e.to_string()))?,
+    ))
+}
+
+#[utoipa::path(post, path="/api/v1/downloads/spotify/disconnect", tag="downloads", security(("session"=[]),("api_key"=[])), responses((status=200,body=SpotifyStatus)))]
+async fn spotify_disconnect(State(s): State<AppState>, user: CurrentUser) -> ApiResult<ApiJson<SpotifyStatus>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(
+        s.ext::<DirectService>()?
+            .spotify_disconnect()
+            .await
+            .map_err(ApiError::internal)?,
+    ))
 }
