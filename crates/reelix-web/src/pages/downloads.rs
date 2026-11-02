@@ -257,7 +257,9 @@ fn SpotifyAccount(credentials: RwSignal<String>) -> impl IntoView {
                 return;
             }
             spawn_local(async move {
-                let Ok(s) = api::get::<SpotifyStatus>("/downloads/spotify").await else { return };
+                let Ok(s) = api::get::<SpotifyStatus>("/downloads/spotify").await else {
+                    return;
+                };
                 if login.get_untracked().is_none() || s.pending {
                     return;
                 }
@@ -290,7 +292,9 @@ fn SpotifyAccount(credentials: RwSignal<String>) -> impl IntoView {
     };
     let finish = move |_| {
         busy.set(true);
-        let body = SpotifyLoginFinish { redirect_url: pasted.get_untracked() };
+        let body = SpotifyLoginFinish {
+            redirect_url: pasted.get_untracked(),
+        };
         spawn_local(async move {
             match api::post::<_, SpotifyStatus>("/downloads/spotify/login/finish", &body).await {
                 Ok(s) => connected(s),

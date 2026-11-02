@@ -1,7 +1,10 @@
 //! Optional yt-dlp backend for YouTube. yt-dlp lists playlists and downloads the
 //! selected streams; Reelix still converts, tags and publishes the files itself.
 //! URLs are normalized by `validate` and passed after `--`, so they cannot become options.
-use crate::{DirectService, process::{command, safe_name}};
+use crate::{
+    DirectService,
+    process::{command, safe_name},
+};
 use anyhow::{Context, Result, anyhow, bail};
 use reelix_api_types::direct::*;
 use serde::Deserialize;
@@ -133,7 +136,8 @@ impl DirectService {
         while let Some((is_err, line)) = rx.recv().await {
             if let Some(value) = line.trim_start().strip_prefix(PROGRESS) {
                 if let Some(id) = progress_id.filter(|_| last.elapsed() >= Duration::from_millis(500)) {
-                    self.progress(id, parse_progress(value), "Downloading media").await?;
+                    self.progress(id, parse_progress(value), "Downloading media")
+                        .await?;
                     last = Instant::now();
                 }
             } else if is_err {
@@ -299,8 +303,12 @@ impl DirectService {
             if existing_output(folder, id, &extensions).await?.is_some() {
                 continue;
             }
-            self.progress(job.id, None, &format!("Downloading video {} of {total}", index + 1))
-                .await?;
+            self.progress(
+                job.id,
+                None,
+                &format!("Downloading video {} of {total}", index + 1),
+            )
+            .await?;
             let mut inputs = Vec::new();
             if r.mode == DownloadMode::Video {
                 let format = match r.max_height {
@@ -310,9 +318,7 @@ impl DirectService {
                 let (video, _) = self.ytdlp_stream(settings, job, id, "video", format).await?;
                 inputs.push(video);
             }
-            let (audio, info) = self
-                .ytdlp_stream(settings, job, id, "audio", "ba".into())
-                .await?;
+            let (audio, info) = self.ytdlp_stream(settings, job, id, "audio", "ba".into()).await?;
             let extension = if original {
                 let ext = audio.extension().and_then(|e| e.to_str()).unwrap_or_default();
                 if !ORIGINAL_AUDIO.contains(&ext) {

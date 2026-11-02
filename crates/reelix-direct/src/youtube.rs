@@ -70,11 +70,9 @@ impl DirectService {
                     if playlist.videos.items.len() >= 10_000 {
                         bail!("YouTube playlist exceeds the 10,000-item limit");
                     }
-                    playlist
-                        .videos
-                        .extend(&query)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Cannot read YouTube playlist page ({e}); retry the job"))?;
+                    playlist.videos.extend(&query).await.map_err(|e| {
+                        anyhow::anyhow!("Cannot read YouTube playlist page ({e}); retry the job")
+                    })?;
                 }
             }
             let truncated = !playlist.videos.is_exhausted() || playlist.videos.items.len() > 50;
@@ -134,11 +132,7 @@ impl DirectService {
         }
     }
 
-    async fn download_youtube_native(
-        &self,
-        job: &DirectDownload,
-        settings: &DirectSettings,
-    ) -> Result<()> {
+    async fn download_youtube_native(&self, job: &DirectDownload, settings: &DirectSettings) -> Result<()> {
         let client = self.youtube_client()?;
         let (_, items, _) = self.youtube_ids(&client, &job.request, false).await?;
         if items.is_empty() {

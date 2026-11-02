@@ -86,7 +86,9 @@ pub(crate) async fn save_session(path: &Path, config: SessionConfig, access_toke
     let session = SpotifySession(Session::new(config, None));
     tokio::time::timeout(
         Duration::from_secs(45),
-        session.0.connect(Credentials::with_access_token(access_token), false),
+        session
+            .0
+            .connect(Credentials::with_access_token(access_token), false),
     )
     .await
     .context("Spotify login timed out")?

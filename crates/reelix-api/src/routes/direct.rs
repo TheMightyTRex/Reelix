@@ -164,7 +164,10 @@ async fn spotify_status(State(s): State<AppState>, user: CurrentUser) -> ApiResu
 }
 
 #[utoipa::path(post, path="/api/v1/downloads/spotify/login", tag="downloads", security(("session"=[]),("api_key"=[])), responses((status=200,body=SpotifyLoginStart)))]
-async fn spotify_login(State(s): State<AppState>, user: CurrentUser) -> ApiResult<ApiJson<SpotifyLoginStart>> {
+async fn spotify_login(
+    State(s): State<AppState>,
+    user: CurrentUser,
+) -> ApiResult<ApiJson<SpotifyLoginStart>> {
     user.require(Permissions::ADMIN)?;
     Ok(ApiJson(
         s.ext::<DirectService>()?
@@ -190,7 +193,10 @@ async fn spotify_login_finish(
 }
 
 #[utoipa::path(post, path="/api/v1/downloads/spotify/disconnect", tag="downloads", security(("session"=[]),("api_key"=[])), responses((status=200,body=SpotifyStatus)))]
-async fn spotify_disconnect(State(s): State<AppState>, user: CurrentUser) -> ApiResult<ApiJson<SpotifyStatus>> {
+async fn spotify_disconnect(
+    State(s): State<AppState>,
+    user: CurrentUser,
+) -> ApiResult<ApiJson<SpotifyStatus>> {
     user.require(Permissions::ADMIN)?;
     Ok(ApiJson(
         s.ext::<DirectService>()?

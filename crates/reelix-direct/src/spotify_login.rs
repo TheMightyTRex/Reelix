@@ -264,7 +264,11 @@ impl DirectService {
         .await;
         if served.is_err() {
             let mut state = self.login_state();
-            if state.pending.as_ref().is_some_and(|p| p.started.elapsed() >= LOGIN_TTL) {
+            if state
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.started.elapsed() >= LOGIN_TTL)
+            {
                 state.pending = None;
                 state.error = Some("The Spotify login expired; click Connect Spotify again".into());
             }

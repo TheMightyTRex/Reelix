@@ -104,7 +104,12 @@ async fn downloads_require_admin_and_csrf_and_roundtrip_jobs() {
         true,
     )
     .await;
-    for path in ["/downloads", "/downloads/settings", "/downloads/health", "/downloads/spotify"] {
+    for path in [
+        "/downloads",
+        "/downloads/settings",
+        "/downloads/health",
+        "/downloads/spotify",
+    ] {
         assert_eq!(
             call(&r, "GET", path, "", Value::Null, true).await.0,
             StatusCode::UNAUTHORIZED

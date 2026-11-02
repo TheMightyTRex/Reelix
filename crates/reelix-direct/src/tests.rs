@@ -478,7 +478,10 @@ printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan"}}\n' "$file" "
         .await
         .unwrap_err()
         .to_string();
-    assert_eq!(error, "yt-dlp failed: [youtube] bbbbbbbbbbb: Sign in to confirm you're not a bot");
+    assert_eq!(
+        error,
+        "yt-dlp failed: [youtube] bbbbbbbbbbb: Sign in to confirm you're not a bot"
+    );
     let folder = Path::new(&job.output_dir);
     let output = folder.join("Song_aaaaaaaaaaa [aaaaaaaaaaa].webm");
     assert_eq!(tokio::fs::read(&output).await.unwrap(), b"audio");
@@ -491,7 +494,11 @@ printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan"}}\n' "$file" "
     assert!(args.contains("-- https://www.youtube.com/watch?v=aaaaaaaaaaa"));
 
     // A retry skips the published video and fails at the same place.
-    assert!(s.execute(&job, &settings, &CancellationToken::new()).await.is_err());
+    assert!(
+        s.execute(&job, &settings, &CancellationToken::new())
+            .await
+            .is_err()
+    );
     let args = tokio::fs::read_to_string(&log).await.unwrap();
     assert_eq!(args.matches("watch?v=aaaaaaaaaaa").count(), 1);
 }
@@ -508,7 +515,10 @@ fn spotify_login_parses_redirects_and_derives_pkce_challenge() {
         spotify_login::parse_redirect(" http://127.0.0.1:8898/login?code=abc&state=xyz ").unwrap(),
         pair("abc", "xyz")
     );
-    assert_eq!(spotify_login::parse_redirect("?code=abc&state=xyz").unwrap(), pair("abc", "xyz"));
+    assert_eq!(
+        spotify_login::parse_redirect("?code=abc&state=xyz").unwrap(),
+        pair("abc", "xyz")
+    );
     assert!(
         spotify_login::parse_redirect("http://127.0.0.1:8898/login?error=access_denied&state=xyz")
             .unwrap_err()
@@ -584,7 +594,9 @@ async fn spotify_code_exchange_sends_pkce_verifier() {
         .and(body_string_contains("grant_type=authorization_code"))
         .and(body_string_contains("code=the-code"))
         .and(body_string_contains("code_verifier=the-verifier"))
-        .and(body_string_contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A8898%2Flogin"))
+        .and(body_string_contains(
+            "redirect_uri=http%3A%2F%2F127.0.0.1%3A8898%2Flogin",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "access_token": "token", "token_type": "Bearer", "expires_in": 3600
         })))
