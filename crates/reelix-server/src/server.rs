@@ -73,6 +73,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let queue = jobs.queue();
     let cancel = CancellationToken::new();
     let jobs_handle = jobs.start(cancel.clone());
+    let direct = Arc::new(reelix_direct::DirectService::new(
+        db.clone(),
+        config.data_dir.clone(),
+    ));
+    let direct_handle = tokio::spawn(direct.clone().run(cancel.clone()));
 
     let state = AppState::new(
         db.clone(),
@@ -86,7 +91,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             start_time: chrono::Utc::now(),
         },
     );
-    let state = modules.attach(&queue, state);
+    let state = modules.attach(&queue, state).with_extension(direct);
     let web_dir = web::resolve_web_dir(config.web_dir.as_deref());
     let web_ui = Arc::new(WebUi::load(&web_dir, &config.url_base));
     let app = web::build_app(reelix_api::router(state), web_ui, &config.url_base);
@@ -116,6 +121,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     tracing::info!("waiting for background jobs to stop");
     if let Err(e) = jobs_handle.await {
         tracing::error!(error = %e, "job system task failed");
+    }
+    if let Err(e) = direct_handle.await? {
+        tracing::error!(error = %e, "direct download worker stopped");
     }
     db.pool().close().await;
     tracing::info!("shutdown complete");

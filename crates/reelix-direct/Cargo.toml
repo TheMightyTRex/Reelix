@@ -1,0 +1,35 @@
+[package]
+name = "reelix-direct"
+description = "Native Rust Spotify and YouTube downloads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+reelix-api-types.workspace = true
+reelix-db.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+futures.workspace = true
+librespot-core = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-metadata = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-oauth = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-protocol = "0.8.0"
+rustypipe = { version = "0.11.4", default-features = false, features = ["rustls-tls-webpki-roots"] }
+aes = "0.8"
+ctr = "0.9"
+lofty.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

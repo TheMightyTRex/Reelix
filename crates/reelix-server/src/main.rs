@@ -16,6 +16,27 @@ fn main() -> ExitCode {
 
     match cli.command {
         Some(Command::Healthcheck) => ExitCode::from(reelix_server::healthcheck::run(&config)),
+        Some(Command::SpotifyLogin {
+            credentials,
+            client_id,
+            redirect_uri,
+        }) => {
+            let runtime = tokio::runtime::Runtime::new().expect("create Spotify login runtime");
+            match runtime.block_on(reelix_direct::spotify::login(
+                &credentials,
+                client_id.as_deref(),
+                &redirect_uri,
+            )) {
+                Ok(()) => {
+                    println!("Spotify session saved to {}", credentials.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("Spotify login failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         None => {
             let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,

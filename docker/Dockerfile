@@ -32,7 +32,7 @@ RUN cd crates/reelix-web && trunk build --release
 FROM debian:bookworm-slim AS runtime
 # util-linux (setpriv) is part of the base image; tzdata makes TZ work.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /reelix /app/reelix

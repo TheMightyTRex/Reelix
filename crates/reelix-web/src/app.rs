@@ -47,6 +47,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("/login") view=pages::LoginPage />
                         <ParentRoute path=path!("") view=Shell>
                             <Route path=path!("") view=pages::DashboardPage />
+                            <Route path=path!("downloads") view=pages::downloads::DownloadsPage />
                             <Route path=path!("system/status") view=pages::system::StatusPage />
                             <Route path=path!("system/health") view=pages::system::HealthPage />
                             <Route path=path!("system/tasks") view=pages::system::TasksPage />

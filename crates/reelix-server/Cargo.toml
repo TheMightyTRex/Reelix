@@ -26,6 +26,7 @@ reelix-api-types.workspace = true
 reelix-books.workspace = true
 reelix-core = { workspace = true, features = ["bus"] }
 reelix-db.workspace = true
+reelix-direct.workspace = true
 reelix-jobs.workspace = true
 reelix-library.workspace = true
 reelix-pipeline.workspace = true

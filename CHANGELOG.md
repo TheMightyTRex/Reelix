@@ -6,6 +6,10 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+### Added
+- Downloads page with native Rust Spotify tracks/albums/playlists, YouTube audio/video choices, format and quality controls, native YouTube/Spotify preview, and a persistent queue with progress, cancellation and retry.
+- Direct-download tool/session checks, administrator-only API routes, native Spotify PKCE login and FFmpeg packaging, and setup documentation.
+
 ## [0.1.0] - 2026-11-01
 
 First public pre-release. Nothing has been tested against real indexers, download clients or media servers yet.

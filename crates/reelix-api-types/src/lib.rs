@@ -187,3 +187,5 @@ pub struct EnqueuedJob {
     /// `None` when an identical job was already queued or running.
     pub job_id: Option<i64>,
 }
+
+pub mod direct;

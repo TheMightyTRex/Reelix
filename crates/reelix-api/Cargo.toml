@@ -19,6 +19,7 @@ reelix-api-types = { workspace = true, features = ["openapi"] }
 reelix-books.workspace = true
 reelix-core = { workspace = true, features = ["bus"] }
 reelix-db.workspace = true
+reelix-direct.workspace = true
 reelix-decision.workspace = true
 reelix-parser.workspace = true
 reelix-jobs.workspace = true

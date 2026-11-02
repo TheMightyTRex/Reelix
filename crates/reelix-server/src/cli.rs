@@ -31,6 +31,16 @@ pub struct Cli {
 pub enum Command {
     /// Probe the local health endpoint; exits 0 iff it returns HTTP 200.
     Healthcheck,
+    /// Authenticate Spotify with native OAuth/PKCE and save reusable session credentials.
+    SpotifyLogin {
+        #[arg(long)]
+        credentials: PathBuf,
+        /// Optional Spotify developer application client ID.
+        #[arg(long)]
+        client_id: Option<String>,
+        #[arg(long, default_value = "http://127.0.0.1:8898/login")]
+        redirect_uri: String,
+    },
 }
 
 impl Cli {
@@ -66,6 +76,9 @@ mod tests {
         let cli = Cli::parse_from(["reelix", "healthcheck", "--port", "9"]);
         assert!(matches!(cli.command, Some(Command::Healthcheck)));
         assert_eq!(cli.overrides().port, Some(9));
+        let cli = Cli::parse_from(["reelix", "spotify-login", "--credentials", "credentials.json"]);
+        assert!(matches!(cli.command, Some(Command::SpotifyLogin { .. })));
+        assert!(Cli::try_parse_from(["reelix", "spotify-login"]).is_err());
         assert!(Cli::try_parse_from(["reelix", "--port", "notaport"]).is_err());
     }
 }

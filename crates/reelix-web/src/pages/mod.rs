@@ -26,3 +26,5 @@ pub use login::LoginPage;
 pub use not_found::NotFound;
 pub use profile::ProfilePage;
 pub use setup::SetupPage;
+
+pub mod downloads;

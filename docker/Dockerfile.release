@@ -10,7 +10,7 @@ ARG VERSION=dev
 
 # util-linux (setpriv) is part of the base image; tzdata makes TZ work.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY bin/${TARGETARCH}/reelix /app/reelix

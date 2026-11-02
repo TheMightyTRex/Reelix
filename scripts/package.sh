@@ -35,6 +35,8 @@ cp "$binary" "$dir/$exe"
 # Skip dotfiles such as trunk's .trunk-lock.
 (cd "$web" && find . -mindepth 1 -maxdepth 1 ! -name '.*' -exec cp -R {} "$dir/web/" \;)
 cp "$root/LICENSE" "$dir/LICENSE.txt"
+mkdir -p "$dir/docs"
+cp "$root/docs/direct-downloads.md" "$dir/docs/"
 
 # README: fill in version and architecture, and keep the title underline the same length.
 sed -e "s/@VERSION@/$version/g" -e "s/@ARCH@/$arch/g" "$root/packaging/$os/README.txt" |

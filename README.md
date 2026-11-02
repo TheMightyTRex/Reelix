@@ -43,6 +43,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 - **Torrent clients:** qBittorrent, Transmission, Deluge, rTorrent and a blackhole folder.
 - **Usenet clients:** SABnzbd, NZBGet and a blackhole folder.
 - Automatic import of finished downloads, failed-download handling with blocklisting and a new search, and remote path mappings for clients on another host.
+- **Direct downloads:** native Rust Spotify tracks, albums and playlists, plus YouTube audio or video with format/resolution selection, playlist preview, a persistent queue, cancellation and retry. Set up tools and destinations on **Downloads**; see [direct download setup](docs/direct-downloads.md).
 
 ### Discover and requests
 - Discover page with trending, popular and upcoming movies and TV.

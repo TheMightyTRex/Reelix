@@ -6,6 +6,7 @@ exclude = ["fuzz"]
 default-members = [
     "crates/reelix-core",
     "crates/reelix-db",
+    "crates/reelix-direct",
     "crates/reelix-jobs",
     "crates/reelix-api-types",
     "crates/reelix-api",
@@ -38,6 +39,7 @@ repository = "https://github.com/mvanhare/Reelix"
 [workspace.dependencies]
 reelix-core = { path = "crates/reelix-core" }
 reelix-db = { path = "crates/reelix-db" }
+reelix-direct = { path = "crates/reelix-direct" }
 reelix-jobs = { path = "crates/reelix-jobs" }
 reelix-api-types = { path = "crates/reelix-api-types" }
 reelix-api = { path = "crates/reelix-api" }

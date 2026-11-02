@@ -117,6 +117,14 @@ pub const NAV: &[&[NavItem]] = &[
             ],
         },
         NavItem {
+            label: "Downloads",
+            icon: "download",
+            href: "/downloads",
+            prefix: "/downloads",
+            perm: ADMIN,
+            children: &[],
+        },
+        NavItem {
             label: "Calendar",
             icon: "calendar",
             href: "/calendar",

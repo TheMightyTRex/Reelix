@@ -18,3 +18,5 @@ pub mod system;
 pub mod torznab;
 pub mod users;
 pub mod ws;
+
+pub mod direct;
