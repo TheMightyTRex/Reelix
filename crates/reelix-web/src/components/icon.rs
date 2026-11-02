@@ -1,7 +1,5 @@
 //! Inline SVG icon set (stroke icons on a 24×24 grid, drawn for Reelix).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use leptos::prelude::*;
 
 fn markup(name: &str) -> &'static str {
@@ -115,20 +113,5 @@ pub fn Icon(#[prop(into)] name: String, #[prop(optional, into)] class: Option<St
 /// The Reelix brand mark.
 #[component]
 pub fn Logo() -> impl IntoView {
-    // Each instance needs its own gradient id: a gradient inside a hidden element breaks every user.
-    static NEXT: AtomicUsize = AtomicUsize::new(1);
-    let id = format!("reelix-logo-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-    let fill = format!("url(#{id})");
-    // `view!` doesn't know `<stop>` and wraps it in `<g>`, which invalidates the gradient,
-    // so the gradient is parsed by the browser from markup instead.
-    let defs = format!(
-        r#"<linearGradient id="{id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color: var(--brand-a)"/><stop offset="1" style="stop-color: var(--brand-b)"/></linearGradient>"#
-    );
-    view! {
-        <svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-            <defs inner_html=defs></defs>
-            <circle cx="32" cy="32" r="21" fill="none" stroke=fill.clone() stroke-width="6" />
-            <path d="M27 21.5v21l16-10.5z" fill=fill />
-        </svg>
-    }
+    view! { <img class="logo-mark" src="logo.png" alt="" aria-hidden="true" draggable="false" /> }
 }

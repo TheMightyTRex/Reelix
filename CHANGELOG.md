@@ -6,10 +6,15 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
 ### Added
 - Queue: select rows (or a whole page) and remove them together (#1). Bulk removal leaves the download client untouched unless you choose otherwise.
 - Discord notifications use a richer layout: overview, rating, genres, codecs, languages, subtitles, TMDb/IMDb/Trakt/TVDB/YouTube links, the release name and the backdrop image (#2). Other services gain the rating, genre, codec and language fields.
 - Discover: the Trailer button plays the YouTube trailer in a popup instead of opening a new tab (#4).
+
+### Changed
+- New Reelix logo in the web UI and as the browser icon.
 
 ### Fixed
 - The queue no longer fills with old, finished downloads from a shared download-client category (for example SABnzbd history imported by Sonarr or Radarr). Unknown downloads are only tracked while in progress or within a day of finishing (#1).
