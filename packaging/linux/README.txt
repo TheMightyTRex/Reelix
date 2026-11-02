@@ -71,8 +71,9 @@ Database changes are applied automatically on startup.
 
 Requirements
 ------------
-- Spotify/YouTube downloads are native Rust. FFmpeg is needed for conversion
-  and video muxing. Use reelix spotify-login to create session credentials,
+- Spotify downloads are native Rust. YouTube downloads need a current yt-dlp
+  and Deno on PATH (https://github.com/yt-dlp/yt-dlp/releases). FFmpeg is
+  needed for conversion and video muxing. Use reelix spotify-login to create session credentials,
   then configure Downloads. See docs/direct-downloads.md for setup details.
 - @ARCH@ Linux with glibc 2.17 or newer (any mainstream distro since 2014,
   e.g. CentOS 7, Ubuntu 16.04, Debian 9). Not Alpine or other musl-based

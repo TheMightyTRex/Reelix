@@ -5,6 +5,7 @@ pub mod spotify;
 mod tests;
 mod transfer;
 mod youtube;
+mod ytdlp;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -63,6 +64,9 @@ impl DirectService {
             if tool.trim().is_empty() || tool.contains(['\n', '\r', '\0']) {
                 bail!("Executable paths must be nonempty paths or executable names");
             }
+        }
+        if settings.yt_dlp.contains(['\n', '\r', '\0']) {
+            bail!("The yt-dlp path must be a path or executable name, or empty");
         }
         if !settings.spotify_credentials.is_empty() && !Path::new(&settings.spotify_credentials).is_absolute()
         {
@@ -175,15 +179,24 @@ impl DirectService {
     pub async fn health(&self) -> Result<Vec<DirectHealth>> {
         let s = self.settings().await?;
         let ffmpeg = process::probe(&s.ffmpeg, "-version").await;
+        let youtube = if s.yt_dlp.trim().is_empty() {
+            DirectHealth {
+                tool: "Native YouTube extractor".into(),
+                available: true,
+                detail: "RustyPipe is compiled into Reelix; set a yt-dlp path if YouTube rejects it".into(),
+            }
+        } else {
+            DirectHealth {
+                tool: "yt-dlp".into(),
+                available: process::probe(&s.yt_dlp, "--version").await,
+                detail: "Lists and downloads YouTube streams; keep it current (yt-dlp -U)".into(),
+            }
+        };
         let credentials = spotify::read_credentials(Path::new(&s.spotify_credentials))
             .await
             .is_ok();
         Ok(vec![
-            DirectHealth {
-                tool: "Native YouTube extractor".into(),
-                available: true,
-                detail: "RustyPipe is compiled into Reelix; no yt-dlp or Python process".into(),
-            },
+            youtube,
             DirectHealth {
                 tool: "Native Spotify client".into(),
                 available: true,
@@ -210,7 +223,7 @@ impl DirectService {
         request.url = validate(&request)?;
         tokio::time::timeout(Duration::from_secs(45), async {
             match request.source {
-                DirectSource::Youtube => self.youtube_preview(&request).await,
+                DirectSource::Youtube => self.youtube_preview(&s, &request).await,
                 DirectSource::Spotify => self.spotify_preview(&s, &request).await,
             }
         })

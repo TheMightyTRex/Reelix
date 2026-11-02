@@ -414,3 +414,84 @@ async fn youtube_transfer_keeps_player_agent_and_uses_bounded_ranges() {
     .unwrap();
     assert_eq!(tokio::fs::read(&output).await.unwrap(), b"abc");
 }
+
+#[test]
+fn ytdlp_progress_uses_total_or_estimate() {
+    assert_eq!(ytdlp::parse_progress("5 10 NA"), Some(50.0));
+    assert_eq!(ytdlp::parse_progress("5 NA 20"), Some(25.0));
+    assert_eq!(ytdlp::parse_progress("5 NA NA"), None);
+    assert_eq!(ytdlp::parse_progress("NA 10 NA"), None);
+    assert!(ytdlp::video_id("oASNi8cLrGw") && !ytdlp::video_id("-x"));
+}
+
+/// A stand-in yt-dlp: lists a playlist, downloads `aaaaaaaaaaa` and rejects `bbbbbbbbbbb`.
+#[cfg(unix)]
+#[tokio::test]
+async fn ytdlp_backend_lists_downloads_and_reports_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, s) = service().await;
+    let script = s.data_dir.join("fake-yt-dlp");
+    let log = s.data_dir.join("args.log");
+    tokio::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+echo "$*" >> '{log}'
+case " $* " in *" --dump-single-json "*)
+  echo 'WARNING: [youtube:tab] 1 unavailable video is hidden' >&2
+  echo '{{"title":"List","entries":[{{"id":"aaaaaaaaaaa","title":"One"}},null,{{"id":"bad"}},{{"id":"aaaaaaaaaaa"}},{{"id":"bbbbbbbbbbb","title":"Two"}}]}}'
+  exit 0;;
+esac
+prev=; for a in "$@"; do case "$prev" in -P) dir=$a;; -o) out=$a;; esac; prev=$a; done
+id=${{a##*v=}}
+if [ "$id" = bbbbbbbbbbb ]; then echo "ERROR: [youtube] $id: Sign in to confirm you're not a bot" >&2; exit 1; fi
+file="$dir/$(echo "$out" | sed 's/%(ext)s/webm/')"
+printf audio > "$file"
+echo 'REELIX-PROGRESS 5 10 NA' >&2
+printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan"}}\n' "$file" "$id"
+"#,
+            log = log.display()
+        ),
+    )
+    .await
+    .unwrap();
+    tokio::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .await
+        .unwrap();
+    let mut settings = s.settings().await.unwrap();
+    settings.yt_dlp = script.to_string_lossy().into_owned();
+    s.save_settings(settings).await.unwrap();
+    let request = DirectRequest {
+        url: "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLlist".into(),
+        playlist: true,
+        ..request()
+    };
+
+    let preview = s.preview(request.clone()).await.unwrap();
+    assert_eq!(preview.title, "List");
+    assert_eq!(preview.items, ["One", "Two"]);
+
+    s.enqueue(request).await.unwrap();
+    let (job, settings) = s.next().await.unwrap().unwrap();
+    let error = s
+        .execute(&job, &settings, &CancellationToken::new())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert_eq!(error, "yt-dlp failed: [youtube] bbbbbbbbbbb: Sign in to confirm you're not a bot");
+    let folder = Path::new(&job.output_dir);
+    let output = folder.join("Song_aaaaaaaaaaa [aaaaaaaaaaa].webm");
+    assert_eq!(tokio::fs::read(&output).await.unwrap(), b"audio");
+    assert!(!folder.join(".aaaaaaaaaaa.audio.webm").exists());
+
+    let args = tokio::fs::read_to_string(&log).await.unwrap();
+    assert!(args.lines().all(|l| l.starts_with("--ignore-config ")));
+    assert!(args.contains("-- https://www.youtube.com/playlist?list=PLlist"));
+    assert!(args.contains("-f ba "));
+    assert!(args.contains("-- https://www.youtube.com/watch?v=aaaaaaaaaaa"));
+
+    // A retry skips the published video and fails at the same place.
+    assert!(s.execute(&job, &settings, &CancellationToken::new()).await.is_err());
+    let args = tokio::fs::read_to_string(&log).await.unwrap();
+    assert_eq!(args.matches("watch?v=aaaaaaaaaaa").count(), 1);
+}

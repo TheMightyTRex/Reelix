@@ -8,6 +8,9 @@ pub struct DirectSettings {
     pub enabled: bool,
     pub output_dir: String,
     pub ffmpeg: String,
+    /// yt-dlp executable for YouTube listing and stream downloads; empty uses the
+    /// built-in RustyPipe extractor.
+    pub yt_dlp: String,
     /// Reusable librespot credentials (compatible with Zotify credentials.json).
     pub spotify_credentials: String,
 }
@@ -17,6 +20,7 @@ impl Default for DirectSettings {
             enabled: false,
             output_dir: String::new(),
             ffmpeg: "ffmpeg".into(),
+            yt_dlp: "yt-dlp".into(),
             spotify_credentials: String::new(),
         }
     }

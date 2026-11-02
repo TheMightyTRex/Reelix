@@ -41,7 +41,7 @@ pub(crate) fn safe_name(value: &str) -> String {
     }
 }
 
-fn command(exe: &str) -> Command {
+pub(crate) fn command(exe: &str) -> Command {
     let mut cmd = Command::new(exe);
     cmd.stdin(Stdio::null()).kill_on_drop(true);
     #[cfg(windows)]

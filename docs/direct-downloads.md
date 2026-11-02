@@ -1,12 +1,13 @@
-# Native Spotify and YouTube downloads
+# Spotify and YouTube downloads
 
-Reelix's direct-download pipeline is implemented in Rust. It does not invoke
-Zotify, youtube-dl, yt-dlp, Python, Deno, or a provider helper executable.
-Only FFmpeg is used for media conversion and audio/video muxing.
+Reelix's direct-download pipeline is implemented in Rust. Spotify is native and
+does not invoke Zotify or Python. YouTube uses yt-dlp when its path is set (the
+default) and falls back to the built-in RustyPipe extractor when the path is empty.
+FFmpeg is used for media conversion and audio/video muxing.
 
 Open **Downloads** (administrator only), enable the feature, and choose an absolute
 server destination. Settings apply immediately. Disabling pauses queued work; use
-Cancel for a running job. Old Zotify/yt-dlp executable settings are ignored.
+Cancel for a running job. Old Zotify executable settings are ignored.
 
 ## YouTube
 
@@ -17,16 +18,34 @@ Paste a video or playlist URL and select **Audio** or **Video**:
   and downloaded separately, then muxed with FFmpeg. MP4 does not force H.264.
 - Playlist mode requires explicit opt-in; otherwise a video URL downloads one video.
 - Preview shows up to 50 titles; downloading follows playlist continuation pages.
-- RustyPipe extracts stream metadata in-process. Reelix transfers bytes with
-  reqwest, resumes using HTTP ranges, and enforces cancellation itself.
 
-The native extractor uses the iOS/Android player clients. It does not invoke the
-optional RustyPipe Botguard executable. Live streams, DRM-protected videos and
-videos requiring unavailable authentication/PO tokens are unsupported. Extraction
-can fail when YouTube changes its protocol; updating Reelix updates the extractor.
-This implementation does not claim full yt-dlp compatibility or support for its
-other websites. Stream decoding uses RustyPipe's embedded JavaScript engine;
-no separate JavaScript runtime needs to be installed.
+### yt-dlp (default)
+
+YouTube changes its protocol often, and yt-dlp is updated within days, so it is
+the default backend. Set **yt-dlp executable** to its name on PATH or an absolute
+path, and keep it current with `yt-dlp -U` (or your package manager). Current
+yt-dlp needs a JavaScript runtime for YouTube; install [Deno](https://deno.com)
+on PATH, or some formats or videos will be missing. Distribution packages are often
+too old to work; prefer the standalone release from
+[yt-dlp's releases](https://github.com/yt-dlp/yt-dlp/releases).
+
+yt-dlp lists playlists (`--flat-playlist`) and downloads the best audio stream and,
+for video, the best video stream within the resolution limit. Reelix then converts,
+muxes, tags and publishes the files exactly as with the built-in extractor, and
+stops the yt-dlp process on cancellation. Reelix runs it with `--ignore-config`, its
+own cache under the data directory, and FFmpeg's path when that is absolute; only
+normalized YouTube URLs are passed. yt-dlp's error message is shown on failed jobs.
+
+### Built-in extractor
+
+Clear the yt-dlp path to use RustyPipe in-process instead. Reelix transfers bytes
+with reqwest, resumes using HTTP ranges, and enforces cancellation itself. It uses
+the iOS/Android player clients and does not invoke the optional RustyPipe Botguard
+executable, so it breaks when YouTube requires PO tokens or changes its player;
+failures then show RustyPipe's error and only a Reelix update fixes them.
+
+Live streams and DRM-protected videos are unsupported with either backend. Neither
+supports yt-dlp's other websites.
 
 ## Spotify
 
@@ -94,10 +113,12 @@ title/artist tags. Spotify gets native track, album, artist, disc, track and cov
 
 ## Installation and Docker
 
-The native download implementations ship in the Reelix binary. Install FFmpeg for
-format conversion/video muxing and configure its executable path if it is not on
-PATH. Native original-audio downloads do not need FFmpeg. Docker includes FFmpeg;
-no Python environment or separately installed downloader is required.
+The Spotify client and built-in YouTube extractor ship in the Reelix binary. Install
+FFmpeg for format conversion/video muxing and configure its executable path if it
+is not on PATH. Original-audio downloads do not need FFmpeg. For YouTube, install
+yt-dlp and Deno (see above). The Docker images include FFmpeg, the standalone
+yt-dlp and Deno, taken from their latest releases when the image is built; pull a
+newer image when YouTube downloads start failing.
 
 For container deployments, use a writable persistent destination such as
 `/data/downloads/direct` and put session credentials under `/config`. Run the native
@@ -106,8 +127,8 @@ credentials file into the container. The Reelix service user must be able to rea
 
 The administrator-only API is `/api/v1/downloads`, with `/settings`, `/health`,
 `/preview`, `/{id}/cancel`, and `/{id}/retry`. Cookie-authenticated mutations require
-the usual CSRF header. Health reports compiled-in providers, FFmpeg availability,
-and whether the session file parses; account access is checked during use.
+the usual CSRF header. Health reports the YouTube backend (and whether yt-dlp runs),
+FFmpeg availability, and whether the session file parses; account access is checked during use.
 
 ## Implementation references
 

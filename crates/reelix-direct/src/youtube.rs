@@ -1,5 +1,6 @@
-//! Native YouTube extraction and format selection. The two-stream pipeline follows
-//! youtube-dl/yt-dlp's best-video + best-audio approach; extraction uses RustyPipe.
+//! YouTube extraction and format selection. The two-stream pipeline follows
+//! youtube-dl/yt-dlp's best-video + best-audio approach; extraction uses RustyPipe,
+//! or the configured yt-dlp executable (see `ytdlp.rs`).
 use crate::{
     DirectService,
     process::{convert, safe_name},
@@ -29,7 +30,7 @@ impl DirectService {
     async fn youtube_player(&self, client: &RustyPipe, id: &str) -> Result<VideoPlayer> {
         rustypipe::validate::video_id(id)?;
         let player = client.query().player_from_clients(id, &[ClientType::Ios, ClientType::Android]).await
-            .map_err(|_| anyhow::anyhow!("Native YouTube extraction failed. The video may be unavailable, require login, or require a client update."))?;
+            .map_err(|e| anyhow::anyhow!("Native YouTube extraction failed ({e}). The video may be unavailable or require login, or YouTube changed its protocol; set a yt-dlp path in Download settings."))?;
         if player.drm.is_some() {
             bail!("This YouTube video requires DRM and is not supported");
         }
@@ -57,13 +58,13 @@ impl DirectService {
             let mut playlist = query
                 .playlist(&id)
                 .await
-                .map_err(|_| anyhow::anyhow!("Cannot read YouTube playlist"))?;
+                .map_err(|e| anyhow::anyhow!("Cannot read YouTube playlist: {e}"))?;
             if preview {
                 playlist
                     .videos
                     .extend_limit(&query, 51)
                     .await
-                    .map_err(|_| anyhow::anyhow!("Cannot read YouTube playlist page"))?;
+                    .map_err(|e| anyhow::anyhow!("Cannot read YouTube playlist page: {e}"))?;
             } else {
                 while !playlist.videos.is_exhausted() {
                     if playlist.videos.items.len() >= 10_000 {
@@ -73,7 +74,7 @@ impl DirectService {
                         .videos
                         .extend(&query)
                         .await
-                        .map_err(|_| anyhow::anyhow!("Cannot read YouTube playlist page; retry the job"))?;
+                        .map_err(|e| anyhow::anyhow!("Cannot read YouTube playlist page ({e}); retry the job"))?;
                 }
             }
             let truncated = !playlist.videos.is_exhausted() || playlist.videos.items.len() > 50;
@@ -99,7 +100,14 @@ impl DirectService {
         }
     }
 
-    pub(crate) async fn youtube_preview(&self, r: &DirectRequest) -> Result<DirectPreview> {
+    pub(crate) async fn youtube_preview(
+        &self,
+        settings: &DirectSettings,
+        r: &DirectRequest,
+    ) -> Result<DirectPreview> {
+        if !settings.yt_dlp.trim().is_empty() {
+            return self.ytdlp_preview(settings, r).await;
+        }
         let client = self.youtube_client()?;
         let (mut title, mut items, truncated) = self.youtube_ids(&client, r, true).await?;
         if !r.playlist {
@@ -115,6 +123,18 @@ impl DirectService {
     }
 
     pub(crate) async fn download_youtube(
+        &self,
+        job: &DirectDownload,
+        settings: &DirectSettings,
+    ) -> Result<()> {
+        if settings.yt_dlp.trim().is_empty() {
+            self.download_youtube_native(job, settings).await
+        } else {
+            self.download_youtube_ytdlp(job, settings).await
+        }
+    }
+
+    async fn download_youtube_native(
         &self,
         job: &DirectDownload,
         settings: &DirectSettings,
@@ -168,38 +188,51 @@ impl DirectService {
             }
             self.transfer_youtube(&audio.url, &audio_part, job.id, &user_agent)
                 .await?;
-            inputs.push(audio_part.clone());
-            self.progress(job.id, Some(100.0), "Processing downloaded streams")
+            inputs.push(audio_part);
+            let channel = player.details.channel_name.as_deref().unwrap_or("YouTube");
+            self.publish_youtube(job, settings, inputs, &output, &id, title, channel)
                 .await?;
-            let staging = folder.join(format!(".{id}.{}.staging.{extension}", reelix_db::now_ms()));
-            if job.request.mode == DownloadMode::Audio && job.request.format == "original" {
-                tokio::fs::copy(&audio_part, &staging).await?;
-            } else {
-                convert(
-                    &settings.ffmpeg,
-                    &inputs,
-                    &staging,
-                    job.request.mode == DownloadMode::Video,
-                    &job.request.format,
-                )
-                .await?;
-            }
-            if job.request.mode == DownloadMode::Audio && extension != "webm" {
-                crate::spotify::write_tags(
-                    &staging,
-                    title,
-                    player.details.channel_name.as_deref().unwrap_or("YouTube"),
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await?;
-            }
-            tokio::fs::rename(&staging, &output).await?;
-            for input in inputs {
-                tokio::fs::remove_file(input).await?;
-            }
+        }
+        Ok(())
+    }
+
+    /// Convert or copy downloaded streams (audio last) into a staging file, tag audio,
+    /// publish it as `output`, then remove the stream files.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn publish_youtube(
+        &self,
+        job: &DirectDownload,
+        settings: &DirectSettings,
+        inputs: Vec<PathBuf>,
+        output: &Path,
+        id: &str,
+        title: &str,
+        channel: &str,
+    ) -> Result<()> {
+        self.progress(job.id, Some(100.0), "Processing downloaded streams")
+            .await?;
+        let audio_part = inputs.last().context("No downloaded audio stream")?;
+        let extension = output.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        let folder = output.parent().context("Output has no folder")?;
+        let staging = folder.join(format!(".{id}.{}.staging.{extension}", reelix_db::now_ms()));
+        if job.request.mode == DownloadMode::Audio && job.request.format == "original" {
+            tokio::fs::copy(audio_part, &staging).await?;
+        } else {
+            convert(
+                &settings.ffmpeg,
+                &inputs,
+                &staging,
+                job.request.mode == DownloadMode::Video,
+                &job.request.format,
+            )
+            .await?;
+        }
+        if job.request.mode == DownloadMode::Audio && extension != "webm" {
+            crate::spotify::write_tags(&staging, title, channel, None, None, None, None).await?;
+        }
+        tokio::fs::rename(&staging, output).await?;
+        for input in inputs {
+            tokio::fs::remove_file(input).await?;
         }
         Ok(())
     }

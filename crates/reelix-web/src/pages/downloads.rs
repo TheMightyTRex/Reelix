@@ -181,6 +181,7 @@ fn DownloadSettings(s: DirectSettings) -> impl IntoView {
     let enabled = RwSignal::new(s.enabled);
     let folder = RwSignal::new(s.output_dir);
     let ffmpeg = RwSignal::new(s.ffmpeg);
+    let yt_dlp = RwSignal::new(s.yt_dlp);
     let credentials = RwSignal::new(s.spotify_credentials);
     let busy = RwSignal::new(false);
     let health = RwSignal::new(Vec::<DirectHealth>::new());
@@ -190,6 +191,7 @@ fn DownloadSettings(s: DirectSettings) -> impl IntoView {
             enabled: enabled.get_untracked(),
             output_dir: folder.get_untracked(),
             ffmpeg: ffmpeg.get_untracked(),
+            yt_dlp: yt_dlp.get_untracked(),
             spotify_credentials: credentials.get_untracked(),
         };
         spawn_local(async move {
@@ -212,8 +214,10 @@ fn DownloadSettings(s: DirectSettings) -> impl IntoView {
             <div class="field-row">
                 <label class="field">"Download folder"<input class="input" prop:value=move || folder.get() on:input=move |e| folder.set(event_target_value(&e)) /></label>
                 <label class="field">"FFmpeg executable"<input class="input" prop:value=move || ffmpeg.get() on:input=move |e| ffmpeg.set(event_target_value(&e)) /></label>
+                <label class="field">"yt-dlp executable"<input class="input" placeholder="Empty: built-in extractor" prop:value=move || yt_dlp.get() on:input=move |e| yt_dlp.set(event_target_value(&e)) /></label>
                 <label class="field">"Spotify credentials file"<input class="input" prop:value=move || credentials.get() on:input=move |e| credentials.set(event_target_value(&e)) /></label>
             </div>
+            <p class="muted">"YouTube uses yt-dlp when a path is set; keep it current with yt-dlp -U, and install Deno so it can read every YouTube format. Clear the path to use the built-in extractor, which breaks more often when YouTube changes."</p>
             <p class="muted">"Run reelix spotify-login --credentials /absolute/path/credentials.json to connect your account, then enter that file path. Spotify list imports remain configured separately under Import Lists."</p>
             <p class="muted">"Files are saved in a separate folder for each job. Use Music → Import Library to match downloaded music into your library."</p>
             <button class="btn btn-primary" disabled=move || busy.get() on:click=save>{move || if busy.get() { "Checking…" } else { "Save and check tools" }}</button>
