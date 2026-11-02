@@ -202,6 +202,9 @@ fn has_src_attr(attrs: &str) -> bool {
 const IMG_HOSTS: &str = "https://image.tmdb.org https://artworks.thetvdb.com https://covers.openlibrary.org \
     https://coverartarchive.org https://archive.org https://*.archive.org";
 
+/// Embedded trailers: YouTube's privacy-enhanced (no-cookie) player only.
+const FRAME_HOSTS: &str = "https://www.youtube-nocookie.com";
+
 /// The CSP served with `index.html`.
 pub fn content_security_policy(script_hashes: &[String]) -> String {
     let mut script_src = String::from("'self' 'wasm-unsafe-eval'");
@@ -211,7 +214,8 @@ pub fn content_security_policy(script_hashes: &[String]) -> String {
     }
     format!(
         "default-src 'self'; script-src {script_src}; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data: {IMG_HOSTS}; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+         img-src 'self' data: {IMG_HOSTS}; connect-src 'self'; frame-src {FRAME_HOSTS}; \
+         frame-ancestors 'none'; base-uri 'self'"
     )
 }
 
@@ -323,6 +327,7 @@ mod tests {
         let csp = content_security_policy(&["'sha256-abc'".to_string()]);
         assert!(csp.contains("script-src 'self' 'wasm-unsafe-eval' 'sha256-abc';"));
         assert!(csp.contains("frame-ancestors 'none'"));
+        assert!(csp.contains("frame-src https://www.youtube-nocookie.com;"));
         assert!(csp.contains("img-src 'self' data: https://image.tmdb.org"));
         for host in [
             "https://artworks.thetvdb.com",

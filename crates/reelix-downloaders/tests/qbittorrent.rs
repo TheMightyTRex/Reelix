@@ -207,6 +207,7 @@ async fn items_map_states_and_seed_limits() {
         Some("/downloads/tv/Andor.S02E01.1080p.WEB.H264-SuccessfulCrab.mkv")
     );
     assert_eq!(items[0].seeding_time, Some(7200));
+    assert_eq!(items[0].completed_at, Some(1730101000));
     // Still seeding → not removable.
     assert!(!items[1].can_be_removed);
     assert_eq!(items[2].eta_secs, Some(133));

@@ -223,6 +223,7 @@ async fn items_merge_queue_and_history_with_status_mapping() {
     assert_eq!(get("SABnzbd_nzo_t1").state, DownloadState::Paused);
 
     let done = get("SABnzbd_nzo_h1");
+    assert_eq!(done.completed_at, Some(1730190000));
     assert_eq!(done.state, DownloadState::Completed);
     assert_eq!(
         done.output_path.as_deref(),

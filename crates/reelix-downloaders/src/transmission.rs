@@ -80,7 +80,7 @@ pub fn schema() -> ProviderSchema {
 }
 
 /// `torrent-get` fields requested.
-pub const FIELDS: [&str; 17] = [
+pub const FIELDS: [&str; 18] = [
     "id",
     "hashString",
     "name",
@@ -98,6 +98,7 @@ pub const FIELDS: [&str; 17] = [
     "secondsSeeding",
     "labels",
     "percentDone",
+    "doneDate",
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,6 +128,9 @@ pub struct TrTorrent {
     pub seconds_seeding: Option<i64>,
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Unix seconds; 0 until complete.
+    #[serde(default)]
+    pub done_date: i64,
 }
 
 /// Transmission status code (+ error code) → Reelix state.
@@ -150,6 +154,7 @@ pub fn to_item(t: TrTorrent, category: &str) -> DownloadItem {
     let state = map_state(t.status, t.error, t.left_until_done, t.is_finished);
     let mut item = DownloadItem::new(t.hash_string.to_ascii_lowercase(), t.name.clone(), state);
     item.category = Some(category.to_owned());
+    item.completed_at = (t.done_date > 0).then_some(t.done_date);
     item.total_bytes = t.total_size.max(0) as u64;
     item.remaining_bytes = t.left_until_done.max(0) as u64;
     item.eta_secs = (t.eta >= 0).then_some(t.eta as u64);

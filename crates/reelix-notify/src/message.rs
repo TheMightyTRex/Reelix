@@ -1,7 +1,7 @@
 //! Neutral rendering of an event (title, body, key/value fields) that each notifier
 //! formats for its own service. Keeps wording consistent across services.
 
-use crate::event::{HealthLevel, NotificationEvent, ReleaseSummary};
+use crate::event::{HealthLevel, MediaSummary, NotificationEvent, ReleaseSummary};
 
 /// Coarse severity; maps to colours, priorities and Apprise/ntfy types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +53,18 @@ pub struct Message {
     pub url: Option<String>,
     pub image_url: Option<String>,
     pub severity: Severity,
+    /// The media the event is about (`Dune (2021)`); empty for events without media.
+    pub subject: String,
+    /// What happened (`Imported`, `Grabbed`…), the title without the subject.
+    pub headline: String,
+    /// Media synopsis, for services that show one (Discord).
+    pub overview: Option<String>,
+    /// Labelled links (TMDb, IMDb, Trakt, TVDB, YouTube).
+    pub links: Vec<(String, String)>,
+    /// Release (scene) name of a grab or import.
+    pub release: Option<String>,
+    /// Wide backdrop image.
+    pub backdrop_url: Option<String>,
 }
 
 impl Message {
@@ -67,6 +79,12 @@ impl Message {
             url: media.and_then(|m| m.link()),
             image_url: media.and_then(|m| m.poster_url.clone()),
             severity: Severity::Info,
+            subject: subject.clone(),
+            headline: String::new(),
+            overview: None,
+            links: Vec::new(),
+            release: None,
+            backdrop_url: None,
         };
         let head = |h: &str| {
             if subject.is_empty() {
@@ -83,6 +101,8 @@ impl Message {
             NotificationEvent::Grab { release, .. } => {
                 m.title = head("Grabbed");
                 m.body = release.title.clone();
+                m.release = Some(release.title.clone());
+                media_fields(&mut m, media);
                 release_fields(&mut m, release);
             }
             NotificationEvent::Import {
@@ -95,8 +115,20 @@ impl Message {
                 m.title = head(if *is_upgrade { "Upgraded" } else { "Imported" });
                 m.severity = Severity::Success;
                 m.body = file.path.clone();
+                m.release = file
+                    .scene_name
+                    .clone()
+                    .or_else(|| release.as_ref().map(|r| r.title.clone()));
+                media_fields(&mut m, media);
                 m.push_opt("Quality", file.quality.clone());
+                let codecs: Vec<String> = [file.video_codec.clone(), file.audio_codec.clone()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                m.push("Codecs", codecs.join(" / "));
                 m.push_opt("Size", file.size_bytes.map(format_size));
+                m.push("Languages", file.audio_languages.join(", "));
+                m.push("Subtitles", file.subtitle_languages.join(", "));
                 m.push_opt("Release group", file.release_group.clone());
                 if let Some(r) = release {
                     m.push_opt("Indexer", r.indexer.clone());
@@ -209,6 +241,19 @@ impl Message {
                 m.url = u.release_notes_url.clone();
             }
         }
+        if let Some(x) = media {
+            m.headline = match m.title.strip_suffix(&format!(": {subject}")) {
+                Some(h) if !subject.is_empty() => h.to_owned(),
+                _ => m.title.clone(),
+            };
+            m.overview = x.overview.clone().filter(|o| !o.trim().is_empty());
+            m.links = x
+                .links()
+                .into_iter()
+                .map(|(name, url)| (name.to_owned(), url))
+                .collect();
+            m.backdrop_url = x.backdrop_url.clone();
+        }
         // Books and music: say what was grabbed / imported first.
         if matches!(
             event,
@@ -302,6 +347,25 @@ impl Message {
         }
         out
     }
+}
+
+/// Rating and genres of the media.
+fn media_fields(m: &mut Message, media: Option<&MediaSummary>) {
+    let Some(media) = media else { return };
+    m.push_opt(
+        "Rating",
+        media.rating.filter(|r| *r > 0.0).map(|r| format!("{r:.1}")),
+    );
+    m.push(
+        "Genres",
+        media
+            .genres
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
 }
 
 fn release_fields(m: &mut Message, r: &ReleaseSummary) {

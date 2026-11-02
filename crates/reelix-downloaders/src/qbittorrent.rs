@@ -136,6 +136,9 @@ pub struct QbTorrent {
     /// Seconds.
     #[serde(default)]
     pub seeding_time: Option<i64>,
+    /// Unix seconds; -1 or 0 until complete.
+    #[serde(default)]
+    pub completion_on: i64,
 }
 
 fn minus_two() -> f64 {
@@ -188,6 +191,7 @@ pub fn to_item(t: QbTorrent, prefs: &QbPreferences) -> DownloadItem {
     let (state, msg) = map_state(&t.state);
     let mut item = DownloadItem::new(t.hash.to_ascii_lowercase(), t.name.clone(), state);
     item.category = Some(t.category.clone()).filter(|c| !c.is_empty());
+    item.completed_at = (t.completion_on > 0).then_some(t.completion_on);
     item.total_bytes = t.size.max(0) as u64;
     item.remaining_bytes = t.amount_left.max(0) as u64;
     // 8640000 = qBittorrent's "infinity".
@@ -689,6 +693,7 @@ mod tests {
             ratio_limit,
             seeding_time_limit: -2,
             seeding_time: Some(60),
+            completion_on: 0,
         }
     }
 

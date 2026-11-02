@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use reelix_api_types::pipeline::{
     HistoryDto, HistoryQuery, ManualImportItemDto, ManualImportQuery, ManualImportRequest, PageQuery, Paged,
-    QueueItemDto, QueueRemoveQuery,
+    QueueBulkFailure, QueueBulkRemove, QueueBulkRemoveResult, QueueItemDto, QueueRemoveQuery,
 };
 use reelix_api_types::{ApiErrorBody, EnqueuedJob, HealthCheck, HealthLevel};
 use reelix_core::Permissions;
@@ -25,6 +25,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/queue", get(queue))
+        .route("/queue/bulk", delete(remove_queue_items))
         .route("/queue/{id}", delete(remove_queue_item))
         .route("/queue/{id}/import", post(retry_import))
         .route("/queue/{id}/ignore", post(ignore_queue_item))
@@ -38,6 +39,7 @@ pub fn routes() -> Router<AppState> {
     paths(
         queue,
         remove_queue_item,
+        remove_queue_items,
         retry_import,
         ignore_queue_item,
         history,
@@ -47,6 +49,9 @@ pub fn routes() -> Router<AppState> {
     ),
     components(schemas(
         QueueItemDto,
+        QueueBulkRemove,
+        QueueBulkRemoveResult,
+        QueueBulkFailure,
         HistoryDto,
         ManualImportItemDto,
         ManualImportRequest,
@@ -145,6 +150,24 @@ pub async fn remove_queue_item(
     require(&user)?;
     svc(&state)?.remove(id, &q).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Removes several queue items with the same options. Each item is handled like
+/// `DELETE /queue/{id}`; failures are reported per item and don't stop the rest.
+#[utoipa::path(delete, path = "/api/v1/queue/bulk", tag = "pipeline",
+    request_body = QueueBulkRemove,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Removed; see `failed` for items that were not", body = QueueBulkRemoveResult),
+        (status = 400, description = "Too many ids", body = ApiErrorBody),
+    ))]
+pub async fn remove_queue_items(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(req): ApiJson<QueueBulkRemove>,
+) -> ApiResult<ApiJson<QueueBulkRemoveResult>> {
+    require(&user)?;
+    Ok(ApiJson(svc(&state)?.remove_many(&req).await?))
 }
 
 /// Retries the automatic import of a completed download (job `process_download`).

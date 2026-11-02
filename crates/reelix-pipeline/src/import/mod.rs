@@ -116,6 +116,7 @@ pub struct ImportedItem {
     pub replaced: Vec<PathBuf>,
     pub extras: Vec<PathBuf>,
     pub scene_name: Option<String>,
+    pub media_info: Option<MediaInfo>,
 }
 
 /// Resolves the configured import mode for a download.
@@ -660,6 +661,7 @@ impl<'a> FileImporter<'a> {
             replaced,
             extras,
             scene_name: p.scene_name.clone(),
+            media_info: p.media_info.clone(),
         })
     }
 }

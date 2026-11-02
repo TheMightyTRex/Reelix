@@ -206,6 +206,9 @@ pub struct HistoryEntry {
     pub dest_dir: String,
     #[serde(default)]
     pub final_dir: String,
+    /// Unix seconds the entry was added to history.
+    #[serde(default)]
+    pub history_time: i64,
 }
 
 fn size(lo: u64, hi: u64) -> u64 {
@@ -502,6 +505,7 @@ impl DownloadClient for NzbGet {
             let mut item = DownloadItem::new(h.nzb_id.to_string(), h.name, state);
             item.category = Some(h.category);
             item.total_bytes = size(h.file_size_lo, h.file_size_hi);
+            item.completed_at = (h.history_time > 0).then_some(h.history_time);
             item.failure = failure;
             item.message = message;
             let dir = if h.final_dir.is_empty() {
@@ -654,6 +658,7 @@ mod tests {
             unpack_status: unpack.into(),
             dest_dir: String::new(),
             final_dir: String::new(),
+            history_time: 0,
         }
     }
 

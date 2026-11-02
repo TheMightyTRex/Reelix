@@ -17,6 +17,10 @@ fn movie() -> MediaSummary {
         overview: Some("A keeper on a remote island begins to doubt the tides.".into()),
         episodes: vec![],
         content: None,
+        genres: vec!["Drama".into(), "Mystery".into(), "Thriller".into()],
+        rating: Some(7.4),
+        backdrop_url: Some("https://image.tmdb.org/t/p/w1280/lighthouse-backdrop.jpg".into()),
+        trailer_url: Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ".into()),
     }
 }
 
@@ -39,6 +43,10 @@ fn series() -> MediaSummary {
             air_date: Some("2024-03-14".into()),
         }],
         content: None,
+        genres: vec!["Drama".into()],
+        rating: Some(8.1),
+        backdrop_url: None,
+        trailer_url: None,
     }
 }
 
@@ -64,6 +72,10 @@ fn file() -> FileSummary {
         quality: Some("Bluray-1080p".into()),
         release_group: Some("NOCTURN".into()),
         scene_name: Some("The.Lighthouse.Keeper.2023.1080p.BluRay.x264-NOCTURN".into()),
+        video_codec: Some("h264".into()),
+        audio_codec: Some("DTS-HD MA 5.1".into()),
+        audio_languages: vec!["English".into()],
+        subtitle_languages: vec!["English".into(), "Spanish".into()],
     }
 }
 

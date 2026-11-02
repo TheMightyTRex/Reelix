@@ -18,7 +18,9 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use reelix_api_types::library::{LibrarySearchKind, SearchRequest};
-use reelix_api_types::pipeline::QueueRemoveQuery;
+use reelix_api_types::pipeline::{
+    QueueBulkFailure, QueueBulkRemove, QueueBulkRemoveResult, QueueRemoveQuery,
+};
 use reelix_books::{BooksService, ContentDownload};
 use reelix_core::bus::EventBus;
 use reelix_core::{ContentKind, DomainEvent, MediaKind, Protocol};
@@ -58,6 +60,74 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 const HEALTH_TTL: Duration = Duration::from_secs(24 * 3600);
 /// Finished tracked rows are kept this long.
 pub const PRUNE_AFTER_DAYS: i64 = 30;
+/// An unknown download that finished longer ago than this is client history (often
+/// imported by another tool sharing the category), not something for Reelix to import.
+const ADOPT_FINISHED_WITHIN_SECS: i64 = 24 * 3600;
+
+/// A trailer stored as a YouTube video key (or already a URL) as a watch URL.
+pub(crate) fn youtube_url(key: &str) -> String {
+    if key.starts_with("http") {
+        key.to_owned()
+    } else {
+        format!("https://www.youtube.com/watch?v={key}")
+    }
+}
+
+/// Codec and language facts of an imported file, for notifications.
+fn file_facts(info: Option<&reelix_import::mediainfo::MediaInfo>) -> FileSummary {
+    use reelix_import::naming::{audio_codec_name, dynamic_range_type, video_codec_name};
+    let Some(info) = info else {
+        return FileSummary::default();
+    };
+    let video = info.video_codec().map(|c| {
+        let hdr = dynamic_range_type(info.hdr());
+        let name = video_codec_name(c);
+        if hdr.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{name} {hdr}")
+        }
+    });
+    let audio = info.audio_codec().map(|c| {
+        let atmos = info.primary_audio().is_some_and(|a| a.is_atmos);
+        let name = audio_codec_name(c, atmos);
+        match info.audio_channels() {
+            Some(ch) => format!("{name} {ch:.1}"),
+            None => name.to_owned(),
+        }
+    });
+    let names = |langs: Vec<reelix_parser::Language>| {
+        let mut out: Vec<String> = Vec::new();
+        for l in langs
+            .into_iter()
+            .filter(|l| *l != reelix_parser::Language::Unknown)
+        {
+            let name = l.name().to_owned();
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+        out
+    };
+    FileSummary {
+        video_codec: video,
+        audio_codec: audio,
+        audio_languages: names(info.audio_languages()),
+        subtitle_languages: names(info.subtitle_languages()),
+        ..Default::default()
+    }
+}
+
+/// Whether an untracked download in a Reelix category should be tracked. Finished
+/// items are only taken when they finished recently, or the client doesn't say when.
+fn adoptable(item: &DownloadItem, now_secs: i64) -> bool {
+    match item.state {
+        DownloadState::Completed | DownloadState::Failed => item
+            .completed_at
+            .is_none_or(|at| now_secs - at <= ADOPT_FINISHED_WITHIN_SECS),
+        _ => true,
+    }
+}
 
 /// Live client state of one download (queue API).
 #[derive(Debug, Clone, PartialEq)]
@@ -305,8 +375,9 @@ impl ActivityService {
         };
 
         // New Reelix-category downloads.
+        let now_secs = now_ms() / 1000;
         for (h, items) in ok.values() {
-            for item in items {
+            for item in items.iter().filter(|i| adoptable(i, now_secs)) {
                 if tracked::by_download(&self.db, h.id, &item.download_id.0)
                     .await?
                     .is_none()
@@ -781,6 +852,7 @@ impl ActivityService {
             quality: Some(item.quality.quality.name().to_owned()),
             release_group: item.release_group.clone(),
             scene_name: item.scene_name.clone(),
+            ..file_facts(item.media_info.as_ref())
         };
         let replaced_files = item
             .replaced
@@ -830,7 +902,11 @@ impl ActivityService {
             s.tmdb_id = Some(i64::from(m.tmdb_id));
             s.imdb_id = m.imdb_id;
             s.poster_url = m.images.poster;
+            s.backdrop_url = m.images.backdrop;
             s.overview = m.overview;
+            s.genres = m.genres;
+            s.rating = Some(m.ratings.vote_average).filter(|r| *r > 0.0);
+            s.trailer_url = m.youtube_trailer.map(|k| youtube_url(&k));
             return s;
         }
         if let Some(id) = series_id
@@ -843,7 +919,10 @@ impl ActivityService {
             s.tvdb_id = m.tvdb_id.map(i64::from);
             s.imdb_id = m.imdb_id;
             s.poster_url = m.images.poster;
+            s.backdrop_url = m.images.backdrop;
             s.overview = m.overview;
+            s.genres = m.genres;
+            s.rating = Some(m.ratings.vote_average).filter(|r| *r > 0.0);
             if let Ok(eps) = self.library.importer().episodes(episode_ids).await {
                 s.episodes = eps
                     .into_iter()
@@ -1043,6 +1122,33 @@ impl ActivityService {
             .remove(&(t.download_client_id, t.download_id.clone()));
         self.emit("queue", "deleted", id);
         Ok(())
+    }
+
+    /// `DELETE /queue/bulk`: [`Self::remove`] for each id; one failure doesn't stop the rest.
+    pub async fn remove_many(&self, req: &QueueBulkRemove) -> Result<QueueBulkRemoveResult> {
+        const MAX: usize = 1000;
+        if req.ids.len() > MAX {
+            return Err(ActivityError::validation(format!(
+                "remove at most {MAX} queue items at once"
+            )));
+        }
+        let q = QueueRemoveQuery {
+            remove_from_client: req.remove_from_client,
+            blocklist: req.blocklist,
+            skip_redownload: req.skip_redownload,
+        };
+        let mut out = QueueBulkRemoveResult::default();
+        let mut seen = HashSet::new();
+        for &id in req.ids.iter().filter(|id| seen.insert(**id)) {
+            match self.remove(id, &q).await {
+                Ok(()) => out.removed += 1,
+                Err(e) => out.failed.push(QueueBulkFailure {
+                    id,
+                    error: e.to_string(),
+                }),
+            }
+        }
+        Ok(out)
     }
 
     /// `POST /queue/{id}/ignore`: stop tracking without importing.

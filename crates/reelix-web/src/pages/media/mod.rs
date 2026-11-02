@@ -14,7 +14,7 @@ use crate::components::request_status::{
     RequestStatusBadge, UserChip, availability_label, availability_tone, badge_for, item_badge, kind_label,
     media_href, refetch_on_change, request_status_label, request_status_tone,
 };
-use crate::components::{ErrorBox, Icon, Skeleton, StatusBadge};
+use crate::components::{ErrorBox, Icon, Modal, Skeleton, StatusBadge};
 use crate::format;
 use crate::state::AuthState;
 
@@ -75,6 +75,8 @@ fn Detail(d: MediaDetailDto, refetch: Callback<()>) -> impl IntoView {
     let auth = AuthState::expect();
     let request_open = RwSignal::new(false);
     let issue_open = RwSignal::new(false);
+    let trailer_open = RwSignal::new(false);
+    let trailer_embed = d.trailer_url.as_deref().and_then(youtube_embed_url);
     let detail_sig = Signal::stored(Some(d.clone()));
 
     let backdrop = tmdb_image(d.backdrop.as_deref(), "w1280");
@@ -309,11 +311,20 @@ fn Detail(d: MediaDetailDto, refetch: Callback<()>) -> impl IntoView {
                         </div>
                         <div class="md-actions">
                             {request_button}
-                            {d.trailer_url.clone().map(|u| view! {
-                                <a class="btn btn-secondary btn-lg" href=u target="_blank" rel="noopener noreferrer">
-                                    <Icon name="play" />
-                                    "Trailer"
-                                </a>
+                            {d.trailer_url.clone().map(|u| if trailer_embed.is_some() {
+                                view! {
+                                    <button type="button" class="btn btn-secondary btn-lg" on:click=move |_| trailer_open.set(true)>
+                                        <Icon name="play" />
+                                        "Trailer"
+                                    </button>
+                                }.into_any()
+                            } else {
+                                view! {
+                                    <a class="btn btn-secondary btn-lg" href=u target="_blank" rel="noopener noreferrer">
+                                        <Icon name="play" />
+                                        "Trailer"
+                                    </a>
+                                }.into_any()
                             })}
                             {can_issue.then(|| view! {
                                 <button type="button" class="btn btn-ghost btn-lg" on:click=move |_| issue_open.set(true)>
@@ -390,6 +401,65 @@ fn Detail(d: MediaDetailDto, refetch: Callback<()>) -> impl IntoView {
         </div>
         <RequestModal open=request_open detail=detail_sig on_requested=on_requested />
         <ReportIssueModal open=issue_open detail=detail_sig />
+        {trailer_embed.map(|src| {
+            let title = format!("{} trailer", d.title);
+            let watch = d.trailer_url.clone().unwrap_or_default();
+            view! {
+                // The player only exists while the dialog is open, so closing it stops playback.
+                <Modal open=trailer_open title=title.clone()>
+                    <iframe class="trailer-frame" src=src.clone() title=title.clone()
+                        allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                        allowfullscreen=true referrerpolicy="strict-origin-when-cross-origin"></iframe>
+                    <a class="trailer-link" href=watch.clone() target="_blank" rel="noopener noreferrer">"Watch on YouTube"</a>
+                </Modal>
+            }
+        })}
+    }
+}
+
+/// Privacy-enhanced embed URL for a YouTube watch / short link, or `None` for anything else.
+fn youtube_embed_url(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let (host, path) = rest.split_once('/')?;
+    let id = match host.trim_start_matches("www.").trim_start_matches("m.") {
+        "youtube.com" => path
+            .strip_prefix("watch?")?
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("v="))?,
+        "youtu.be" => path.split(['?', '#']).next()?,
+        _ => return None,
+    };
+    let valid = id.len() == 11
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-');
+    valid.then(|| format!("https://www.youtube-nocookie.com/embed/{id}?autoplay=1&rel=0"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::youtube_embed_url;
+
+    #[test]
+    fn trailer_embeds_only_valid_youtube_links() {
+        let embed = Some("https://www.youtube-nocookie.com/embed/vKQi3bBA1y8?autoplay=1&rel=0".to_owned());
+        assert_eq!(
+            youtube_embed_url("https://www.youtube.com/watch?v=vKQi3bBA1y8"),
+            embed
+        );
+        assert_eq!(
+            youtube_embed_url("https://youtube.com/watch?feature=x&v=vKQi3bBA1y8"),
+            embed
+        );
+        assert_eq!(youtube_embed_url("https://youtu.be/vKQi3bBA1y8?t=3"), embed);
+        assert_eq!(youtube_embed_url("https://vimeo.com/watch?v=vKQi3bBA1y8"), None);
+        assert_eq!(youtube_embed_url("https://www.youtube.com/watch?v=short"), None);
+        assert_eq!(
+            youtube_embed_url("https://www.youtube.com/watch?v=vKQi3bBA1y8\"><script>"),
+            None
+        );
     }
 }
 

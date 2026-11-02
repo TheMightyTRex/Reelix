@@ -9,11 +9,13 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
 use reelix_api_types::Permissions;
-use reelix_api_types::pipeline::{Paged, PendingReleaseDto, QueueItemDto};
+use reelix_api_types::pipeline::{
+    Paged, PendingReleaseDto, QueueBulkRemove, QueueBulkRemoveResult, QueueItemDto,
+};
 
 use crate::api;
 use crate::components::history_table::{FormatScore, MediaCell, ProtoBadge, media_title, quality_label};
-use crate::components::library_common::{Pager, bytes, on_entity_changed};
+use crate::components::library_common::{Pager, bytes, on_entity_changed, toggle_id};
 use crate::components::library_forms::{require_any, with_query};
 use crate::components::manual_import::{ManualImportModal, ManualImportSource};
 use crate::components::{
@@ -116,6 +118,33 @@ pub fn QueuePage() -> impl IntoView {
 
     let remove_target = RwSignal::new(None::<QueueItemDto>);
     let remove_open = RwSignal::new(false);
+    // Bulk removal: the selected ids, and whether the remove dialog is acting on them.
+    let selected = RwSignal::new(Vec::<i64>::new());
+    let bulk = RwSignal::new(false);
+    let page_ids = Signal::derive(move || {
+        queue
+            .get()
+            .and_then(Result::ok)
+            .map(|p| p.items.iter().map(|q| q.id).collect::<Vec<_>>())
+            .unwrap_or_default()
+    });
+    let all_selected = move || {
+        let ids = page_ids.get();
+        !ids.is_empty() && selected.with(|s| ids.iter().all(|id| s.contains(id)))
+    };
+    let toggle_all = move |on: bool| {
+        let ids = page_ids.get_untracked();
+        selected.update(|s| {
+            s.retain(|id| !ids.contains(id));
+            if on {
+                s.extend(ids);
+            }
+        });
+    };
+    Effect::new(move |_| {
+        page.track();
+        selected.set(Vec::new());
+    });
     let opts = RemoveOpts {
         from_client: RwSignal::new(true),
         blocklist: RwSignal::new(false),
@@ -131,9 +160,53 @@ pub fn QueuePage() -> impl IntoView {
         opts.blocklist.set(false);
         opts.skip_redownload.set(false);
         remove_target.set(Some(item));
+        bulk.set(false);
         remove_open.set(true);
     };
+    // Off by default: stale entries are often other tools' finished downloads.
+    let open_bulk_remove = move |_| {
+        opts.from_client.set(false);
+        opts.blocklist.set(false);
+        opts.skip_redownload.set(false);
+        remove_target.set(None);
+        bulk.set(true);
+        remove_open.set(true);
+    };
+    let do_bulk_remove = move || {
+        let blocklist = opts.blocklist.get_untracked();
+        let body = QueueBulkRemove {
+            ids: selected.get_untracked(),
+            remove_from_client: opts.from_client.get_untracked(),
+            blocklist,
+            skip_redownload: blocklist && opts.skip_redownload.get_untracked(),
+        };
+        remove_open.set(false);
+        spawn_local(async move {
+            match api::delete_with_body::<_, QueueBulkRemoveResult>("/queue/bulk", &body).await {
+                Ok(r) => {
+                    let plural = if r.removed == 1 { "" } else { "s" };
+                    if r.failed.is_empty() {
+                        toasts.success(format!("Removed {} item{plural}.", r.removed));
+                    } else {
+                        toasts.error(format!(
+                            "Removed {} item{plural}; {} could not be removed: {}",
+                            r.removed,
+                            r.failed.len(),
+                            r.failed[0].error
+                        ));
+                    }
+                    selected.update(|s| s.retain(|id| r.failed.iter().any(|f| f.id == *id)));
+                    queue.refetch();
+                }
+                Err(e) => toasts.error(format!("Could not remove: {e}")),
+            }
+        });
+    };
     let do_remove = move |_| {
+        if bulk.get_untracked() {
+            do_bulk_remove();
+            return;
+        }
         let Some(item) = remove_target.get_untracked() else {
             return;
         };
@@ -231,6 +304,12 @@ pub fn QueuePage() -> impl IntoView {
                     <caption class="visually-hidden">"Download queue"</caption>
                     <thead>
                         <tr>
+                            {manage.then(|| view! {
+                                <th scope="col" class="col-check">
+                                    <input type="checkbox" aria-label="Select all on this page" prop:checked=all_selected
+                                        on:change=move |e| toggle_all(event_target_checked(&e)) />
+                                </th>
+                            })}
                             <th scope="col">"Media"</th>
                             <th scope="col">"Release"</th>
                             <th scope="col">"Quality"</th>
@@ -257,8 +336,16 @@ pub fn QueuePage() -> impl IntoView {
                             let id = q.id;
                             let q_rm = q.clone();
                             let q_mi = q.clone();
+                            let is_sel = move || selected.with(|s| s.contains(&id));
+                            let select_label = format!("Select {}", q.title);
                             view! {
-                                <tr class:q-failed=failed>
+                                <tr class:q-failed=failed class:is-selected=is_sel>
+                                    {manage.then(|| view! {
+                                        <td class="col-check">
+                                            <input type="checkbox" aria-label=select_label prop:checked=is_sel
+                                                on:change=move |_| toggle_id(selected, id) />
+                                        </td>
+                                    })}
                                     <td><MediaCell media=q.media.clone() episodes=q.episodes.clone() /></td>
                                     <td class="release-title">
                                         <ProtoBadge protocol=q.protocol />
@@ -392,6 +479,10 @@ pub fn QueuePage() -> impl IntoView {
     };
 
     let remove_title = move || {
+        if bulk.get() {
+            let n = selected.with(Vec::len);
+            return format!("{n} selected item{}", if n == 1 { "" } else { "s" });
+        }
         remove_target
             .get()
             .map(|q| match &q.media {
@@ -403,6 +494,12 @@ pub fn QueuePage() -> impl IntoView {
 
     view! {
         <PageHeader title="Queue" subtitle="Live download progress across every client.">
+            {move || (manage && !selected.with(Vec::is_empty)).then(|| view! {
+                <button type="button" class="btn btn-danger" on:click=open_bulk_remove>
+                    <Icon name="trash" />
+                    {move || format!("Remove selected ({})", selected.with(Vec::len))}
+                </button>
+            })}
             {manage.then(|| view! {
                 <button type="button" class="btn btn-secondary" on:click=move |_| open_manual(None)>
                     <Icon name="folder" />

@@ -2255,6 +2255,16 @@ select.input {
    ========================================================================== */
 
 .modal:has(.modal-wide) { width: min(760px, 100%); }
+.modal:has(.trailer-frame) { width: min(960px, 100%); }
+.trailer-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: #000;
+}
+.trailer-link { display: inline-block; margin-top: var(--space-3); }
 .modal:has(.modal-xwide) { width: min(980px, 100%); }
 
 /* Toolbar above library lists */

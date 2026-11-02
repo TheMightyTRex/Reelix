@@ -64,7 +64,7 @@ pub fn schema() -> ProviderSchema {
     }
 }
 
-pub const FIELDS: [&str; 15] = [
+pub const FIELDS: [&str; 16] = [
     "hash",
     "name",
     "state",
@@ -80,6 +80,7 @@ pub const FIELDS: [&str; 15] = [
     "stop_ratio",
     "stop_at_ratio",
     "seeding_time",
+    "completed_time",
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +115,9 @@ pub struct DeTorrent {
     pub seeding_time: Option<f64>,
     #[serde(default)]
     pub label: Option<String>,
+    /// Unix seconds (Deluge 2); 0 until complete.
+    #[serde(default)]
+    pub completed_time: f64,
 }
 
 /// Deluge state → Reelix state.
@@ -136,6 +140,7 @@ pub fn to_item(t: DeTorrent, category: &str) -> DownloadItem {
     let state = map_state(&t.state, t.is_finished);
     let mut item = DownloadItem::new(t.hash.to_ascii_lowercase(), t.name.clone(), state);
     item.category = Some(category.to_owned());
+    item.completed_at = (t.completed_time > 0.0).then_some(t.completed_time as i64);
     item.total_bytes = t.total_size.max(0.0) as u64;
     item.remaining_bytes = (t.total_size - t.total_done).max(0.0) as u64;
     item.eta_secs = (t.eta > 0.0).then_some(t.eta as u64);

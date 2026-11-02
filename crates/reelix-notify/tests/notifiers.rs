@@ -33,9 +33,12 @@ async fn discord_posts_embed() {
         .and(body_partial_json(json!({
             "username": "Reelix",
             "embeds": [{
-                "title": "Grabbed: The Lighthouse Keeper (2023)",
+                "author": { "name": "Reelix" },
+                "title": "The Lighthouse Keeper (2023)",
+                "description": "Grabbed",
                 "url": "https://www.themoviedb.org/movie/912345",
-                "thumbnail": { "url": "https://image.tmdb.org/t/p/w500/lighthouse.jpg" }
+                "thumbnail": { "url": "https://image.tmdb.org/t/p/w500/lighthouse.jpg" },
+                "image": { "url": "https://image.tmdb.org/t/p/w1280/lighthouse-backdrop.jpg" }
             }]
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(fixture("discord_message.json")))

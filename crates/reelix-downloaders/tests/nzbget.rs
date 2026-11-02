@@ -111,6 +111,8 @@ async fn items_map_queue_and_history() {
     assert!((get("41").progress() - 0.5).abs() < 1e-9);
     assert_eq!(get("42").state, DownloadState::PostProcessing);
     assert_eq!(get("42").total_bytes, 1 << 32);
+    assert_eq!(get("41").completed_at, None);
+    assert!(items.iter().any(|i| i.completed_at == Some(1730150000)));
     let done = get("31");
     assert_eq!(done.state, DownloadState::Completed);
     assert_eq!(

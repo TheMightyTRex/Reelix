@@ -10,6 +10,8 @@ use reelix_core::{ContentKind, MediaKind, Protocol};
 use serde::{Deserialize, Serialize};
 
 /// Everything a notifier can be asked to deliver.
+// Events are built once per notification and dropped, so variant size doesn't matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum NotificationEvent {
@@ -112,6 +114,17 @@ pub struct MediaSummary {
     /// Set for books/music (then `kind` is a placeholder `Movie`); renderers prefer it when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<ContentKind>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    /// TMDB vote average, 0–10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+    /// Absolute backdrop (fanart) URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backdrop_url: Option<String>,
+    /// YouTube trailer URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trailer_url: Option<String>,
 }
 
 impl MediaSummary {
@@ -129,6 +142,10 @@ impl MediaSummary {
             overview: None,
             episodes: Vec::new(),
             content: None,
+            genres: Vec::new(),
+            rating: None,
+            backdrop_url: None,
+            trailer_url: None,
         }
     }
 
@@ -163,6 +180,38 @@ impl MediaSummary {
             ContentKind::Music => "Album",
             ContentKind::Movie | ContentKind::Series => return None,
         })
+    }
+
+    /// Labelled public links: TMDb, IMDb, Trakt, TVDB and the YouTube trailer (none for
+    /// books and music).
+    pub fn links(&self) -> Vec<(&'static str, String)> {
+        if self.content_label().is_some() {
+            return Vec::new();
+        }
+        let (tmdb_kind, trakt_kind) = match self.kind {
+            MediaKind::Movie => ("movie", "movie"),
+            MediaKind::Series => ("tv", "show"),
+        };
+        let mut out = Vec::new();
+        if let Some(id) = self.tmdb_id {
+            out.push(("TMDb", format!("https://www.themoviedb.org/{tmdb_kind}/{id}")));
+        }
+        if let Some(id) = &self.imdb_id {
+            out.push(("IMDb", format!("https://www.imdb.com/title/{id}/")));
+        }
+        if let Some(id) = self.tmdb_id {
+            out.push((
+                "Trakt",
+                format!("https://trakt.tv/search/tmdb/{id}?id_type={trakt_kind}"),
+            ));
+        }
+        if let Some(id) = self.tvdb_id {
+            out.push(("TVDB", format!("https://thetvdb.com/dereferrer/series/{id}")));
+        }
+        if let Some(url) = &self.trailer_url {
+            out.push(("YouTube", url.clone()));
+        }
+        out
     }
 
     /// A public link for the media (TMDB, falling back to IMDb; none for books and music).
@@ -241,6 +290,16 @@ pub struct FileSummary {
     pub release_group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_name: Option<String>,
+    /// Video codec and dynamic range, e.g. `h265 DV HDR10`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_codec: Option<String>,
+    /// Primary audio track, e.g. `EAC3 Atmos 5.1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_codec: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_languages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitle_languages: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -100,6 +100,9 @@ pub struct HistorySlot {
     pub fail_message: String,
     #[serde(default)]
     pub action_line: String,
+    /// Unix seconds the job left post-processing.
+    #[serde(default, deserialize_with = "lenient")]
+    pub completed: f64,
 }
 
 /// Number or numeric string → f64 (garbage → 0).
@@ -192,6 +195,7 @@ impl HistorySlot {
         let mut item = DownloadItem::new(self.nzo_id, self.name, state);
         item.category = self.category;
         item.total_bytes = self.bytes.max(0.0) as u64;
+        item.completed_at = (self.completed > 0.0).then_some(self.completed as i64);
         match state {
             DownloadState::Completed => {
                 item.output_path = self.storage.filter(|s| !s.is_empty());

@@ -326,6 +326,7 @@ impl ActivityService {
             quality: Some(first.quality.quality.name().to_owned()),
             release_group: first.release_group.clone(),
             scene_name: Some(t.title.clone()),
+            ..Default::default()
         };
         let replaced_files = replaced
             .iter()

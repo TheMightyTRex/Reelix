@@ -284,6 +284,8 @@ pub struct DownloadItem {
     pub can_move_files: bool,
     /// The client entry may be removed after import.
     pub can_be_removed: bool,
+    /// When the download finished (Unix seconds), if the client reports it.
+    pub completed_at: Option<i64>,
 }
 
 impl DownloadItem {
@@ -305,6 +307,7 @@ impl DownloadItem {
             seeding_time: None,
             can_move_files: false,
             can_be_removed: false,
+            completed_at: None,
         }
     }
 

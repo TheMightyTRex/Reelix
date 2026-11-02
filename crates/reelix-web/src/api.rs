@@ -180,6 +180,14 @@ pub async fn post_empty<T: DeserializeOwned>(path: &str) -> ApiResult<T> {
     finish(path, result).await
 }
 
+/// `DELETE {path}` with a JSON body, decoding the JSON response (bulk removals).
+pub async fn delete_with_body<B: Serialize, T: DeserializeOwned>(path: &str, body: &B) -> ApiResult<T> {
+    let req = with_headers(Request::delete(&api_url(path)))
+        .json(body)
+        .map_err(ApiError::decode)?;
+    finish(path, req.send().await).await
+}
+
 /// `DELETE {path}`.
 pub async fn delete(path: &str) -> ApiResult<()> {
     let result = with_headers(Request::delete(&api_url(path))).send().await;

@@ -198,6 +198,35 @@ pub struct QueueRemoveQuery {
     pub skip_redownload: bool,
 }
 
+/// `DELETE /queue/bulk`: remove several queue items with the same options.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct QueueBulkRemove {
+    pub ids: Vec<i64>,
+    #[serde(default)]
+    pub remove_from_client: bool,
+    #[serde(default)]
+    pub blocklist: bool,
+    #[serde(default)]
+    pub skip_redownload: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QueueBulkRemoveResult {
+    pub removed: u32,
+    /// Items that could not be removed; the others were.
+    pub failed: Vec<QueueBulkFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QueueBulkFailure {
+    pub id: i64,
+    pub error: String,
+}
+
 // ---------- History / blocklist / pending ----------
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

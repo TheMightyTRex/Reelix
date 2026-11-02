@@ -210,6 +210,7 @@ pub async fn load(db: &Db, kind: MediaKind, id: Option<i64>) -> sqlx::Result<Vec
                     quality: quality_name(&quality),
                     release_group: group,
                     scene_name: scene,
+                    ..Default::default()
                 },
                 episodes: eps_by_file.remove(&fid).unwrap_or_default(),
             },

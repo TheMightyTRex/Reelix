@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use reelix_api_types::library::{ImportMode, MediaManagementSettings};
-use reelix_api_types::pipeline::{HistoryQuery, ManualImportFile, ManualImportQuery, ManualImportRequest};
+use reelix_api_types::pipeline::{
+    HistoryQuery, ManualImportFile, ManualImportQuery, ManualImportRequest, QueueBulkRemove,
+};
 use reelix_core::bus::EventBus;
 use reelix_core::{DomainEvent, Protocol};
 use reelix_db::Db;
@@ -824,4 +826,95 @@ fn import_mode_defaults() {
         MediaManagementSettings::default().import_mode,
         ImportMode::HardlinkOrCopy
     );
+}
+
+/// Old client history in a shared category (e.g. imported by another tool long ago) is not
+/// adopted; recent completions and in-progress downloads still are.
+#[tokio::test]
+async fn monitor_ignores_long_finished_unknown_downloads() {
+    let e = env(Protocol::Usenet, false).await;
+    let now = reelix_db::now_ms() / 1000;
+    let finished = |id: &str, state: DownloadState, ago: Option<i64>| {
+        let mut i = item(
+            id,
+            &format!("Some.Release.{id}.2020.1080p.WEB-DL-GRP"),
+            state,
+            None,
+        );
+        i.completed_at = ago.map(|a| now - a);
+        i
+    };
+    e.client.items.lock().unwrap().extend([
+        finished("old_done", DownloadState::Completed, Some(3 * 24 * 3600)),
+        finished("old_failed", DownloadState::Failed, Some(40 * 24 * 3600)),
+        finished("new_done", DownloadState::Completed, Some(600)),
+        finished("no_time", DownloadState::Completed, None),
+        finished("active", DownloadState::Downloading, None),
+    ]);
+    e.svc.poll().await.unwrap();
+    let mut ids: Vec<String> = e
+        .svc
+        .queue(None, None)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|q| q.download_id)
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["active", "new_done", "no_time"]);
+    // Still ignored on later polls.
+    e.svc.poll().await.unwrap();
+    assert_eq!(e.svc.queue(None, None).await.unwrap().total, 3);
+}
+
+#[tokio::test]
+async fn bulk_remove_reports_each_failure_and_removes_the_rest() {
+    let e = env(Protocol::Torrent, false).await;
+    e.client.items.lock().unwrap().extend([
+        item(
+            "h1",
+            "First.Thing.2020.1080p.WEB-DL-GRP",
+            DownloadState::Downloading,
+            None,
+        ),
+        item(
+            "h2",
+            "Second.Thing.2020.1080p.WEB-DL-GRP",
+            DownloadState::Downloading,
+            None,
+        ),
+    ]);
+    e.svc.poll().await.unwrap();
+    let ids: Vec<i64> = e
+        .svc
+        .queue(None, None)
+        .await
+        .unwrap()
+        .items
+        .iter()
+        .map(|q| q.id)
+        .collect();
+    assert_eq!(ids.len(), 2);
+    let result = e
+        .svc
+        .remove_many(&QueueBulkRemove {
+            ids: vec![ids[0], ids[1], ids[0], 999_999],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.removed, 2);
+    assert_eq!(result.failed.len(), 1);
+    assert_eq!(result.failed[0].id, 999_999);
+    assert_eq!(e.svc.queue(None, None).await.unwrap().total, 0);
+    // Removed without touching the client, the rows stay and are not adopted again.
+    assert_eq!(e.client.items.lock().unwrap().len(), 2);
+    e.svc.poll().await.unwrap();
+    assert_eq!(e.svc.queue(None, None).await.unwrap().total, 0);
+    let too_many = QueueBulkRemove {
+        ids: (0..1001).collect(),
+        ..Default::default()
+    };
+    assert!(e.svc.remove_many(&too_many).await.is_err());
 }

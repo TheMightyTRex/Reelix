@@ -5,7 +5,10 @@ use crate::{
     process::{convert, safe_name},
 };
 use anyhow::{Context, Result, bail};
-use librespot_core::{Session, SessionConfig, SpotifyUri, authentication::Credentials, cdn_url::CdnUrl};
+use librespot_core::{
+    FileId, Session, SessionConfig, SpotifyId, SpotifyUri, audio_key::AudioKey, authentication::Credentials,
+    cdn_url::CdnUrl, error::ErrorKind,
+};
 use librespot_metadata::{Album, Metadata, Track, audio::file::AudioFileFormat, playlist::Playlist};
 use librespot_oauth::OAuthClientBuilder;
 use reelix_api_types::direct::*;
@@ -151,6 +154,75 @@ async fn tracks(session: &Session, r: &DirectRequest) -> Result<(String, Vec<Spo
     }
 }
 
+/// Asks for a file's decryption key, retrying when the reply is late (librespot gives up
+/// after 1.5 s) or the channel dropped. A refusal (`Unavailable`) returns at once.
+async fn request_key(
+    session: &Session,
+    id: SpotifyId,
+    file: FileId,
+) -> Result<AudioKey, librespot_core::Error> {
+    let mut attempt = 0;
+    loop {
+        match session.audio_key().request(id, file).await {
+            Err(e) if e.kind == ErrorKind::Aborted && attempt < 2 => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// The audio file and key for `track`, falling back to Spotify's alternative (relinked)
+/// tracks when the track has no file at the selected quality or its key is refused,
+/// as Spotify's own clients do for tracks not licensed in the account's country.
+async fn audio_source(
+    session: &Session,
+    track: &Track,
+    qualities: &[AudioFileFormat],
+    product: Option<&str>,
+) -> Result<(FileId, AudioKey)> {
+    let mut last_error = None;
+    let mut has_file = false;
+    for candidate in std::iter::once(None).chain(track.alternatives.iter().take(5).map(Some)) {
+        let fetched;
+        let t = match candidate {
+            None => track,
+            Some(uri) => match Track::get(session, uri).await {
+                Ok(t) => {
+                    fetched = t;
+                    &fetched
+                }
+                Err(_) => continue,
+            },
+        };
+        let Some(file) = qualities.iter().find_map(|f| t.files.get(f)).copied() else {
+            continue;
+        };
+        has_file = true;
+        let SpotifyUri::Track { id } = &t.id else {
+            continue;
+        };
+        match request_key(session, *id, file).await {
+            Ok(key) => return Ok((file, key)),
+            Err(e) => last_error = Some(e),
+        }
+    }
+    if !has_file {
+        bail!("No audio file at the selected quality is available for this track/account");
+    }
+    match (last_error.map(|e| e.kind), product) {
+        (Some(ErrorKind::Unavailable), Some(p)) if p != "premium" => bail!(
+            "Spotify refused this track's audio key. Spotify downloads need a Premium account, and this account is {p}"
+        ),
+        (Some(ErrorKind::Unavailable), _) => bail!(
+            "Spotify refused this track's audio key; it may not be available in your account's country ({})",
+            session.country()
+        ),
+        _ => bail!("Spotify did not answer the audio key request in time; retry the job"),
+    }
+}
+
 pub(crate) fn quality_order(quality: &str, premium: bool) -> Result<Vec<AudioFileFormat>> {
     use AudioFileFormat::*;
     match quality {
@@ -204,16 +276,17 @@ impl DirectService {
             bail!("Spotify collection exceeds the 10,000-track limit");
         }
         // Product attributes arrive asynchronously after the login welcome packet.
-        let premium = tokio::time::timeout(Duration::from_secs(5), async {
+        let product = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(product) = session.0.get_user_attribute("type") {
-                    break product == "premium";
+                    break product;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await
-        .unwrap_or(false);
+        .ok();
+        let premium = product.as_deref() == Some("premium");
         let qualities = quality_order(job.request.spotify_quality.as_deref().unwrap_or("auto"), premium)?;
         let total = tracks.len();
         for (index, uri) in tracks.into_iter().enumerate() {
@@ -225,11 +298,7 @@ impl DirectService {
             let track = Track::get(&session.0, &uri)
                 .await
                 .map_err(|_| anyhow::anyhow!("Spotify track metadata is unavailable"))?;
-            let file_id = qualities
-                .iter()
-                .find_map(|f| track.files.get(f))
-                .copied()
-                .context("No audio file at the selected quality is available for this track/account")?;
+            let (file_id, key) = audio_source(&session.0, &track, &qualities, product.as_deref()).await?;
             let SpotifyUri::Track { id } = track.id else {
                 bail!("Unexpected Spotify track ID");
             };
@@ -258,12 +327,6 @@ impl DirectService {
             if tokio::fs::try_exists(&output).await? {
                 continue;
             }
-            let key = session
-                .0
-                .audio_key()
-                .request(id, file_id)
-                .await
-                .map_err(|_| anyhow::anyhow!("Spotify did not authorize this track's audio key"))?;
             let cdn = CdnUrl::new(file_id)
                 .resolve_audio(&session.0)
                 .await

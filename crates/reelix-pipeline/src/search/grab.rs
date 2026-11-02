@@ -123,7 +123,11 @@ impl GrabTarget {
             s.tmdb_id = Some(i64::from(m.tmdb_id));
             s.imdb_id = m.imdb_id.clone();
             s.poster_url = m.images.poster.clone();
+            s.backdrop_url = m.images.backdrop.clone();
             s.overview = m.overview.clone();
+            s.genres = m.genres.clone();
+            s.rating = Some(m.ratings.vote_average).filter(|r| *r > 0.0);
+            s.trailer_url = m.youtube_trailer.as_deref().map(crate::monitor::youtube_url);
             return Some(s);
         }
         let series = self.series.as_ref()?;
@@ -134,7 +138,10 @@ impl GrabTarget {
         s.tvdb_id = series.tvdb_id.map(i64::from);
         s.imdb_id = series.imdb_id.clone();
         s.poster_url = series.images.poster.clone();
+        s.backdrop_url = series.images.backdrop.clone();
         s.overview = series.overview.clone();
+        s.genres = series.genres.clone();
+        s.rating = Some(series.ratings.vote_average).filter(|r| *r > 0.0);
         s.episodes = self
             .episodes
             .iter()
