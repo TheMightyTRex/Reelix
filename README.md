@@ -85,7 +85,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 
 ## Installation
 
-Release archives and `SHA256SUMS` carry signed build provenance; check a download with `gh attestation verify <file> --repo mvanhare/Reelix`.
+Release archives and `SHA256SUMS` carry signed build provenance; check a download with `gh attestation verify <file> --repo demonzoned/Reelix`.
 
 ### Docker
 

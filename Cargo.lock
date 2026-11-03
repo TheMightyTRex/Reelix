@@ -3990,7 +3990,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-api"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4038,7 +4038,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-api-types"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "reelix-core",
@@ -4051,7 +4051,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-books"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4083,7 +4083,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",
@@ -4095,7 +4095,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-db"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-decision"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "reelix-core",
@@ -4128,7 +4128,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-direct"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -4159,7 +4159,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-downloaders"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4181,7 +4181,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-import"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "filetime",
@@ -4199,7 +4199,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-indexers"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4228,7 +4228,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-jobs"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4242,7 +4242,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-library"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4267,7 +4267,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-lists"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4284,7 +4284,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-mediaserver"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4301,7 +4301,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-metadata"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4317,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-migrate"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-music"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4376,7 +4376,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-notify"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4395,7 +4395,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-parser"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "proptest",
@@ -4407,7 +4407,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-pipeline"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-providers"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4474,7 +4474,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-requests"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4501,7 +4501,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4553,7 +4553,7 @@ dependencies = [
 
 [[package]]
 name = "reelix-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
