@@ -35,7 +35,7 @@ jobs:
       publish: ${{ steps.version.outputs.publish }}
       image: ${{ steps.version.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - id: version
@@ -70,7 +70,7 @@ jobs:
         run: |
           scripts/release-notes.sh "${{ steps.version.outputs.version }}" > release-notes.md
           cat release-notes.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-notes
           path: release-notes.md
@@ -80,20 +80,20 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: web
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2
         with:
           tool: trunk
       - name: trunk build
         working-directory: crates/reelix-web
         run: trunk build --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: web
           path: crates/reelix-web/dist
@@ -110,17 +110,17 @@ jobs:
           - arch: aarch64
             docker: arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.arch }}-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: linux-${{ matrix.arch }}
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2
         with:
           tool: cargo-zigbuild
       # Linking against glibc 2.17 makes the binary run on almost any non-musl distribution.
@@ -132,7 +132,7 @@ jobs:
           max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
           echo "Highest glibc symbol: $max"
           [ "$max" = GLIBC_2.17 ] || { echo "::error::Binary needs $max, expected GLIBC_2.17"; exit 1; }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bin-linux-${{ matrix.docker }}
           path: target/${{ matrix.arch }}-unknown-linux-gnu/release/reelix
@@ -146,9 +146,9 @@ jobs:
       # Link the C runtime statically so users don't need the Visual C++ redistributable.
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: windows
       - name: build
@@ -156,7 +156,7 @@ jobs:
       - name: smoke test
         shell: bash
         run: ./target/release/reelix.exe --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bin-windows-x86_64
           path: target/release/reelix.exe
@@ -166,31 +166,36 @@ jobs:
     name: package
     needs: [prepare, web, linux, windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Signed build provenance for the archives (verify with `gh attestation verify`).
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: dl1
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         continue-on-error: true
         with:
           name: web
           path: artifacts/web
       - name: retry download (web)
         if: steps.dl1.outcome == 'failure'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: web
           path: artifacts/web
       - id: dl2
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         continue-on-error: true
         with:
           pattern: bin-*
           path: artifacts
       - name: retry download (bin-*)
         if: steps.dl2.outcome == 'failure'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: bin-*
           path: artifacts
@@ -216,7 +221,7 @@ jobs:
       # Syft reads the workspace Cargo.lock (copied alone so the fuzz crate's lockfile stays out).
       - name: prepare SBOM input
         run: mkdir sbom-src && cp Cargo.toml Cargo.lock sbom-src/
-      - uses: anchore/sbom-action@v0
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: sbom-src
           format: spdx-json
@@ -229,7 +234,16 @@ jobs:
           sha256sum "reelix-$VERSION-sbom.spdx.json" > "reelix-$VERSION-sbom.spdx.json.sha256"
           cat *.sha256 | sort -k2 > SHA256SUMS
           cat SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - name: attest build provenance
+        if: needs.prepare.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.spdx.json
+            dist/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist
@@ -246,28 +260,28 @@ jobs:
       IMAGE: ${{ needs.prepare.outputs.image }}
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: dl3
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         continue-on-error: true
         with:
           name: web
           path: artifacts/web
       - name: retry download (web)
         if: steps.dl3.outcome == 'failure'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: web
           path: artifacts/web
       - id: dl4
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         continue-on-error: true
         with:
           pattern: bin-linux-*
           path: artifacts
       - name: retry download (bin-linux-*)
         if: steps.dl4.outcome == 'failure'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: bin-linux-*
           path: artifacts
@@ -278,10 +292,10 @@ jobs:
           cp artifacts/bin-linux-arm64/reelix context/bin/arm64/
           cp -R artifacts/web context/web
           cp docker/entrypoint.sh context/docker/
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.IMAGE }}
           flavor: latest=false
@@ -290,7 +304,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=v${{ env.VERSION }},enable=${{ needs.prepare.outputs.stable == 'true' }}
             type=raw,value=latest,enable=${{ needs.prepare.outputs.stable == 'true' }}
       - name: smoke test (amd64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: context
           file: docker/Dockerfile.release
@@ -310,13 +324,13 @@ jobs:
           docker logs reelix
           docker rm -f reelix
       - if: needs.prepare.outputs.publish == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: context
           file: docker/Dockerfile.release
@@ -337,26 +351,26 @@ jobs:
       contents: write
     steps:
       - id: dl5
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         continue-on-error: true
         with:
           name: release-notes
           path: artifacts/release-notes
       - name: retry download (release-notes)
         if: steps.dl5.outcome == 'failure'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: release-notes
           path: artifacts/release-notes
       - id: dl6
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         continue-on-error: true
         with:
           name: dist
           path: artifacts/dist
       - name: retry download (dist)
         if: steps.dl6.outcome == 'failure'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: dist
           path: artifacts/dist
@@ -374,7 +388,7 @@ jobs:
             echo "docker pull $IMAGE:$VERSION"
             echo '```'
           } > notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: Reelix ${{ needs.prepare.outputs.version }}
           body_path: notes.md

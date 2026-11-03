@@ -366,7 +366,7 @@ fn release_row(
             <td><ProtoBadge protocol=r.protocol /></td>
             <td title=r.publish_date.map(crate::format::datetime).unwrap_or_default()>{age_label(r.age_minutes)}</td>
             <td class="release-title">
-                {match r.info_url.clone() {
+                {match r.info_url.as_deref().and_then(crate::format::http_url) {
                     Some(u) => view! { <a href=u target="_blank" rel="noopener noreferrer">{r.title.clone()}</a> }.into_any(),
                     None => view! { <span>{r.title.clone()}</span> }.into_any(),
                 }}

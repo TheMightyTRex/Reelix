@@ -311,7 +311,7 @@ fn Detail(d: MediaDetailDto, refetch: Callback<()>) -> impl IntoView {
                         </div>
                         <div class="md-actions">
                             {request_button}
-                            {d.trailer_url.clone().map(|u| if trailer_embed.is_some() {
+                            {d.trailer_url.as_deref().and_then(format::http_url).map(|u| if trailer_embed.is_some() {
                                 view! {
                                     <button type="button" class="btn btn-secondary btn-lg" on:click=move |_| trailer_open.set(true)>
                                         <Icon name="play" />
@@ -386,7 +386,7 @@ fn Detail(d: MediaDetailDto, refetch: Callback<()>) -> impl IntoView {
                                 {imdb_href.map(|h| view! {
                                     <a href=h target="_blank" rel="noopener noreferrer" class="card-link">"IMDb" <Icon name="external" /></a>
                                 })}
-                                {d.homepage.clone().filter(|h| h.starts_with("http")).map(|h| view! {
+                                {d.homepage.as_deref().and_then(format::http_url).map(|h| view! {
                                     <a href=h target="_blank" rel="noopener noreferrer" class="card-link">"Website" <Icon name="external" /></a>
                                 })}
                             </div>
@@ -403,7 +403,7 @@ fn Detail(d: MediaDetailDto, refetch: Callback<()>) -> impl IntoView {
         <ReportIssueModal open=issue_open detail=detail_sig />
         {trailer_embed.map(|src| {
             let title = format!("{} trailer", d.title);
-            let watch = d.trailer_url.clone().unwrap_or_default();
+            let watch = d.trailer_url.as_deref().and_then(format::http_url).unwrap_or_default();
             view! {
                 // The player only exists while the dialog is open, so closing it stops playback.
                 <Modal open=trailer_open title=title.clone()>

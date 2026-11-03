@@ -33,7 +33,8 @@ impl SecretBox {
         }
     }
 
-    /// Reads a 32-byte key (base64 text file); creates it with 0600 perms on unix if missing.
+    /// Reads a 32-byte key (base64 text file); creates it owner-only (see [`restrict_to_owner`])
+    /// if missing.
     pub fn load_or_create(path: &Path) -> Result<Self> {
         match std::fs::read_to_string(path) {
             Ok(text) => {
@@ -64,6 +65,7 @@ impl SecretBox {
                     opts.mode(0o600);
                 }
                 let mut file = opts.open(path)?;
+                restrict_to_owner(path);
                 file.write_all(B64.encode(key).as_bytes())?;
                 file.write_all(b"\n")?;
                 file.sync_all()?;
@@ -103,6 +105,56 @@ impl SecretBox {
     }
 }
 
+/// Creates (or truncates) `path` for writing, readable by the current user only.
+pub fn create_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let file = opts.open(path)?;
+    restrict_to_owner(path);
+    Ok(file)
+}
+
+/// Limits an existing file or directory to the current user: mode 0600 / 0700 on unix, an
+/// owner-only ACL (inheritance removed) via `icacls` on Windows. Failures are logged only.
+pub fn restrict_to_owner(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if path.is_dir() { 0o700 } else { 0o600 };
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)) {
+            tracing::warn!(path = %path.display(), error = %e, "could not restrict permissions");
+        }
+    }
+    #[cfg(windows)]
+    {
+        let Some(user) = std::env::var_os("USERNAME").filter(|u| !u.is_empty()) else {
+            tracing::warn!(path = %path.display(), "could not restrict permissions: USERNAME is not set");
+            return;
+        };
+        let mut grant = user;
+        grant.push(if path.is_dir() { ":(OI)(CI)F" } else { ":F" });
+        let out = std::process::Command::new("icacls")
+            .arg(path)
+            .args(["/inheritance:r", "/grant:r"])
+            .arg(grant)
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => tracing::warn!(
+                path = %path.display(),
+                stderr = %String::from_utf8_lossy(&o.stderr).trim(),
+                "icacls could not restrict permissions"
+            ),
+            Err(e) => tracing::warn!(path = %path.display(), error = %e, "could not run icacls"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +183,22 @@ mod tests {
         ));
         assert!(matches!(sb.decrypt("not base64!"), Err(DbError::Crypto(_))));
         assert!(matches!(sb.decrypt("AAAA"), Err(DbError::Crypto(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_files_and_dirs_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        std::fs::write(&file, "old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        create_private_file(&file).unwrap().write_all(b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        restrict_to_owner(dir.path());
+        assert_eq!(mode(dir.path()), 0o700);
     }
 
     #[test]

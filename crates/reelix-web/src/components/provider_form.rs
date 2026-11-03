@@ -402,7 +402,7 @@ pub fn ProviderForm(
     view! {
         <form class="form provider-form" on:submit=save>
             {schema.schema.description.clone().map(|d| view! { <p class="field-hint">{d}</p> })}
-            {schema.schema.info_url.clone().map(|u| view! {
+            {schema.schema.info_url.as_deref().and_then(crate::format::http_url).map(|u| view! {
                 <p class="field-hint"><a href=u target="_blank" rel="noopener noreferrer">"More info ↗"</a></p>
             })}
             <div class="field-row">

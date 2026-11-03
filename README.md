@@ -85,6 +85,8 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 
 ## Installation
 
+Release archives and `SHA256SUMS` carry signed build provenance; check a download with `gh attestation verify <file> --repo mvanhare/Reelix`.
+
 ### Docker
 
 ```yaml
@@ -148,6 +150,8 @@ cargo build --release -p reelix-server
 Run the binary from the repository root so it finds the web UI in `crates/reelix-web/dist`, or point `REELIX_WEB_DIR` at the built UI.
 
 ### First run
+
+> **Warning:** don't expose the port to the internet yet. Complete setup before exposing Reelix publicly (port forwarding, reverse proxy or tunnel).
 
 Open <http://localhost:7700>. The setup wizard walks you through:
 

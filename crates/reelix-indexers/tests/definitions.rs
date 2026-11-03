@@ -42,6 +42,24 @@ fn loads_definitions_and_builds_schemas() {
 }
 
 #[test]
+fn text_credentials_are_secret_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let yml = "id: creds\nname: Creds\nlinks: [https://creds.invalid/]\nsettings:\n  - { name: username, type: text }\n  - { name: cookie, type: text }\n  - { name: apikey }\n  - { name: passkey, type: text }\n  - { name: note, type: text }\nsearch:\n  path: s\n  rows: {selector: tr}\n  fields:\n    title: {selector: a}\n    download: {selector: a, attribute: href}\n";
+    std::fs::write(dir.path().join("creds.yml"), yml).unwrap();
+    let (s, errors) = DefinitionStore::load_dir(dir.path()).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    let schemas = all_schemas(&s);
+    let creds = schemas
+        .iter()
+        .find(|s| s.implementation == "definition:creds")
+        .unwrap();
+    assert_eq!(
+        creds.secret_fields().collect::<Vec<_>>(),
+        ["cookie", "apikey", "passkey"]
+    );
+}
+
+#[test]
 fn broken_definitions_are_reported_not_fatal() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("good.yml"), fixture("definitions/kestrel.yml")).unwrap();

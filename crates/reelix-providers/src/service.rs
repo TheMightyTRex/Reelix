@@ -199,6 +199,7 @@ impl ProviderService {
             syncing: std::sync::atomic::AtomicBool::new(false),
         });
         svc.load_definitions().await;
+        svc.seal_plaintext_secrets().await?;
         svc.reload_settings().await?;
         svc.reload_tags_and_mappings().await?;
         for kind in ProviderKind::ALL {
@@ -236,12 +237,46 @@ impl ProviderService {
     /// Newznab instances are kept untouched).
     pub async fn reload_definitions(&self) -> Result<()> {
         self.load_definitions().await;
+        self.seal_plaintext_secrets().await?;
         self.reload_kind_with(ProviderKind::Indexer, &|row| {
             row.implementation
                 .starts_with(reelix_indexers::definition::IMPLEMENTATION_PREFIX)
         })
         .await?;
         self.publish("indexer_definitions", "reloaded", 0);
+        Ok(())
+    }
+
+    /// Encrypts secret fields still stored in plain text, e.g. definition credentials that
+    /// were declared `type: text` before they were treated as secrets. Idempotent.
+    async fn seal_plaintext_secrets(&self) -> Result<()> {
+        let defs = self.defs();
+        for row in repo::list(&self.db, None).await? {
+            let Some(found) = schemas::find(row.kind, &row.implementation, &defs) else {
+                continue;
+            };
+            let plain: Vec<&str> = found
+                .schema
+                .secret_fields()
+                .filter(|f| {
+                    row.settings
+                        .get(*f)
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| !s.is_empty() && !s.starts_with(crypto::ENC_PREFIX))
+                })
+                .collect();
+            if plain.is_empty() {
+                continue;
+            }
+            let sealed = crypto::encrypt_fields(&self.secrets, &row.settings, plain.iter().copied())?;
+            repo::update_settings(&self.db, row.id, &sealed).await?;
+            tracing::info!(
+                kind = row.kind.as_str(),
+                id = row.id,
+                fields = ?plain,
+                "encrypted provider secrets stored in plain text"
+            );
+        }
         Ok(())
     }
 
