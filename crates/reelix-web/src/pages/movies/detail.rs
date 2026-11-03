@@ -224,7 +224,7 @@ fn MovieDetail(id: i64) -> impl IntoView {
                                 <Icon name="trash" />
                                 "Delete"
                             </button>
-                            {m.homepage.clone().map(|h| view! {
+                            {m.homepage.as_deref().and_then(crate::format::http_url).map(|h| view! {
                                 <a class="btn btn-ghost" href=h target="_blank" rel="noopener noreferrer"><Icon name="external" />"Website"</a>
                             })}
                             {m.imdb_id.clone().map(|i| view! {

@@ -9,8 +9,8 @@ yanked = "deny"
 unmaintained = "workspace"
 # Each entry has no compatible fix upstream; recheck when librespot or openidconnect update.
 ignore = [
-    # rustls 0.22, rustls-webpki 0.102 and quick-xml 0.38 come only from librespot-core 0.8
-    # (hyper-proxy2 and its XML parsing). Reelix never configures a librespot proxy.
+    # rustls 0.22 and rustls-webpki 0.102 come only from librespot-core 0.8's hyper-proxy2
+    # connector. Reelix never configures a librespot proxy.
     { id = "RUSTSEC-2026-0346", reason = "rustls 0.22 via librespot's unused proxy connector" },
     { id = "RUSTSEC-2026-0349", reason = "rustls 0.22 via librespot's unused proxy connector" },
     { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
@@ -18,8 +18,11 @@ ignore = [
     { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
     { id = "RUSTSEC-2026-0382", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38 is pinned by librespot-core; Reelix's own quick-xml is fixed" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38 is pinned by librespot-core; Reelix's own quick-xml is fixed" },
+    # quick-xml 0.38 is pinned by librespot-core 0.8, whose session.rs parses the ProductInfo
+    # packet sent by Spotify over the authenticated session (plain Reader, no attributes() or
+    # NsReader), besides hyper-proxy2. Reelix's own quick-xml is a fixed version.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38 via librespot-core: plain Reader on Spotify's ProductInfo packet over the authenticated session" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38 via librespot-core: plain Reader on Spotify's ProductInfo packet over the authenticated session" },
     # No fixed rsa release exists. The attack needs private-key decryption; librespot and
     # openidconnect only verify signatures with public keys.
     { id = "RUSTSEC-2023-0071", reason = "rsa is used only for public-key signature verification" },

@@ -158,6 +158,7 @@ pub fn schema(d: &Definition) -> ProviderSchema {
         };
         let kind = match s.kind.as_str() {
             "password" => FieldKind::Secret,
+            "text" if is_secret(&s.name) => FieldKind::Secret,
             "checkbox" => FieldKind::Bool,
             "select" => FieldKind::Select { options: options() },
             "multi-select" => FieldKind::MultiSelect { options: options() },
@@ -182,7 +183,12 @@ pub fn schema(d: &Definition) -> ProviderSchema {
 }
 
 fn is_credential(name: &str) -> bool {
-    matches!(name, "username" | "password" | "cookie" | "apikey" | "passkey")
+    name == "username" || is_secret(name)
+}
+
+/// Credentials stored encrypted and masked even when declared as `type: text`.
+fn is_secret(name: &str) -> bool {
+    matches!(name, "password" | "cookie" | "apikey" | "passkey")
 }
 
 pub(crate) fn yaml_to_json(v: &yaml_serde::Value) -> serde_json::Value {

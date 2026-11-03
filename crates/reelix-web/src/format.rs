@@ -145,3 +145,35 @@ pub fn humanize_kind(kind: &str) -> String {
         None => String::new(),
     }
 }
+
+/// `u` if it is an absolute `http(s)` URL; remote values (indexer info links, homepages) go
+/// through this before becoming an `href`, so they can't be `javascript:` or `data:` links.
+pub fn http_url(u: &str) -> Option<String> {
+    let u = u.trim();
+    let scheme = u.split_once("://")?.0;
+    (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")).then(|| u.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::http_url;
+
+    #[test]
+    fn only_http_links_pass() {
+        assert_eq!(
+            http_url(" https://x.invalid/a ").as_deref(),
+            Some("https://x.invalid/a")
+        );
+        assert!(http_url("HTTP://x.invalid").is_some());
+        for bad in [
+            "javascript:alert(1)",
+            "javascript://%0aalert(1)",
+            "data:text/html,x",
+            "/relative",
+            "httpx://x",
+            "",
+        ] {
+            assert!(http_url(bad).is_none(), "{bad}");
+        }
+    }
+}

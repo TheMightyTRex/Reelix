@@ -438,3 +438,57 @@ async fn settings_validation() {
     assert!(!saved.enabled && saved.auto_update_hours == 48 && saved.last_error.is_none());
     assert!(!e.svc.definitions_sync_due(), "auto-update disabled");
 }
+
+#[tokio::test]
+async fn plaintext_definition_credentials_are_sealed_on_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let custom = dir.path().join("definitions/custom");
+    std::fs::create_dir_all(&custom).unwrap();
+    let yml = def_yaml("cookiejar", "Cookie Jar").replace(
+        "caps:",
+        "settings:\n  - { name: cookie, type: text, label: Cookie }\ncaps:",
+    );
+    std::fs::write(custom.join("cookiejar.yml"), yml).unwrap();
+    let db = Db::in_memory().await.unwrap();
+    // A row written before `cookie` was treated as a secret: stored in plain text.
+    sqlx::query(
+        "INSERT INTO providers (kind, implementation, name, enabled, priority, tags, settings, created_at, updated_at)
+         VALUES ('indexer', 'definition:cookiejar', 'Jar', 0, 25, '[]', ?, 0, 0)",
+    )
+    .bind(json!({"cookie": "session=abc"}).to_string())
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let stored = || async {
+        let raw: String = sqlx::query_scalar("SELECT settings FROM providers")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        serde_json::from_str::<serde_json::Value>(&raw).unwrap()["cookie"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let svc = ProviderService::new(
+        db.clone(),
+        SecretBox::from_key([5; 32]),
+        EventBus::default(),
+        reqwest::Client::new(),
+        ProviderOptions::new(dir.path()),
+    )
+    .await
+    .unwrap();
+    let sealed = stored().await;
+    assert!(sealed.starts_with("enc:"), "{sealed}");
+
+    let row = &svc.list(ProviderKind::Indexer).await.unwrap()[0];
+    assert_eq!(row.settings["cookie"], "session=abc");
+    assert_eq!(
+        svc.to_dto(row).settings["cookie"],
+        reelix_api_types::providers::SECRET_MASK
+    );
+
+    // Idempotent: an already sealed value is left untouched.
+    svc.reload_definitions().await.unwrap();
+    assert_eq!(stored().await, sealed);
+}

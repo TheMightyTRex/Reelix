@@ -130,6 +130,16 @@ pub(crate) async fn update(db: &Db, id: i64, w: &WriteProvider<'_>) -> Result<bo
     Ok(res.rows_affected() > 0)
 }
 
+/// Rewrites only the stored settings (used to seal secrets in place; `updated_at` is kept).
+pub(crate) async fn update_settings(db: &Db, id: i64, settings: &Map<String, Value>) -> Result<()> {
+    sqlx::query("UPDATE providers SET settings = ? WHERE id = ?")
+        .bind(serde_json::to_string(settings)?)
+        .bind(id)
+        .execute(db.pool())
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn delete(db: &Db, kind: ProviderKind, id: i64) -> Result<bool> {
     let res = sqlx::query("DELETE FROM providers WHERE id = ? AND kind = ?")
         .bind(id)

@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use reelix_api_types::system::{BackupDto, BackupKind, PendingRestoreDto};
+use reelix_db::secrets::{create_private_file, restrict_to_owner};
 use serde::{Deserialize, Serialize};
+use toml_edit::{DocumentMut, Item, Table};
 use zip::write::SimpleFileOptions;
 
 use super::Paths;
@@ -125,6 +127,7 @@ pub fn write_archive(
 ) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(&paths.backup_dir)
         .with_context(|| format!("creating {}", paths.backup_dir.display()))?;
+    restrict_to_owner(&paths.backup_dir);
     let stamp = now.format(NAME_TIME);
     let mut name = format!("{NAME_PREFIX}{}_{stamp}.zip", kind_str(kind));
     let mut n = 1;
@@ -135,7 +138,7 @@ pub fn write_archive(
     let target = paths.backup_dir.join(&name);
     let partial = paths.backup_dir.join(format!(".{name}.partial"));
     let result = (|| -> anyhow::Result<()> {
-        let mut zip = zip::ZipWriter::new(File::create(&partial)?);
+        let mut zip = zip::ZipWriter::new(create_private_file(&partial)?);
         let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let manifest = Manifest {
             app: "reelix".into(),
@@ -313,6 +316,104 @@ fn extract(archive: &mut zip::ZipArchive<File>, entry: &str, to: &Path) -> anyho
     Ok(true)
 }
 
+/// Settings that describe this installation rather than the backed-up data: a restored
+/// `config.toml` keeps the current values (`None` = every key of the table).
+const KEPT_CONFIG: &[(&str, Option<&str>)] = &[
+    ("paths", None),
+    ("database", None),
+    ("security", Some("trusted_proxies")),
+    ("security", Some("secret_key_file")),
+];
+
+/// Writes the backup's `config.toml` to `target`, keeping the [`KEPT_CONFIG`] keys of the
+/// config currently there.
+fn restore_config(archive: &mut zip::ZipArchive<File>, target: &Path) -> anyhow::Result<()> {
+    let mut restored = String::new();
+    archive
+        .by_name(CONFIG_ENTRY)?
+        .take(1024 * 1024)
+        .read_to_string(&mut restored)
+        .context("reading config.toml from the backup")?;
+    let current = match std::fs::read_to_string(target) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e).with_context(|| format!("reading {}", target.display())),
+    };
+    let (merged, kept) = merge_restored_config(current.as_deref(), &restored)?;
+    if !kept.is_empty() {
+        tracing::warn!(
+            keys = %kept.join(", "),
+            "restored config.toml: kept this installation's values for these keys"
+        );
+    }
+    std::fs::write(target, merged).with_context(|| format!("writing {}", target.display()))
+}
+
+/// `restored` with every [`KEPT_CONFIG`] key taken from `current` (removed when `current`
+/// doesn't set it), plus the `table.key` names that differed.
+fn merge_restored_config(current: Option<&str>, restored: &str) -> anyhow::Result<(String, Vec<String>)> {
+    let current: DocumentMut = current
+        .unwrap_or_default()
+        .parse()
+        .context("the current config.toml is not valid TOML")?;
+    let mut doc: DocumentMut = restored
+        .parse()
+        .context("config.toml in the backup is not valid TOML")?;
+    let keys_of = |d: &DocumentMut, table: &str| -> Vec<String> {
+        d.get(table)
+            .and_then(Item::as_table_like)
+            .map(|t| t.iter().map(|(k, _)| k.to_owned()).collect())
+            .unwrap_or_default()
+    };
+    // Value text without surrounding whitespace/comments, for comparison.
+    let value = |d: &DocumentMut, table: &str, key: &str| {
+        d.get(table).and_then(|t| t.get(key)).map(|i| {
+            let mut i = i.clone();
+            if let Some(v) = i.as_value_mut() {
+                v.decor_mut().clear();
+            }
+            i.to_string()
+        })
+    };
+    let mut kept = Vec::new();
+    for &(table, key) in KEPT_CONFIG {
+        let keys = match key {
+            Some(k) => vec![k.to_owned()],
+            None => {
+                let mut ks = keys_of(&current, table);
+                for k in keys_of(&doc, table) {
+                    if !ks.contains(&k) {
+                        ks.push(k);
+                    }
+                }
+                ks
+            }
+        };
+        for key in keys {
+            if value(&current, table, &key) == value(&doc, table, &key) {
+                continue;
+            }
+            kept.push(format!("{table}.{key}"));
+            let cur = current.get(table).and_then(|t| t.get(&key)).cloned();
+            match (doc.get_mut(table).and_then(Item::as_table_like_mut), cur) {
+                (Some(t), Some(item)) => {
+                    t.insert(&key, item);
+                }
+                (Some(t), None) => {
+                    t.remove(&key);
+                }
+                (None, Some(item)) => {
+                    let mut t = Table::new();
+                    t.insert(&key, item);
+                    doc.insert(table, Item::Table(t));
+                }
+                (None, None) => {}
+            }
+        }
+    }
+    Ok((doc.to_string(), kept))
+}
+
 /// Moved-aside originals, so a failed restore can be undone.
 struct Saved {
     dir: PathBuf,
@@ -384,6 +485,12 @@ pub async fn apply_pending_restore(paths: &Paths, database_url: &str) -> anyhow:
                 std::fs::copy(target, &to)?;
                 saved.files.push((to, target.clone()));
             }
+            if entry == CONFIG_ENTRY {
+                restore_config(&mut archive, target)?;
+                continue;
+            }
+            // Pre-create the key owner-only; `extract` truncates it and keeps the permissions.
+            create_private_file(target).with_context(|| format!("writing {}", target.display()))?;
             extract(&mut archive, entry, target)?;
         }
         Ok(())
@@ -481,7 +588,11 @@ mod tests {
     async fn backup_list_prune_and_restore_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
         let p = paths(tmp.path());
-        std::fs::write(&p.config_file, "[server]\nport = 7701\n").unwrap();
+        std::fs::write(
+            &p.config_file,
+            "[server]\nport = 7701\n[paths]\ndata_dir = \"/old\"\n[security]\ntrusted_proxies = [\"10.0.0.1\"]\n",
+        )
+        .unwrap();
         std::fs::write(&p.secret_key_file, "old-key").unwrap();
 
         let db = reelix_db::Db::connect(&url(&p)).await.unwrap();
@@ -491,6 +602,13 @@ mod tests {
         let t0 = Utc::now();
         let backup = write_archive(&p, &snap, BackupKind::Manual, t0).unwrap();
         validate(&backup).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&backup), 0o600);
+            assert_eq!(mode(&p.backup_dir), 0o700);
+        }
 
         // Two more scheduled backups; retention 1 keeps the newest and never touches manual ones.
         for secs in [1, 2] {
@@ -513,7 +631,11 @@ mod tests {
         // Change state after the backup, then restore it.
         db.settings().set("marker", "after").await.unwrap();
         db.pool().close().await;
-        std::fs::write(&p.config_file, "[server]\nport = 9999\n").unwrap();
+        std::fs::write(
+            &p.config_file,
+            "[server]\nport = 9999\n[paths]\ndata_dir = \"/new\"\n",
+        )
+        .unwrap();
         std::fs::write(&p.secret_key_file, "new-key").unwrap();
 
         stage(&p, &backup, "manual", Utc::now()).unwrap();
@@ -526,10 +648,60 @@ mod tests {
             db.settings().get::<String>("marker").await.unwrap().as_deref(),
             Some("before")
         );
-        assert!(std::fs::read_to_string(&p.config_file).unwrap().contains("7701"));
+        // The backup's settings come back, but not its installation paths or proxies.
+        let config = std::fs::read_to_string(&p.config_file).unwrap();
+        assert!(config.contains("7701"), "{config}");
+        assert!(
+            config.contains("\"/new\"") && !config.contains("/old"),
+            "{config}"
+        );
+        assert!(!config.contains("10.0.0.1"), "{config}");
         assert_eq!(std::fs::read_to_string(&p.secret_key_file).unwrap(), "old-key");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&p.secret_key_file)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
         // Nothing staged: nothing to do.
         assert!(!apply_pending_restore(&p, &url(&p)).await.unwrap());
+    }
+
+    #[test]
+    fn restored_config_keeps_installation_keys() {
+        let current = "[paths]\ndata_dir = \"/data\"\n[security]\nsecret_key_file = \"/data/k\"\n";
+        let restored = "# from the backup\n[server]\nport = 1234\n[paths]\ndata_dir = \"/elsewhere\"\nlog_dir = \"/logs\"\n\n[database]\nurl = \"sqlite:///other.db\"\n\n[security]\ntrusted_proxies = [\"0.0.0.0/0\"]\n";
+        let (merged, kept) = merge_restored_config(Some(current), restored).unwrap();
+        assert_eq!(
+            kept,
+            [
+                "paths.data_dir",
+                "paths.log_dir",
+                "database.url",
+                "security.trusted_proxies",
+                "security.secret_key_file"
+            ]
+        );
+        let doc: DocumentMut = merged.parse().unwrap();
+        assert!(merged.starts_with("# from the backup"), "{merged}");
+        assert_eq!(doc["server"]["port"].as_integer(), Some(1234));
+        assert_eq!(doc["paths"]["data_dir"].as_str(), Some("/data"));
+        assert!(doc["paths"].get("log_dir").is_none());
+        assert!(doc["database"].get("url").is_none());
+        assert!(doc["security"].get("trusted_proxies").is_none());
+        assert_eq!(doc["security"]["secret_key_file"].as_str(), Some("/data/k"));
+
+        // Same values: nothing to report; no current config: the keys are dropped.
+        let (_, kept) = merge_restored_config(Some(current), current).unwrap();
+        assert!(kept.is_empty());
+        let (merged, _) = merge_restored_config(None, restored).unwrap();
+        assert!(
+            !merged.contains("/elsewhere") && merged.contains("port = 1234"),
+            "{merged}"
+        );
     }
 
     #[tokio::test]

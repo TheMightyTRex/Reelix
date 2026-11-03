@@ -214,7 +214,7 @@ fn Release(r: ReleaseDto, current: bool, hint: Option<&'static str>) -> impl Int
                 <span class="muted release-date">
                     {r.published_at.map(format::date).unwrap_or_default()}
                 </span>
-                <a class="btn btn-sm btn-ghost" href=r.url.clone() target="_blank" rel="noopener">
+                <a class="btn btn-sm btn-ghost" href=format::http_url(&r.url) target="_blank" rel="noopener">
                     <Icon name="external" />
                     "GitHub"
                 </a>
@@ -229,7 +229,7 @@ fn Release(r: ReleaseDto, current: bool, hint: Option<&'static str>) -> impl Int
                     {assets
                         .into_iter()
                         .map(|a| view! {
-                            <a class="btn btn-sm btn-secondary" href=a.url.clone() rel="noopener">
+                            <a class="btn btn-sm btn-secondary" href=format::http_url(&a.url) rel="noopener">
                                 <Icon name="download" />
                                 {format!("{} ({})", a.name, bytes(a.size_bytes))}
                             </a>
