@@ -151,7 +151,7 @@ pub(crate) async fn check(resp: reqwest::Response) -> Result<reqwest::Response, 
             .map(|v| v.ceil() as u64);
         return Err(NotifyError::RateLimited { retry_after_secs });
     }
-    let mut body = resp.text().await.unwrap_or_default();
+    let mut body = error_text(resp).await;
     truncate(&mut body, 500);
     if matches!(status.as_u16(), 401 | 403) {
         return Err(NotifyError::Unauthorized(body));
@@ -160,6 +160,43 @@ pub(crate) async fn check(resp: reqwest::Response) -> Result<reqwest::Response, 
         status: status.as_u16(),
         body,
     })
+}
+
+/// Largest JSON reply read from a notification service (after decompression).
+pub(crate) const MAX_JSON_BYTES: usize = 1024 * 1024;
+/// How much of an error body is read; only a short snippet is kept anyway.
+const MAX_ERROR_BYTES: usize = 4 * 1024;
+
+/// Reads a JSON reply, failing once the body exceeds [`MAX_JSON_BYTES`] so a hostile
+/// endpoint (or gzip bomb) can't make Reelix buffer gigabytes.
+pub(crate) async fn json<T: serde::de::DeserializeOwned>(
+    mut resp: reqwest::Response,
+) -> Result<T, NotifyError> {
+    let too_big = || NotifyError::Api(format!("response larger than {} KB", MAX_JSON_BYTES / 1024));
+    if resp.content_length().is_some_and(|n| n > MAX_JSON_BYTES as u64) {
+        return Err(too_big());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > MAX_JSON_BYTES {
+            return Err(too_big());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&out).map_err(|e| NotifyError::Api(format!("invalid response: {e}")))
+}
+
+/// The first few KB of an (error) body as text; read failures yield what was read so far.
+pub(crate) async fn error_text(mut resp: reqwest::Response) -> String {
+    let mut out = Vec::new();
+    while out.len() < MAX_ERROR_BYTES {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => out.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    out.truncate(MAX_ERROR_BYTES);
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Truncates on a char boundary.

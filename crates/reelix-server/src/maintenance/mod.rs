@@ -8,14 +8,13 @@ pub mod logs;
 pub mod server_settings;
 pub mod updates;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::body::Bytes;
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
-use reelix_api::{ApiError, ApiResult, HealthSource, LogsQuery, MaintenanceBackend};
+use reelix_api::{ApiError, ApiResult, HealthSource, LogsQuery, MaintenanceBackend, UploadStream};
 use reelix_api_types::system::{
     BackupDto, BackupKind, BackupSettings, BackupsOverview, InstallKind, LogFileDto, LogsDto,
     PendingRestoreDto, ReleaseDto, ServerSettingsDto, ServerSettingsValues, UpdateSettings, UpdateStatusDto,
@@ -131,6 +130,31 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> ApiResult<T> {
     tokio::task::spawn_blocking(f).await.map_err(internal)
+}
+
+/// A file removed when dropped (also when the request is cancelled mid-upload).
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Writes the streamed upload to `to`; returns the number of bytes written.
+async fn save_upload(archive: &mut UploadStream, to: &Path) -> std::io::Result<u64> {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = tokio::fs::File::create(to).await?;
+    let mut written = 0u64;
+    while let Some(chunk) = archive.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk).await?;
+        written += chunk.len() as u64;
+    }
+    file.sync_all().await?;
+    Ok(written)
 }
 
 impl MaintenanceService {
@@ -357,11 +381,26 @@ impl MaintenanceBackend for MaintenanceService {
         })
     }
 
-    fn stage_restore_upload(&self, archive: Bytes) -> BoxFuture<'_, ApiResult<PendingRestoreDto>> {
+    fn stage_restore_upload(&self, mut archive: UploadStream) -> BoxFuture<'_, ApiResult<PendingRestoreDto>> {
         Box::pin(async move {
-            let _guard = self.backup_lock.lock().await;
             let paths = self.paths.clone();
-            blocking(move || backup::stage_bytes(&paths, &archive, Utc::now()))
+            let upload = TempFile(
+                blocking(move || backup::upload_path(&paths))
+                    .await?
+                    .map_err(internal)?,
+            );
+            match save_upload(&mut archive, &upload.0).await {
+                Ok(0) => return Err(ApiError::validation("upload a backup .zip file")),
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => {
+                    return Err(reelix_api::upload_too_large());
+                }
+                Err(e) => return Err(ApiError::validation(format!("the upload failed: {e}"))),
+            }
+            let _guard = self.backup_lock.lock().await;
+            let (paths, path) = (self.paths.clone(), upload.0.clone());
+            // On success the file is moved into place, so dropping `upload` removes nothing.
+            blocking(move || backup::stage_upload(&paths, &path, Utc::now()))
                 .await?
                 .map_err(|e| ApiError::validation(format!("{e:#}")))
         })

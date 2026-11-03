@@ -5,7 +5,7 @@ use reelix_core::provider::{FieldKind, FieldSchema, ProviderSchema, SelectOption
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::common::{Settings, check, schema as mk_schema, truncate};
+use crate::common::{self, Settings, check, schema as mk_schema, truncate};
 use crate::{BuildContext, EventMask, Message, NotificationEvent, Notifier, NotifyError};
 
 pub const ID: &str = "pushover";
@@ -146,10 +146,10 @@ impl Notifier for Pushover {
         let resp = self.http.post(url).form(&self.form(event)).send().await?;
         // Pushover returns 4xx with `{status:0, errors:[…]}` for bad input/keys.
         if resp.status().as_u16() == 400 {
-            let r: PoResponse = resp.json().await?;
+            let r: PoResponse = common::json(resp).await?;
             return Err(NotifyError::Api(r.errors.join("; ")));
         }
-        let r: PoResponse = check(resp).await?.json().await?;
+        let r: PoResponse = common::json(check(resp).await?).await?;
         if r.status != 1 {
             return Err(NotifyError::Api(r.errors.join("; ")));
         }

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 
-use crate::common::{Settings, schema as mk_schema, truncate};
+use crate::common::{self, Settings, schema as mk_schema, truncate};
 use crate::{BuildContext, EventMask, Message, NotificationEvent, Notifier, NotifyError};
 
 pub const ID: &str = "matrix";
@@ -126,7 +126,7 @@ impl Matrix {
                 retry_after_secs: None,
             };
         }
-        let e: MatrixError = resp.json().await.unwrap_or(MatrixError {
+        let e: MatrixError = common::json(resp).await.unwrap_or(MatrixError {
             errcode: String::new(),
             error: String::new(),
         });
@@ -155,7 +155,7 @@ impl Matrix {
                 if !resp.status().is_success() {
                     return Err(Self::error(resp).await);
                 }
-                Ok(resp.json::<AliasResponse>().await?.room_id)
+                Ok(common::json::<AliasResponse>(resp).await?.room_id)
             })
             .await
             .map(String::as_str)

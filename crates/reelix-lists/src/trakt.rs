@@ -349,7 +349,7 @@ impl TraktDeviceAuth {
             429 => DevicePoll::SlowDown,
             401 | 403 => return Err(ListError::Unauthorized),
             s => {
-                let body = resp.text().await.unwrap_or_default();
+                let body = common::error_text(resp).await;
                 return Err(ListError::Status {
                     status: s,
                     body: body.chars().take(200).collect(),

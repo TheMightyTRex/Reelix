@@ -206,6 +206,38 @@ async fn pushover_form_and_errors() {
 }
 
 #[tokio::test]
+async fn oversized_replies_are_not_buffered() {
+    let server = MockServer::start().await;
+    let huge = format!("{{\"status\":1,\"pad\":\"{}\"}}", "x".repeat(2 * 1024 * 1024));
+    Mock::given(method("POST"))
+        .and(path("/1/messages.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(huge, "application/json"))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/gotify/message"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("e".repeat(1024 * 1024)))
+        .mount(&server)
+        .await;
+    let po = notifier(
+        "pushover",
+        json!({ "api_token": "a", "user_key": "b", "api_url": server.uri() }),
+    );
+    match po.notify(&grab()).await.unwrap_err() {
+        NotifyError::Api(m) => assert!(m.contains("larger than"), "{m}"),
+        e => panic!("unexpected {e:?}"),
+    }
+    let gotify = notifier(
+        "gotify",
+        json!({ "server_url": format!("{}/gotify", server.uri()), "app_token": "t" }),
+    );
+    match gotify.notify(&grab()).await.unwrap_err() {
+        NotifyError::Status { status: 500, body } => assert!(body.len() < 1024, "{}", body.len()),
+        e => panic!("unexpected {e:?}"),
+    }
+}
+
+#[tokio::test]
 async fn gotify_uses_app_token_header() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

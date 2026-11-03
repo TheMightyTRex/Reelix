@@ -81,7 +81,7 @@ pub(crate) async fn send(req: RequestBuilder) -> Result<Response, ListError> {
                 .map(Duration::from_secs),
         },
         _ => {
-            let body = resp.text().await.unwrap_or_default();
+            let body = error_text(resp).await;
             ListError::Status {
                 status: status.as_u16(),
                 body: body.chars().take(200).collect(),
@@ -90,9 +90,50 @@ pub(crate) async fn send(req: RequestBuilder) -> Result<Response, ListError> {
     })
 }
 
+/// Largest list response body read (after decompression).
+pub(crate) const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+/// How much of an error body is read; only a short snippet is kept anyway.
+const MAX_ERROR_BYTES: usize = 8 * 1024;
+
+/// Reads a response body, failing once it exceeds `limit` bytes (a hostile or broken
+/// server can't make Reelix buffer gigabytes, e.g. via a gzip bomb).
+pub(crate) async fn read_limited(mut resp: Response, limit: usize) -> Result<Vec<u8>, ListError> {
+    let too_big = || ListError::Parse(format!("response larger than {} MB", limit / (1024 * 1024)));
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(too_big());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > limit {
+            return Err(too_big());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
+/// The body as (lossy UTF-8) text, capped at [`MAX_BODY_BYTES`].
+pub(crate) async fn text(resp: Response) -> Result<String, ListError> {
+    let bytes = read_limited(resp, MAX_BODY_BYTES).await?;
+    Ok(String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+}
+
+/// The first few KB of an (error) body as text; read failures yield what was read so far.
+pub(crate) async fn error_text(mut resp: Response) -> String {
+    let mut out = Vec::new();
+    while out.len() < MAX_ERROR_BYTES {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => out.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    out.truncate(MAX_ERROR_BYTES);
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Decodes a JSON body with parse errors mapped to [`ListError::Parse`].
 pub(crate) async fn json<T: DeserializeOwned>(resp: Response) -> Result<T, ListError> {
-    let bytes = resp.bytes().await?;
+    let bytes = read_limited(resp, MAX_BODY_BYTES).await?;
     serde_json::from_slice(&bytes).map_err(|e| ListError::Parse(e.to_string()))
 }
 

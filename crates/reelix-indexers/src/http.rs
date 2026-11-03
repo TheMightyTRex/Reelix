@@ -368,9 +368,9 @@ impl FlareSolverr {
             .json(&body)
             .send()
             .await?;
-        let r: FsResponse = resp
-            .json()
-            .await
+        // The reply embeds the solved page, so it gets the same cap as a direct page fetch.
+        let bytes = read_limited(resp, MAX_PAGE_BYTES).await?;
+        let r: FsResponse = serde_json::from_slice(&bytes)
             .map_err(|e| IndexerError::Cloudflare(format!("bad FlareSolverr reply: {e}")))?;
         match (r.status.as_str(), r.solution) {
             ("ok", Some(s)) => Ok(Solution {

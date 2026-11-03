@@ -282,7 +282,7 @@ impl QBittorrent {
                     .filter(|kv| kv.trim_start().starts_with("SID="))
             })
             .map(|kv| kv.trim().to_owned());
-        let body = resp.text().await.unwrap_or_default();
+        let body = common::read_text(resp).await.unwrap_or_default();
         if status.as_u16() == 403 {
             return Err(ClientError::Auth("IP banned after too many failed logins".into()));
         }
@@ -318,7 +318,7 @@ impl QBittorrent {
                 self.login().await?;
                 continue;
             }
-            let body = resp.text().await?;
+            let body = common::read_text(resp).await?;
             if status.as_u16() == 403 {
                 return Err(ClientError::Auth("session rejected".into()));
             }
