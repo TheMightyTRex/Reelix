@@ -396,13 +396,19 @@ fn recycle_bin_lifecycle() {
     ));
     assert!(bin.recycle(&lib, &guard).is_err());
 
+    // Entries the bin did not create are never purged.
+    write(&bin_dir.join("notes.txt"), b"keep");
+    fs::create_dir_all(bin_dir.join("2020-01-01 not a stamp")).unwrap();
+    fs::create_dir_all(bin_dir.join("Movies")).unwrap();
+
     let report = bin
         .cleanup_at(Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap())
         .unwrap();
     assert_eq!((report.removed, report.kept), (1, 1));
     assert!(!bin_dir.join("2026-01-01_12-00-00").exists());
     assert_eq!(bin.empty().unwrap().removed, 1);
-    assert_eq!(fs::read_dir(&bin_dir).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&bin_dir).unwrap().count(), 3);
+    assert!(bin_dir.join("notes.txt").exists() && bin_dir.join("Movies").exists());
 
     let forever = RecycleBin::new(root.join("bin2"), None).unwrap();
     assert_eq!(forever.cleanup().unwrap().removed, 0);

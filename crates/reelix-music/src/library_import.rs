@@ -1,7 +1,5 @@
 //! Import Library: existing artist folders under a music root → artists + their files.
 
-use std::path::Path;
-
 use reelix_api_types::library::{ImportErrorDto, LibraryImportResult};
 use reelix_api_types::music::{AddArtistRequest, MusicImportCandidateDto, MusicLibraryImportRequest};
 use reelix_library::content_roots;
@@ -51,11 +49,8 @@ impl MusicService {
         let mut result = LibraryImportResult::default();
         for item in req.items {
             let path = content_roots::normalize(&item.path);
-            let outcome = if !Path::new(&path).starts_with(&root.path) {
-                Err(MusicError::Validation(format!(
-                    "{path} is not inside {}",
-                    root.path
-                )))
+            let outcome = if let Err(e) = content_roots::ensure_inside(&path, [root.path.as_str()]) {
+                Err(e.into())
             } else if repo::artists::load(&self.db, None)
                 .await?
                 .iter()

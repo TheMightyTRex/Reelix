@@ -140,11 +140,13 @@ pub(crate) fn destination(
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
+    // Fallback file stem when the format renders empty: the sanitised title, never the raw one.
+    let title_stem = || non_empty(reelix_import::naming::sanitize(&naming.title, config), "Book");
     match format {
         BookFormat::Ebook => {
             let src = sources.first().copied().unwrap_or(Path::new(""));
             let stem = if n.rename {
-                non_empty(naming.render(&n.ebook_file, config), &naming.title)
+                non_empty(naming.render(&n.ebook_file, config), &title_stem())
             } else {
                 original_stem(src)
             };
@@ -165,7 +167,7 @@ pub(crate) fn destination(
             if sources.len() <= 1 {
                 let src = sources.first().copied().unwrap_or(Path::new(""));
                 let stem = if n.rename {
-                    non_empty(naming.render(&n.audiobook_file, config), &naming.title)
+                    non_empty(naming.render(&n.audiobook_file, config), &title_stem())
                 } else {
                     original_stem(src)
                 };
@@ -263,6 +265,29 @@ mod tests {
             rename: false,
             ..Default::default()
         };
+        // An empty rendering falls back to the sanitised title, then to "Book".
+        let blank = BookNamingDto {
+            ebook_file: String::new(),
+            ..Default::default()
+        };
+        let evil = BookNaming {
+            title: "../../etc/passwd".into(),
+            ..naming()
+        };
+        let (e, _) = destination(&blank, &evil, BookFormat::Ebook, &[Path::new("/dl/x.epub")], &cfg);
+        assert!(!e.contains('/'), "{e}");
+        let untitled = BookNaming {
+            title: " ... ".into(),
+            ..naming()
+        };
+        let (e, _) = destination(
+            &blank,
+            &untitled,
+            BookFormat::Ebook,
+            &[Path::new("/dl/x.epub")],
+            &cfg,
+        );
+        assert_eq!(e, "Book.epub");
         let (e, _) = destination(
             &keep,
             &b,

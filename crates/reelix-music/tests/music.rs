@@ -274,6 +274,7 @@ impl MusicMetadataProvider for FakeMb {
 
 struct Env {
     svc: Arc<MusicService>,
+    db: Db,
     mb: Arc<FakeMb>,
     root: PathBuf,
     root_id: i64,
@@ -335,6 +336,7 @@ async fn env() -> Env {
         .unwrap();
     Env {
         svc,
+        db,
         mb,
         root,
         root_id: rf.id,
@@ -479,6 +481,57 @@ async fn add_artist_applies_metadata_profile_and_monitoring() {
         e.svc.delete_root_folder(e.root_id).await,
         Err(MusicError::Conflict(_))
     ));
+}
+
+#[tokio::test]
+async fn artist_paths_stay_inside_music_roots() {
+    let e = env().await;
+    let a = e.svc.add_artist(add_req(&e, ArtistMonitor::None)).await.unwrap();
+    let outside = e.root.parent().unwrap().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let edit = |path: &Path, move_files: bool| ArtistEdit {
+        path: Some(path.to_string_lossy().into_owned()),
+        move_files,
+        ..Default::default()
+    };
+    // A new path must resolve inside a music root, with or without moving.
+    for bad in [
+        PathBuf::from("/etc/reelix"),
+        outside.join("Radiohead"),
+        e.root.join("../outside/Radiohead"),
+        e.root.clone(),
+    ] {
+        for move_files in [false, true] {
+            assert!(
+                matches!(
+                    e.svc.update_artist(a.id, edit(&bad, move_files)).await,
+                    Err(MusicError::Validation(_))
+                ),
+                "{}",
+                bad.display()
+            );
+        }
+    }
+    assert_eq!(e.svc.get_artist(a.id).await.unwrap().path, a.path);
+    // Moving inside the root works.
+    std::fs::create_dir_all(&a.path).unwrap();
+    let to = e.root.join("Radiohead (moved)");
+    let moved = e.svc.update_artist(a.id, edit(&to, true)).await.unwrap();
+    assert_eq!(Path::new(&moved.path), to);
+    assert!(to.is_dir() && !Path::new(&a.path).exists());
+    // A stored path outside the roots is never moved from.
+    let victim = outside.join("victim");
+    std::fs::create_dir_all(&victim).unwrap();
+    sqlx::query("UPDATE artists SET path = ? WHERE id = ?")
+        .bind(victim.to_string_lossy().into_owned())
+        .bind(a.id)
+        .execute(e.db.pool())
+        .await
+        .unwrap();
+    let stolen = e.root.join("Stolen");
+    assert!(e.svc.update_artist(a.id, edit(&stolen, true)).await.is_err());
+    assert!(victim.is_dir());
+    assert!(!stolen.exists());
 }
 
 #[tokio::test]

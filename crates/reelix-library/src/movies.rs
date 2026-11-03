@@ -7,11 +7,12 @@ use reelix_api_types::library::{
     AddMovieRequest, BulkDeleteRequest, CastDto, LookupResult, MovieBulkEdit, MovieDto, MovieEdit,
     MovieFileDto, MovieListQuery, MovieMonitor, Paged, SortDir, TagMode,
 };
-use reelix_core::MediaKind;
+use reelix_core::{ContentKind, MediaKind};
 use reelix_db::NewJob;
 use reelix_import::naming::MovieNaming;
 use reelix_metadata::{ExternalSource, MovieMetadata, SearchHit};
 
+use crate::content_roots;
 use crate::convert::{images, movie_status, ratings, year_u16};
 use crate::error::{LibraryError, Result};
 use crate::repo::files::{self, FileTable};
@@ -345,7 +346,11 @@ impl LibraryService {
         }
 
         m.path = match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-            Some(p) => crate::root_folders::normalize(p),
+            Some(p) => {
+                let p = crate::root_folders::normalize(p);
+                content_roots::ensure_inside(&p, [root.path.as_str()])?;
+                p
+            }
             None => {
                 let folder = self.naming_config().await?.movie_folder(&movie_naming(&m))?;
                 Path::new(&root.path).join(folder).to_string_lossy().into_owned()
@@ -443,6 +448,9 @@ impl LibraryService {
             }
             if let Some(t) = &e.tags {
                 apply_tags(&mut m.tags, t, e.tag_mode);
+            }
+            if m.path != old_path {
+                content_roots::ensure_inside_kinds(&self.db, &m.path, &[ContentKind::Movie]).await?;
             }
             if e.move_files && m.path != old_path {
                 self.move_media_folder(Path::new(&old_path), Path::new(&m.path))

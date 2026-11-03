@@ -178,15 +178,19 @@ impl BooksService {
         let settings = self.settings().await?;
         let config = self.naming_config().await?;
         let folder = author_folder(&settings.naming, &a, &config);
-        let place = |root: &Option<ContentRoot>, explicit: Option<String>| {
-            root.as_ref()
-                .map(|r| match explicit.filter(|p| !p.trim().is_empty()) {
-                    Some(p) => content_roots::normalize(&p),
-                    None => Path::new(&r.path).join(&folder).to_string_lossy().into_owned(),
-                })
+        let place = |root: &Option<ContentRoot>, explicit: Option<String>| -> Result<Option<String>> {
+            let Some(r) = root else { return Ok(None) };
+            Ok(Some(match explicit.filter(|p| !p.trim().is_empty()) {
+                Some(p) => {
+                    let p = content_roots::normalize(&p);
+                    content_roots::ensure_inside(&p, [r.path.as_str()])?;
+                    p
+                }
+                None => Path::new(&r.path).join(&folder).to_string_lossy().into_owned(),
+            }))
         };
-        a.path = place(&ebook_root, paths.ebook);
-        a.audio_path = place(&audio_root, paths.audio);
+        a.path = place(&ebook_root, paths.ebook)?;
+        a.audio_path = place(&audio_root, paths.audio)?;
         a.id = repo::insert(&self.db, &a, added_by_request_id).await?;
         tracing::info!(id = a.id, olid = %olid, name = %a.name, "author added");
 
@@ -233,6 +237,10 @@ impl BooksService {
         let config = self.naming_config().await?;
         let folder = author_folder(&settings.naming, &a, &config);
         for format in BookFormat::ALL {
+            let old_path = match format {
+                BookFormat::Ebook => &old.path,
+                BookFormat::Audiobook => &old.audio_path,
+            };
             let (profile_edit, root_edit, path_edit) = match format {
                 BookFormat::Ebook => (edit.quality_profile_id, edit.root_folder_id, edit.path.as_deref()),
                 BookFormat::Audiobook => (
@@ -284,6 +292,11 @@ impl BooksService {
                 })?;
                 let rf = self.require_root(r, format).await?;
                 *path = Some(Path::new(&rf.path).join(&folder).to_string_lossy().into_owned());
+            }
+            if let Some(p) = path.as_deref()
+                && *path != *old_path
+            {
+                content_roots::ensure_inside_kinds(&self.db, p, &[format.content_kind()]).await?;
             }
         }
         if a.quality_profile_id.is_none() && a.audio_quality_profile_id.is_none() {

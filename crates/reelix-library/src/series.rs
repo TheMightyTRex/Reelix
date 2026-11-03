@@ -9,11 +9,12 @@ use reelix_api_types::library::{
     NewItemMonitor, Paged, SearchRequest, SeasonDto, SeriesBulkEdit, SeriesDto, SeriesEdit, SeriesListQuery,
     SeriesMonitor, SeriesStatistics, SeriesStatus, SortDir,
 };
-use reelix_core::MediaKind;
+use reelix_core::{ContentKind, MediaKind};
 use reelix_db::NewJob;
 use reelix_import::naming::SeriesNaming;
 use reelix_metadata::{ExternalSource, SeriesExternalId, SeriesMetadata};
 
+use crate::content_roots;
 use crate::convert::{images, ratings, series_status, year_u16};
 use crate::error::{LibraryError, Result};
 use crate::movies::{apply_tags, cast_of, hit_to_lookup, paginate, split_year};
@@ -247,7 +248,11 @@ impl LibraryService {
         s.added_by_request_id = req.added_by_request_id;
         s.last_refreshed = Some(chrono::Utc::now());
         s.path = match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-            Some(p) => crate::root_folders::normalize(p),
+            Some(p) => {
+                let p = crate::root_folders::normalize(p);
+                content_roots::ensure_inside(&p, [root.path.as_str()])?;
+                p
+            }
             None => {
                 let folder = self.naming_config().await?.series_folder(&series_naming(&s))?;
                 Path::new(&root.path).join(folder).to_string_lossy().into_owned()
@@ -431,6 +436,9 @@ impl LibraryService {
             }
             if let Some(t) = &e.tags {
                 apply_tags(&mut s.tags, t, e.tag_mode);
+            }
+            if s.path != old_path {
+                content_roots::ensure_inside_kinds(&self.db, &s.path, &[ContentKind::Series]).await?;
             }
             if e.move_files && s.path != old_path {
                 self.move_media_folder(Path::new(&old_path), Path::new(&s.path))

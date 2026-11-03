@@ -341,9 +341,26 @@ pub fn sanitize_file_name(name: &str) -> String {
     let cleaned = cleaned.trim().trim_matches('.').trim();
     if cleaned.is_empty() {
         "download".into()
+    } else if is_reserved_device_name(cleaned) {
+        format!("_{}", cleaned.chars().take(199).collect::<String>())
     } else {
         cleaned.chars().take(200).collect()
     }
+}
+
+/// Windows device names (`CON`, `NUL`, `COM1`…), with or without an extension, which can't be
+/// used as file names there.
+fn is_reserved_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end()
+        .to_ascii_uppercase();
+    ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// Response body text with a bounded length, for error messages.
@@ -545,5 +562,10 @@ mod tests {
     fn sanitize() {
         assert_eq!(sanitize_file_name("../a/b:c"), "_a_b_c");
         assert_eq!(sanitize_file_name(".."), "download");
+        assert_eq!(sanitize_file_name("CON"), "_CON");
+        assert_eq!(sanitize_file_name("nul.txt"), "_nul.txt");
+        assert_eq!(sanitize_file_name("COM1.torrent"), "_COM1.torrent");
+        assert_eq!(sanitize_file_name("Console"), "Console");
+        assert_eq!(sanitize_file_name("COM0"), "COM0");
     }
 }

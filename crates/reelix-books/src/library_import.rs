@@ -59,10 +59,10 @@ impl BooksService {
         let mut result = LibraryImportResult::default();
         for item in req.items {
             let path = content_roots::normalize(&item.path);
-            if !std::path::Path::new(&path).starts_with(&root.path) {
+            if let Err(e) = content_roots::ensure_inside(&path, [root.path.as_str()]) {
                 result.errors.push(ImportErrorDto {
                     path: item.path,
-                    message: format!("not inside the root folder {}", root.path),
+                    message: e.to_string(),
                 });
                 continue;
             }

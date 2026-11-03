@@ -369,7 +369,26 @@ pub fn sanitize(name: &str, config: &NamingConfig) -> String {
     let trimmed = collapsed
         .trim_end_matches(['.', ' '])
         .trim_start_matches(['.', ' ']);
-    trimmed.to_string()
+    if is_reserved_device_name(trimmed) {
+        format!("_{trimmed}")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Windows device names (`CON`, `NUL`, `COM1`…), with or without an extension, which can't be
+/// used as file names there.
+fn is_reserved_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end()
+        .to_ascii_uppercase();
+    ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 impl NamingConfig {
