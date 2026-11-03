@@ -13,7 +13,12 @@ use reelix_api_types::requests::{
 use utoipa::OpenApi;
 
 use super::requests::svc;
-use crate::auth::{CurrentUser, hash_password_blocking};
+use reelix_requests::users::PasswordChange;
+
+use crate::auth::{
+    AuthMethod, CurrentUser, RequestMeta, hash_password_blocking, session_token, sha256_hex,
+    verify_password_blocking,
+};
 use crate::error::{ApiError, ApiJson, ApiPath, ApiResult};
 use crate::state::AppState;
 
@@ -158,31 +163,72 @@ pub async fn get_user(
     Ok(ApiJson(svc(&state)?.get_user(&user.user, id).await?))
 }
 
-/// Updates a user (MANAGE_USERS; users may edit their own profile fields and password).
+/// Updates a user (MANAGE_USERS; users may edit their own profile fields and password, which
+/// needs `current_password`).
 #[utoipa::path(put, path = "/api/v1/users/{id}", tag = "users", request_body = UpdateUserDto,
     params(("id" = i64, Path, description = "User id")),
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Updated", body = UserDetailDto),
-        (status = 403, description = "Not permitted", body = ApiErrorBody),
+        (status = 403, description = "Not permitted or wrong current password", body = ApiErrorBody),
         (status = 409, description = "Would remove the last admin", body = ApiErrorBody),
     ))]
 pub async fn update_user(
     State(state): State<AppState>,
+    meta: RequestMeta,
     user: CurrentUser,
     ApiPath(id): ApiPath<i64>,
     ApiJson(mut dto): ApiJson<UpdateUserDto>,
 ) -> ApiResult<ApiJson<UserDetailDto>> {
-    let hash = match dto.password.take().filter(|p| !p.is_empty()) {
+    let current = dto.current_password.take();
+    let me = id == user.user.id;
+    let change = match dto.password.take().filter(|p| !p.is_empty()) {
         Some(p) => {
             check_password(&p)?;
-            Some(hash_password_blocking(p).await?)
+            if me {
+                verify_current_password(&state, &meta, &user, current).await?;
+            }
+            Some(PasswordChange {
+                hash: hash_password_blocking(p).await?,
+                keep_session: (user.method == AuthMethod::Session)
+                    .then(|| session_token(&meta.headers).map(|t| sha256_hex(&t)))
+                    .flatten(),
+            })
         }
         None => None,
     };
     Ok(ApiJson(
-        svc(&state)?.update_user(&user.user, id, dto, hash).await?,
+        svc(&state)?.update_user(&user.user, id, dto, change).await?,
     ))
+}
+
+/// Changing your own password needs the current one (so a hijacked session can't lock the
+/// owner out); accounts without a local password yet are exempt. Guesses are rate-limited
+/// like logins.
+async fn verify_current_password(
+    state: &AppState,
+    meta: &RequestMeta,
+    user: &CurrentUser,
+    current: Option<String>,
+) -> ApiResult<()> {
+    let Some((_, Some(hash))) = state.db().users().find_credentials(&user.user.username).await? else {
+        return Ok(());
+    };
+    let wrong = || ApiError::Validation {
+        status: StatusCode::FORBIDDEN,
+        message: "current password is incorrect".into(),
+    };
+    let Some(current) = current.filter(|c| !c.is_empty()) else {
+        return Err(wrong());
+    };
+    let attempt = state.inner.limiter.begin(meta.ip, &user.user.username)?;
+    if verify_password_blocking(current, Some(hash)).await? {
+        attempt.succeeded();
+        Ok(())
+    } else {
+        attempt.failed();
+        Err(wrong())
+    }
 }
 
 /// Deletes a user and their requests/issues.

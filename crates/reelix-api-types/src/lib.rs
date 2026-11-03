@@ -45,6 +45,10 @@ pub struct ApiErrorBody {
 pub struct SetupStatus {
     /// True until the first admin account exists.
     pub needs_setup: bool,
+    /// True when `POST /setup` must carry the one-time `setup_token` printed in the server log
+    /// (requests from the server machine itself don't need it).
+    #[serde(default)]
+    pub setup_token_required: bool,
     pub version: String,
 }
 
@@ -55,6 +59,9 @@ pub struct SetupRequest {
     pub password: String,
     #[serde(default)]
     pub email: Option<String>,
+    /// One-time token from the server log; see [`SetupStatus::setup_token_required`].
+    #[serde(default)]
+    pub setup_token: Option<String>,
 }
 
 // ---------- Auth ----------
@@ -121,7 +128,9 @@ pub struct SystemStatus {
     pub uptime_secs: u64,
     /// Database engine, e.g. `sqlite`.
     pub database: String,
-    pub data_dir: String,
+    /// Only returned to admins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_dir: Option<String>,
     pub url_base: String,
 }
 

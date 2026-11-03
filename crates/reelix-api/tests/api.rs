@@ -80,6 +80,8 @@ struct Req<'a> {
     csrf: bool,
     body: Option<Value>,
     headers: Vec<(&'static str, &'a str)>,
+    /// TCP peer address (none, like a proxy-less in-process call, by default).
+    peer: Option<&'a str>,
 }
 
 async fn call(app: &TestApp, method: Method, uri: &str, r: Req<'_>) -> Resp {
@@ -95,6 +97,10 @@ async fn call(app: &TestApp, method: Method, uri: &str, r: Req<'_>) -> Resp {
     }
     for (k, v) in r.headers {
         b = b.header(k, v);
+    }
+    if let Some(peer) = r.peer {
+        let addr: std::net::SocketAddr = peer.parse().unwrap();
+        b = b.extension(axum::extract::ConnectInfo(addr));
     }
     let req = match r.body {
         Some(v) => b
@@ -271,6 +277,91 @@ async fn unauthenticated_requests_get_401_json() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
+/// Rebuilds the app's state (fresh limiter) with `f` applied before the router is built.
+fn reconfigure(app: &mut TestApp, f: impl FnOnce(AppState) -> AppState) {
+    let state = AppState::new(
+        app.state.db().clone(),
+        app.state.events().clone(),
+        app.state.jobs().clone(),
+        app.state.secrets().clone(),
+        app.state.config().clone(),
+    );
+    app.state = f(state);
+    app.router = reelix_api::router(app.state.clone());
+}
+
+#[tokio::test]
+async fn setup_requires_the_token_unless_local() {
+    let mut app = app().await;
+    reconfigure(&mut app, |s| s.with_setup_token("tok-123"));
+    let setup = |token: Option<&str>, peer: Option<&'static str>, headers| {
+        let mut body = json!({"username": "admin", "password": ADMIN_PW});
+        if let Some(t) = token {
+            body["setup_token"] = json!(t);
+        }
+        Req {
+            body: Some(body),
+            peer,
+            headers,
+            ..Default::default()
+        }
+    };
+
+    let r = call(&app, Method::GET, "/api/v1/setup", Req::default()).await;
+    assert_eq!(r.body["setup_token_required"], true);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/setup",
+        Req {
+            peer: Some("127.0.0.1:5000"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.body["setup_token_required"], false);
+
+    for (token, peer, headers) in [
+        (None, Some("192.0.2.1:5000"), vec![]),
+        (Some("wrong"), None, vec![]),
+        // A reverse proxy on the same host doesn't make its clients local.
+        (
+            None,
+            Some("127.0.0.1:5000"),
+            vec![("x-forwarded-for", "192.0.2.1")],
+        ),
+    ] {
+        let r = call(&app, Method::POST, "/api/v1/setup", setup(token, peer, headers)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+    }
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/setup",
+        setup(Some("tok-123"), None, vec![]),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+}
+
+#[tokio::test]
+async fn setup_from_the_server_itself_needs_no_token() {
+    let mut app = app().await;
+    reconfigure(&mut app, |s| s.with_setup_token("tok-123"));
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/setup",
+        Req {
+            body: Some(json!({"username": "admin", "password": ADMIN_PW})),
+            peer: Some("[::1]:5000"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+}
+
 #[tokio::test]
 async fn login_ok_bad_and_logout() {
     let app = app().await;
@@ -401,6 +492,106 @@ async fn login_is_rate_limited() {
         login(&app, "someone", "wrong-password", false).await.status,
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn parallel_guesses_cannot_outrun_the_limiter() {
+    let app = app().await;
+    setup_admin(&app).await;
+    let guesses = (0..12).map(|_| login(&app, "admin", "wrong-password", false));
+    let statuses: Vec<_> = futures::future::join_all(guesses)
+        .await
+        .into_iter()
+        .map(|r| r.status)
+        .collect();
+    let tried = statuses
+        .iter()
+        .filter(|s| **s == StatusCode::UNAUTHORIZED)
+        .count();
+    assert!(tried <= 5, "{statuses:?}");
+    assert!(statuses.contains(&StatusCode::TOO_MANY_REQUESTS), "{statuses:?}");
+}
+
+#[tokio::test]
+async fn rate_limit_uses_forwarded_address_only_from_trusted_proxies() {
+    let mut app = app().await;
+    reconfigure(&mut app, |s| {
+        s.with_security(reelix_api::SecurityConfig {
+            trusted_proxies: vec!["10.0.0.0/8".parse().unwrap()],
+            ..Default::default()
+        })
+    });
+    setup_admin(&app).await;
+    let attempt = |peer: &'static str, xff: &'static str| {
+        call(
+            &app,
+            Method::POST,
+            "/api/v1/auth/login",
+            Req {
+                body: Some(json!({"username": "admin", "password": "wrong-password"})),
+                peer: Some(peer),
+                headers: vec![("x-forwarded-for", xff)],
+                ..Default::default()
+            },
+        )
+    };
+    // Through the trusted proxy each client is counted on its own…
+    for _ in 0..5 {
+        assert_eq!(
+            attempt("10.0.0.1:1", "192.0.2.1").await.status,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert_eq!(
+        attempt("10.0.0.1:1", "192.0.2.1").await.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        attempt("10.0.0.1:1", "192.0.2.2").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    // …while an untrusted peer can't dodge its lock by inventing X-Forwarded-For values.
+    for i in 0..5 {
+        let xff = ["1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5"][i];
+        assert_eq!(
+            attempt("198.51.100.1:1", xff).await.status,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert_eq!(
+        attempt("198.51.100.1:1", "6.6.6.6").await.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+#[tokio::test]
+async fn secure_cookies_setting() {
+    let mut app = app().await;
+    setup_admin(&app).await;
+    for (mode, proto, secure) in [
+        (reelix_api::SecureCookies::Always, "http", true),
+        (reelix_api::SecureCookies::Never, "https", false),
+    ] {
+        reconfigure(&mut app, |s| {
+            s.with_security(reelix_api::SecurityConfig {
+                secure_cookies: mode,
+                ..Default::default()
+            })
+        });
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/auth/login",
+            Req {
+                body: Some(json!({"username": "admin", "password": ADMIN_PW})),
+                headers: vec![("x-forwarded-proto", proto)],
+                ..Default::default()
+            },
+        )
+        .await;
+        let cookie = r.headers[header::SET_COOKIE].to_str().unwrap().to_owned();
+        assert_eq!(cookie.contains("; Secure"), secure, "{mode:?}: {cookie}");
+    }
 }
 
 #[tokio::test]
@@ -617,6 +808,19 @@ async fn admin_endpoints_forbidden_for_regular_users() {
     .await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.body["database"], "sqlite");
+    // …but not where the server keeps its data.
+    assert!(r.body.get("data_dir").is_none(), "{:?}", r.body);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/system/status",
+        Req {
+            cookie: Some(&admin),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(r.body["data_dir"].is_string(), "{:?}", r.body);
 
     let tasks = call(
         &app,
@@ -828,11 +1032,16 @@ async fn websocket_forwards_visible_events() {
     let router = app.router.clone();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
-    async fn connect(addr: std::net::SocketAddr, cookie: &str) -> tokio::net::TcpStream {
+    async fn handshake(
+        addr: std::net::SocketAddr,
+        cookie: &str,
+        origin: &str,
+    ) -> (String, tokio::net::TcpStream) {
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
         let req = format!(
             "GET /api/v1/ws HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
-             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nCookie: {cookie}\r\n\r\n"
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nCookie: {cookie}\r\n\
+             Origin: {origin}\r\n\r\n"
         );
         s.write_all(req.as_bytes()).await.unwrap();
         let mut head = Vec::new();
@@ -841,9 +1050,19 @@ async fn websocket_forwards_visible_events() {
             s.read_exact(&mut byte).await.unwrap();
             head.push(byte[0]);
         }
-        let head = String::from_utf8(head).unwrap();
+        (String::from_utf8(head).unwrap(), s)
+    }
+
+    async fn connect(addr: std::net::SocketAddr, cookie: &str) -> tokio::net::TcpStream {
+        let (head, s) = handshake(addr, cookie, &format!("http://{addr}")).await;
         assert!(head.starts_with("HTTP/1.1 101"), "{head}");
         s
+    }
+
+    // Cookie logins from another site are refused (cross-site WebSocket hijacking).
+    for origin in ["https://evil.example", "null", "http://127.0.0.1:1"] {
+        let (head, _) = handshake(addr, &admin, origin).await;
+        assert!(head.starts_with("HTTP/1.1 403"), "{origin}: {head}");
     }
 
     async fn read_text(s: &mut tokio::net::TcpStream) -> Value {

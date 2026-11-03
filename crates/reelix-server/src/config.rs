@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
+pub use reelix_api::SecureCookies;
 use serde::{Deserialize, Serialize};
 
 /// Default HTTP port.
@@ -100,6 +101,7 @@ struct RawSecurity {
     #[serde(skip_serializing_if = "Option::is_none")]
     secret_key_file: Option<PathBuf>,
     trusted_proxies: Vec<String>,
+    secure_cookies: SecureCookies,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,7 +134,9 @@ pub struct Config {
     /// Explicitly configured web UI directory; `None` means auto-detect.
     pub web_dir: Option<PathBuf>,
     pub secret_key_file: PathBuf,
-    pub trusted_proxies: Vec<String>,
+    /// Reverse proxies (CIDRs) whose `X-Forwarded-For` is believed for the client address.
+    pub trusted_proxies: Vec<reelix_api::IpNet>,
+    pub secure_cookies: SecureCookies,
     pub log_level: String,
     pub log_format: LogFormat,
     /// Config file that was read, if any.
@@ -210,6 +214,13 @@ impl Config {
     fn resolve(raw: RawConfig, config_file: Option<PathBuf>) -> Result<Config, ConfigError> {
         let url_base =
             normalize_url_base(&raw.server.url_base).map_err(|e| Box::new(figment::Error::from(e)))?;
+        let trusted_proxies = raw
+            .security
+            .trusted_proxies
+            .iter()
+            .map(|p| p.parse())
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|e| Box::new(figment::Error::from(format!("security.trusted_proxies: {e}"))))?;
         let data_dir = raw.paths.data_dir;
         let database_url = raw
             .database
@@ -228,7 +239,8 @@ impl Config {
                 .security
                 .secret_key_file
                 .unwrap_or_else(|| data_dir.join("secret.key")),
-            trusted_proxies: raw.security.trusted_proxies,
+            trusted_proxies,
+            secure_cookies: raw.security.secure_cookies,
             log_level: raw.logging.level,
             log_format: raw.logging.format,
             data_dir,
@@ -262,6 +274,7 @@ pub(crate) fn env_key(key: &str) -> Option<&'static str> {
         "log_dir" => "paths.log_dir",
         "web_dir" => "paths.web_dir",
         "secret_key_file" => "security.secret_key_file",
+        "secure_cookies" => "security.secure_cookies",
         "log_level" => "logging.level",
         "log_format" => "logging.format",
         _ => return None,
@@ -315,7 +328,11 @@ pub fn default_config_template() -> String {
 [security]
 # Key used to encrypt provider secrets at rest; generated on first run if absent.
 # secret_key_file = "<data_dir>/secret.key"
+# Reverse proxies whose X-Forwarded-For header is trusted for the client address
+# (login rate limiting, local-only checks).
 # trusted_proxies = ["172.16.0.0/12"]
+# Secure flag on session cookies: auto (when X-Forwarded-Proto is https) | always | never
+# secure_cookies = "auto"
 
 [logging]
 # trace | debug | info | warn | error (RUST_LOG overrides)
@@ -398,6 +415,7 @@ mod tests {
                 format = "json"
                 [security]
                 trusted_proxies = ["10.0.0.0/8"]
+                secure_cookies = "always"
                 "#,
             )?;
 
@@ -408,7 +426,8 @@ mod tests {
             assert_eq!(cfg.url_base, "/reelix");
             assert_eq!(cfg.log_level, "debug");
             assert_eq!(cfg.log_format, LogFormat::Json);
-            assert_eq!(cfg.trusted_proxies, vec!["10.0.0.0/8".to_string()]);
+            assert_eq!(cfg.trusted_proxies, vec!["10.0.0.0/8".parse().unwrap()]);
+            assert_eq!(cfg.secure_cookies, SecureCookies::Always);
             assert!(cfg.config_file.is_some());
 
             // Env overrides file.
@@ -499,6 +518,9 @@ mod tests {
             assert!(load(&CliOverrides::default()).is_err());
             jail.set_env("REELIX_URL_BASE", "");
             jail.set_env("REELIX_LOG_FORMAT", "xml");
+            assert!(load(&CliOverrides::default()).is_err());
+            jail.set_env("REELIX_LOG_FORMAT", "json");
+            jail.set_env("REELIX_SECURE_COOKIES", "sometimes");
             assert!(load(&CliOverrides::default()).is_err());
             Ok(())
         });

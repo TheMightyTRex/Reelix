@@ -13,6 +13,15 @@ use reelix_mediaserver::MediaServerKind;
 use crate::repo::{UserEdit, UserRecord, ts};
 use crate::{Actor, Error, MediaServerEntry, RequestService, Result};
 
+/// A new password for [`RequestService::update_user`].
+#[derive(Debug, Clone)]
+pub struct PasswordChange {
+    /// Argon2 hash, computed by the caller.
+    pub hash: String,
+    /// Token hash of the session to keep when users change their own password (the caller's).
+    pub keep_session: Option<String>,
+}
+
 /// `(constant, label, description)` for every permission bit.
 pub const PERMISSION_INFO: &[(Permissions, &str, &str, &str)] = &[
     (
@@ -297,13 +306,14 @@ impl RequestService {
         self.get_user(actor, created.id).await
     }
 
-    /// Updates a user. `password_hash` (already hashed) replaces the password and ends sessions.
+    /// Updates a user. A `password` change ends the user's other sessions; when someone else's
+    /// password is reset, their API keys are revoked too.
     pub async fn update_user(
         &self,
         actor: &Actor,
         id: i64,
         dto: UpdateUserDto,
-        password_hash: Option<String>,
+        password: Option<PasswordChange>,
     ) -> Result<UserDetailDto> {
         let me = actor.id == id;
         let target = self.user_record(id).await?;
@@ -313,6 +323,17 @@ impl RequestService {
             if !actor.permissions.is_admin() {
                 if target.permissions.is_admin() && !me {
                     return Err(Error::Forbidden("only admins can edit admins".into()));
+                }
+                // Taking over (password) or reshaping (permissions) an account needs every
+                // permission it has, or a manager could reset a higher-privileged user.
+                if !me
+                    && !actor.permissions.contains(target.permissions)
+                    && (password.is_some() || permissions != target.permissions)
+                {
+                    return Err(Error::Forbidden(
+                        "you can only change the password or permissions of users whose permissions your own account has"
+                            .into(),
+                    ));
                 }
                 if permissions.is_admin() && !target.permissions.is_admin() {
                     return Err(Error::Forbidden("only admins can grant ADMIN".into()));
@@ -335,7 +356,7 @@ impl RequestService {
         {
             return Err(Error::Conflict("cannot remove ADMIN from the last admin".into()));
         }
-        if password_hash.is_some()
+        if password.is_some()
             && target.auth_source != "local"
             && !target.has_password
             && !actor.permissions.is_admin()
@@ -386,10 +407,13 @@ impl RequestService {
                 },
             )
             .await?;
-        if let Some(hash) = password_hash {
-            self.users_repo().set_password_hash(id, &hash).await?;
+        if let Some(change) = password {
+            let repo = self.users_repo();
+            repo.set_password_hash(id, &change.hash).await?;
+            let keep = if me { change.keep_session.as_deref() } else { None };
+            repo.delete_sessions(id, keep).await?;
             if !me {
-                self.users_repo().delete_sessions(id).await?;
+                repo.delete_api_keys(id).await?;
             }
         }
         self.changed("user", "updated", id, Some(id));
@@ -472,12 +496,21 @@ impl RequestService {
         dto: ImportUsersDto,
     ) -> Result<ImportUsersResultDto> {
         require_users(actor)?;
-        let s = self.server(server_id).await?;
         let settings = self.request_settings().await?;
         let permissions = dto.permissions.unwrap_or(settings.default_permissions);
         if permissions.is_admin() && !actor.permissions.is_admin() {
             return Err(Error::Forbidden("only admins can grant ADMIN".into()));
         }
+        // As for created users: explicit permissions beyond the actor's own need an admin.
+        if dto.permissions.is_some()
+            && !actor.permissions.is_admin()
+            && !actor.permissions.contains(permissions)
+        {
+            return Err(Error::Forbidden(
+                "you can only grant permissions your own account has".into(),
+            ));
+        }
+        let s = self.server(server_id).await?;
         let users = s
             .server
             .users()

@@ -1034,7 +1034,8 @@ pub struct CreateUserDto {
 }
 
 /// `PUT /users/{id}`: replaces the editable fields (send the whole object back).
-/// `password` is only changed when present (local users; also logs the user out everywhere).
+/// `password` is only changed when present (local users; also ends the user's other sessions).
+/// Changing your own password requires `current_password` once the account has one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateUserDto {
@@ -1066,6 +1067,8 @@ pub struct UpdateUserDto {
     pub music_quota_days: Option<u32>,
     #[serde(default)]
     pub password: Option<String>,
+    #[serde(default)]
+    pub current_password: Option<String>,
 }
 
 /// A role preset (`GET /users/roles`).

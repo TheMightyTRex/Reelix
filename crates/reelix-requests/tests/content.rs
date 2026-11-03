@@ -451,6 +451,7 @@ async fn permissions_and_quotas() {
         music_quota_limit: Some(0),
         music_quota_days: None,
         password: None,
+        current_password: None,
     };
     let saved = t.svc.update_user(&t.admin, t.user.id, upd, None).await.unwrap();
     assert_eq!(saved.book_quota_limit, Some(5));

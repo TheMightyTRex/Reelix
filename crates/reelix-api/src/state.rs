@@ -9,7 +9,7 @@ use reelix_db::Db;
 use reelix_db::secrets::SecretBox;
 use reelix_jobs::JobQueue;
 
-use crate::auth::LoginLimiter;
+use crate::auth::{LoginLimiter, SecurityConfig};
 
 /// Static configuration the API needs from the server.
 #[derive(Debug, Clone)]
@@ -35,6 +35,9 @@ pub(crate) struct Inner {
     pub secrets: SecretBox,
     pub config: ApiConfig,
     pub limiter: LoginLimiter,
+    pub security: SecurityConfig,
+    /// One-time token first-run setup requires from non-local clients (`None`: not required).
+    pub setup_token: Option<String>,
     /// Serialises first-run setup so two concurrent requests cannot both create an admin.
     pub setup_lock: tokio::sync::Mutex<()>,
     /// Domain services registered by the server (library, providers, requests, …), keyed by type.
@@ -51,6 +54,8 @@ impl AppState {
                 secrets,
                 config,
                 limiter: LoginLimiter::default(),
+                security: SecurityConfig::default(),
+                setup_token: None,
                 setup_lock: tokio::sync::Mutex::new(()),
                 extensions: HashMap::new(),
             }),
@@ -75,6 +80,26 @@ impl AppState {
 
     pub fn config(&self) -> &ApiConfig {
         &self.inner.config
+    }
+
+    pub fn security(&self) -> &SecurityConfig {
+        &self.inner.security
+    }
+
+    fn inner_mut(&mut self) -> &mut Inner {
+        Arc::get_mut(&mut self.inner).expect("AppState must be configured before it is cloned")
+    }
+
+    /// Sets the trusted proxies and cookie policy (before building the router).
+    pub fn with_security(mut self, security: SecurityConfig) -> Self {
+        self.inner_mut().security = security;
+        self
+    }
+
+    /// Requires `token` in `POST /setup` from clients other than the server machine itself.
+    pub fn with_setup_token(mut self, token: impl Into<String>) -> Self {
+        self.inner_mut().setup_token = Some(token.into());
+        self
     }
 
     /// Registers a domain service that handlers fetch with [`AppState::ext`].

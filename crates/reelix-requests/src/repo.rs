@@ -745,8 +745,18 @@ impl UserAdminRepo<'_> {
     }
 
     /// Ends every session of the user.
-    pub async fn delete_sessions(&self, id: i64) -> Result<()> {
-        sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+    /// Ends the user's sessions, except the one with token hash `keep`.
+    pub async fn delete_sessions(&self, id: i64, keep: Option<&str>) -> Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?")
+            .bind(id)
+            .bind(keep)
+            .execute(self.0.pool())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_api_keys(&self, id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM api_keys WHERE user_id = ?")
             .bind(id)
             .execute(self.0.pool())
             .await?;
