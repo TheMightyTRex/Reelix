@@ -456,10 +456,10 @@ async fn tags_mappings_and_download_clients() {
     assert!(b.tags.is_empty());
 
     // Remote path mappings. Local paths must be absolute on this OS.
-    let (dl, x) = if cfg!(windows) {
-        (r"C:\mnt\dl", r"C:\x")
+    let (dl, x, data) = if cfg!(windows) {
+        (r"C:\mnt\dl", r"C:\x", r"C:\data")
     } else {
-        ("/mnt/dl", "/x")
+        ("/mnt/dl", "/x", "/data")
     };
     let m = e.svc.create_mapping("nas", "/downloads", dl).await.unwrap();
     assert!(matches!(
@@ -479,12 +479,12 @@ async fn tags_mappings_and_download_clients() {
         PathBuf::from("/downloads/a")
     );
     e.svc
-        .update_mapping(m.id, "nas", "/downloads", "/data")
+        .update_mapping(m.id, "nas", "/downloads", data)
         .await
         .unwrap();
     assert_eq!(
         e.svc.map_remote_path("nas", "/downloads/a"),
-        PathBuf::from("/data/a")
+        Path::new(data).join("a")
     );
     assert!(e.svc.delete_mapping(m.id).await.unwrap());
 
