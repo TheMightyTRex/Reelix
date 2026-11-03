@@ -43,6 +43,22 @@ fn backdate(path: &std::path::Path, secs: u64) {
         .unwrap();
 }
 
+/// Backdates a directory's mtime. Windows only opens directories with backup semantics.
+fn backdate_dir(path: &std::path::Path, secs: u64) {
+    let mut opts = std::fs::File::options();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_WRITE_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS
+        opts.access_mode(0x100).custom_flags(0x0200_0000);
+    }
+    #[cfg(not(windows))]
+    opts.read(true);
+    let dir = opts.open(path).unwrap();
+    dir.set_modified(SystemTime::now() - Duration::from_secs(secs))
+        .unwrap();
+}
+
 #[tokio::test]
 async fn torrent_blackhole_writes_files_and_magnets() {
     let d = dirs();
@@ -130,8 +146,7 @@ async fn watch_folder_items_settle_and_remove() {
     std::fs::create_dir_all(&done).unwrap();
     std::fs::write(done.join("past.lives.mkv"), vec![0u8; 2048]).unwrap();
     backdate(&done.join("past.lives.mkv"), 600);
-    let dir = std::fs::File::open(&done).unwrap();
-    let _ = dir.set_modified(SystemTime::now() - Duration::from_secs(600));
+    backdate_dir(&done, 600);
     std::fs::write(d.watch.join("Aftersun.2022.720p.mkv"), vec![0u8; 100]).unwrap();
     std::fs::write(d.watch.join(".DS_Store"), b"x").unwrap();
 
