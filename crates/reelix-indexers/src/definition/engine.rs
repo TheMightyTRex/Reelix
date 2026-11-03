@@ -164,13 +164,10 @@ impl DefinitionIndexer {
     /// or a subdomain of either). Session cookies and definition headers are only sent there,
     /// so a download link or redirect pointing elsewhere can't capture them.
     fn own_host(&self, url: &Url) -> bool {
-        let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
+        let Some(host) = url.host_str() else {
             return false;
         };
-        let related = |known: &str| {
-            let known = known.to_ascii_lowercase();
-            host == known || host.ends_with(&format!(".{known}")) || known.ends_with(&format!(".{host}"))
-        };
+        let related = |known: &str| crate::http::host_within(host, known);
         self.base.host_str().is_some_and(related)
             || self
                 .def
@@ -250,10 +247,7 @@ impl DefinitionIndexer {
             let next = url
                 .join(loc)
                 .map_err(|e| IndexerError::Parse(format!("bad redirect: {e}")))?;
-            if matches!(resp.status().as_u16(), 301..=303) {
-                method = Method::GET;
-                body = None;
-            }
+            (method, body) = redirect_request(resp.status().as_u16(), method, body, self.own_host(&next));
             url = next;
         }
         Err(IndexerError::Parse("too many redirects".into()))
@@ -279,18 +273,22 @@ impl DefinitionIndexer {
             .map(|c| c.trim_matches('"').to_string());
         let bytes = crate::http::read_limited(resp, crate::http::MAX_PAGE_BYTES).await?;
         let text = decode(&bytes, charset.as_deref().unwrap_or(&self.def.encoding));
-        if is_cloudflare_challenge(status, &resp_headers, &text) {
+        // Only the tracker itself is solved: a redirect elsewhere must not get the session
+        // cookies or the login body, nor plant cookies in the tracker's jar.
+        if is_cloudflare_challenge(status, &resp_headers, &text) && self.own_host(&final_url) {
             let fs = self.flaresolverr.as_ref().ok_or_else(|| {
                 IndexerError::Cloudflare("challenge detected; configure FlareSolverr".into())
             })?;
             let sol = fs.solve(final_url.as_str(), body.as_deref(), &s.jar).await?;
-            for (n, v) in &sol.cookies {
-                s.jar.set(n, v);
-            }
-            if sol.user_agent.is_some() {
-                s.user_agent = sol.user_agent;
-            }
             let url = Url::parse(&sol.url).unwrap_or(final_url);
+            if self.own_host(&url) {
+                for (n, v) in &sol.cookies {
+                    s.jar.set(n, v);
+                }
+                if sol.user_agent.is_some() {
+                    s.user_agent = sol.user_agent;
+                }
+            }
             return Ok(Page { url, body: sol.body });
         }
         if let Some(e) = err {
@@ -1734,6 +1732,10 @@ impl Indexer for DefinitionIndexer {
         self.protocol
     }
 
+    fn owns_url(&self, url: &Url) -> bool {
+        self.own_host(url)
+    }
+
     async fn capabilities(&self) -> Result<IndexerCapabilities, IndexerError> {
         Ok(self.caps.clone())
     }
@@ -1769,9 +1771,50 @@ impl Indexer for DefinitionIndexer {
     }
 }
 
+/// Method and body for the next hop of a redirect: 301–303 switch to a body-less GET; 307/308
+/// keep both, but only towards the tracker itself (a form body such as login credentials is
+/// never replayed to a foreign host).
+fn redirect_request(
+    status: u16,
+    method: Method,
+    body: Option<String>,
+    next_is_own: bool,
+) -> (Method, Option<String>) {
+    if matches!(status, 301..=303) || (body.is_some() && !next_is_own) {
+        (Method::GET, None)
+    } else {
+        (method, body)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirects_drop_body_towards_foreign_hosts() {
+        let body = || Some("user=a&pass=b".to_string());
+        assert_eq!(
+            redirect_request(307, Method::POST, body(), true),
+            (Method::POST, body())
+        );
+        assert_eq!(
+            redirect_request(308, Method::POST, body(), false),
+            (Method::GET, None)
+        );
+        assert_eq!(
+            redirect_request(307, Method::POST, body(), false),
+            (Method::GET, None)
+        );
+        assert_eq!(
+            redirect_request(302, Method::POST, body(), true),
+            (Method::GET, None)
+        );
+        assert_eq!(
+            redirect_request(307, Method::GET, None, false),
+            (Method::GET, None)
+        );
+    }
 
     #[test]
     fn xml_documents_keep_rss_elements() {

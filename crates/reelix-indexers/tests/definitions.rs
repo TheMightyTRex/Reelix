@@ -60,6 +60,26 @@ fn text_credentials_are_secret_fields() {
 }
 
 #[test]
+fn own_host_is_the_tracker_and_its_subdomains_only() {
+    let idx = build(
+        "definition:lumentracker",
+        &json!({"base_url": "https://www.tracker.example.org/", "username": "u", "password": "p"}),
+        &ctx(1, "Lumen"),
+    )
+    .unwrap();
+    let owns = |u: &str| idx.owns_url(&url::Url::parse(u).unwrap());
+    assert!(owns("https://www.tracker.example.org/dl/1"));
+    assert!(owns("https://tracker.example.org/dl/1"));
+    assert!(owns("https://cdn.tracker.example.org/dl/1"));
+    assert!(owns("https://lumen.invalid/dl/1"), "definition link");
+    // Parent domains and public suffixes are not the tracker.
+    assert!(!owns("https://example.org/"));
+    assert!(!owns("https://org/"));
+    assert!(!owns("https://invalid/"));
+    assert!(!owns("https://other.example.org/"));
+}
+
+#[test]
 fn broken_definitions_are_reported_not_fatal() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("good.yml"), fixture("definitions/kestrel.yml")).unwrap();

@@ -1,7 +1,8 @@
 //! HTTP plumbing shared by the adapters: per-indexer clients with proxies, the SSRF
 //! guard, a tiny cookie jar and the FlareSolverr client.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::redirect;
@@ -95,16 +96,76 @@ pub fn is_private(ip: IpAddr) -> bool {
                 || v4.is_link_local()
                 || v4.is_unspecified()
                 || v4.is_broadcast()
+                || v4.is_multicast()
                 || (o[0] == 100 && (o[1] & 0xc0) == 64) // CGNAT 100.64/10
-                || o[0] == 0
+                || (o[0] == 198 && (o[1] & 0xfe) == 18) // benchmarking 198.18/15
+                || o[0] == 0 // "this network" 0/8
+                || o[0] >= 240 // reserved 240/4
         }
         IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
+            // IPv4-mapped `::ffff:a.b.c.d` and IPv4-compatible `::a.b.c.d`.
+            if let Some(v4) = v6.to_ipv4() {
                 return is_private(IpAddr::V4(v4));
             }
             let s = v6.segments();
-            v6.is_loopback() || v6.is_unspecified() || (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80
+            let embedded =
+                |hi: u16, lo: u16| IpAddr::V4(Ipv4Addr::from((u32::from(hi) << 16) | u32::from(lo)));
+            // NAT64 64:ff9b::/96 carries the IPv4 target in the low 32 bits.
+            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+                return is_private(embedded(s[6], s[7]));
+            }
+            // 6to4 2002::/16 carries the IPv4 address in bits 16..48.
+            if s[0] == 0x2002 {
+                return is_private(embedded(s[1], s[2]));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
+                || (s[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+                || (s[0] & 0xffc0) == 0xfec0 // deprecated site-local fec0::/10
         }
+    }
+}
+
+/// Keeps the public addresses of `addrs`, failing when none remain.
+fn public_addrs(
+    host: &str,
+    addrs: impl Iterator<Item = SocketAddr>,
+) -> Result<Vec<SocketAddr>, IndexerError> {
+    let mut blocked = None;
+    let public: Vec<_> = addrs
+        .filter(|a| {
+            let private = is_private(a.ip());
+            if private {
+                blocked.get_or_insert(a.ip());
+            }
+            !private
+        })
+        .collect();
+    if public.is_empty() {
+        return Err(IndexerError::Blocked(match blocked {
+            Some(ip) => format!("{host} resolves to {ip}"),
+            None => format!("cannot resolve {host}"),
+        }));
+    }
+    Ok(public)
+}
+
+/// DNS resolver that drops private addresses, so the SSRF guard also holds at connect time
+/// (no DNS-rebinding window between [`AddressGuard::check`] and the actual connection, and
+/// redirects to host names that resolve privately fail too).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GuardedResolver;
+
+impl reqwest::dns::Resolve for GuardedResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs = tokio::net::lookup_host((host.as_str(), 0)).await?;
+            let public = public_addrs(&host, addrs)?;
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
     }
 }
 
@@ -152,6 +213,45 @@ impl AddressGuard {
         }
         Ok(())
     }
+
+    /// Enforces the guard inside the connection: unless private addresses are allowed, host
+    /// names are resolved through [`GuardedResolver`]. IP literals don't go through DNS, so
+    /// pair this with [`Self::redirect_policy`] (or [`Self::check_literal`]) for those.
+    pub fn secure(&self, builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        if self.allow_private {
+            builder
+        } else {
+            builder.dns_resolver(Arc::new(GuardedResolver))
+        }
+    }
+
+    /// Follows up to 10 redirects, stopping (the 3xx response is returned) at non-HTTP
+    /// schemes such as magnet links and at hops the literal check rejects.
+    pub fn redirect_policy(self) -> redirect::Policy {
+        redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 || self.check_literal(attempt.url()).is_err() {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        })
+    }
+}
+
+/// Whether `host` is `known` or one of its subdomains (a leading `www.` on `known` is
+/// ignored). Never true for a parent domain or public suffix of `known`.
+pub fn host_within(host: &str, known: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let known = known.trim_end_matches('.').to_ascii_lowercase();
+    let known = match known.strip_prefix("www.") {
+        Some(rest) if rest.contains('.') => rest,
+        _ => known.as_str(),
+    };
+    !known.is_empty()
+        && (host == known
+            || host
+                .strip_suffix(known)
+                .is_some_and(|sub| sub.ends_with('.') && sub.len() > 1))
 }
 
 /// Network options for building an indexer's own HTTP client.
@@ -164,20 +264,15 @@ pub struct HttpOptions {
 }
 
 /// Builds a per-indexer client. Redirects are followed (≤ 10 hops) except into non-HTTP
-/// schemes (magnet links surface as the 3xx response) or blocked addresses.
+/// schemes (magnet links surface as the 3xx response) or blocked addresses; host names are
+/// resolved through the guard. Behind a proxy the proxy resolves the target, so only the
+/// pre-flight [`AddressGuard::check`] applies (and the admin-chosen proxy may be on the LAN).
 pub(crate) fn build_client(
     opts: &HttpOptions,
     follow_redirects: bool,
 ) -> Result<reqwest::Client, IndexerError> {
-    let guard = opts.guard;
     let policy = if follow_redirects {
-        redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= 10 || guard.check_literal(attempt.url()).is_err() {
-                attempt.stop()
-            } else {
-                attempt.follow()
-            }
-        })
+        opts.guard.redirect_policy()
     } else {
         redirect::Policy::none()
     };
@@ -186,8 +281,9 @@ pub(crate) fn build_client(
         .user_agent(opts.user_agent.clone())
         .redirect(policy)
         .gzip(true);
-    if let Some(p) = &opts.proxy {
-        b = b.proxy(p.to_reqwest()?);
+    match &opts.proxy {
+        Some(p) => b = b.proxy(p.to_reqwest()?),
+        None => b = opts.guard.secure(b),
     }
     b.build()
         .map_err(|e| IndexerError::Config(format!("http client: {e}")))
@@ -415,6 +511,99 @@ mod tests {
                 .check_literal(&Url::parse("http://192.168.1.2/").unwrap())
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn host_within_never_matches_parents() {
+        assert!(host_within("tracker.example", "tracker.example"));
+        assert!(host_within("dl.tracker.example", "tracker.example"));
+        assert!(host_within("tracker.example", "www.tracker.example"));
+        assert!(host_within("TRACKER.example.", "tracker.example"));
+        assert!(!host_within("example", "tracker.example"));
+        assert!(!host_within("evil.example", "tracker.example"));
+        assert!(!host_within("co.uk", "tracker.co.uk"));
+        assert!(!host_within("eviltracker.example", "tracker.example"));
+        assert!(!host_within(".tracker.example", "tracker.example"));
+    }
+
+    #[test]
+    fn private_ranges() {
+        for ip in [
+            "0.1.2.3",
+            "100.64.0.1",
+            "198.18.0.1",
+            "198.19.255.254",
+            "224.0.0.1",
+            "239.255.255.250",
+            "255.255.255.255",
+            "240.0.0.1",
+            "::ffff:127.0.0.1",
+            "::127.0.0.1",
+            "::10.0.0.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::a9fe:a9fe",
+            "2002:c0a8:0101::1",
+            "2002:7f00:1::",
+            "ff02::1",
+            "fd00::1",
+            "fe80::1",
+        ] {
+            assert!(is_private(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "93.184.216.34",
+            "198.20.0.1",
+            "100.128.0.1",
+            "::ffff:93.184.216.34",
+            "64:ff9b::5db8:d822",
+            "2002:5db8:d822::1",
+            "2606:4700::1111",
+        ] {
+            assert!(!is_private(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn resolver_drops_private_addresses() {
+        let a = |s: &str| s.parse::<SocketAddr>().unwrap();
+        let kept = public_addrs(
+            "mixed.test",
+            [a("127.0.0.1:80"), a("93.184.216.34:80"), a("[fd00::1]:80")].into_iter(),
+        )
+        .unwrap();
+        assert_eq!(kept, vec![a("93.184.216.34:80")]);
+        assert!(matches!(
+            public_addrs("lan.test", [a("10.0.0.1:80"), a("[::1]:80")].into_iter()),
+            Err(IndexerError::Blocked(m)) if m.contains("10.0.0.1")
+        ));
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_refuses_localhost() {
+        use reqwest::dns::Resolve;
+        let name: reqwest::dns::Name = "localhost".parse().unwrap();
+        assert!(GuardedResolver.resolve(name).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn guarded_client_cannot_reach_loopback_by_name() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let opts = |allow_private| HttpOptions {
+            proxy: None,
+            timeout: Duration::from_secs(5),
+            user_agent: "t".into(),
+            guard: AddressGuard { allow_private },
+        };
+        let url = format!("http://localhost:{port}/");
+        let err = build_client(&opts(false), true)
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_connect(), "{err:?}");
+        drop(listener);
     }
 
     #[test]

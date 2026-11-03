@@ -529,7 +529,7 @@ impl SearchService {
                     ));
                 };
                 (
-                    self.raw_release(req, url)?,
+                    self.raw_release(req, url).await?,
                     None,
                     Vec::new(),
                     ContentRef::default(),
@@ -552,7 +552,7 @@ impl SearchService {
         self.grab(&release, &target, req.download_client_id).await
     }
 
-    fn raw_release(&self, req: &GrabRequest, url: String) -> Result<GrabbedRelease> {
+    async fn raw_release(&self, req: &GrabRequest, url: String) -> Result<GrabbedRelease> {
         let (row, ix) = self
             .providers
             .indexers()
@@ -561,9 +561,25 @@ impl SearchService {
             .ok_or_else(|| {
                 SearchError::NotFound(format!("indexer {} not found or disabled", req.indexer_id))
             })?;
+        let magnet = url.starts_with("magnet:");
+        if !magnet {
+            // A user-supplied link: it must pass the SSRF guard and live on the indexer itself
+            // (the indexer's cookies / API key are sent along when fetching it).
+            let parsed = url::Url::parse(url.trim())
+                .map_err(|e| SearchError::Validation(format!("invalid download_url: {e}")))?;
+            self.guard()
+                .check(&parsed)
+                .await
+                .map_err(|e| SearchError::Validation(format!("download_url rejected: {e}")))?;
+            if !ix.owns_url(&parsed) {
+                return Err(SearchError::Validation(format!(
+                    "download_url must point at indexer {}",
+                    row.name
+                )));
+            }
+        }
         let title = req.title.clone().unwrap_or_else(|| req.guid.clone());
         let parsed = reelix_parser::parse(&title);
-        let magnet = url.starts_with("magnet:");
         Ok(GrabbedRelease {
             guid: req.guid.clone(),
             title,
@@ -586,6 +602,13 @@ impl SearchService {
             seed_ratio: row.settings.get("seed_ratio").and_then(serde_json::Value::as_f64),
             seed_time_minutes: row.setting_u64("seed_time_minutes").map(|v| v as u32),
         })
+    }
+
+    /// The indexer SSRF guard, honouring the "allow private addresses" setting.
+    pub(crate) fn guard(&self) -> reelix_indexers::AddressGuard {
+        reelix_indexers::AddressGuard {
+            allow_private: self.providers.allow_private_addresses(),
+        }
     }
 
     // ------------------------------------------------------------------

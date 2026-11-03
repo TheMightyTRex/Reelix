@@ -152,6 +152,10 @@ pub async fn resolve(
     }
 }
 
+/// Downloads a `.torrent` (following up to 6 redirects, magnet hops included).
+///
+/// No SSRF guard here: callers must check the address of `url` first (the pipeline runs the
+/// indexer `AddressGuard` before handing out a [`ReleasePayload::Url`]).
 async fn fetch(http: &reqwest::Client, url: &str, title: &str) -> Result<TorrentSource, ClientError> {
     let mut current = url.to_owned();
     for _ in 0..6 {

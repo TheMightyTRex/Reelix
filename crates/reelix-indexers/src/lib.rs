@@ -37,6 +37,11 @@ pub use newznab::{Flavor, NewznabIndexer};
 #[async_trait]
 pub trait Indexer: Send + Sync {
     fn protocol(&self) -> Protocol;
+    /// Whether `url` is on this indexer's own host (or a subdomain of it). User-supplied
+    /// download links are only accepted there; unknown implementations own nothing.
+    fn owns_url(&self, _url: &Url) -> bool {
+        false
+    }
     /// Search modes and categories (fetched from the indexer once, then cached).
     async fn capabilities(&self) -> Result<IndexerCapabilities, IndexerError>;
     async fn search(&self, query: &SearchQuery) -> Result<Vec<ReleaseInfo>, IndexerError>;
