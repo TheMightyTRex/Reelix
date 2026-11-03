@@ -1,6 +1,6 @@
 //! ProviderService flows against wiremock (no real network).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use reelix_api_types::HealthLevel;
@@ -455,14 +455,15 @@ async fn tags_mappings_and_download_clients() {
         .unwrap();
     assert!(b.tags.is_empty());
 
-    // Remote path mappings.
-    let m = e
-        .svc
-        .create_mapping("nas", "/downloads", "/mnt/dl")
-        .await
-        .unwrap();
+    // Remote path mappings. Local paths must be absolute on this OS.
+    let (dl, x) = if cfg!(windows) {
+        (r"C:\mnt\dl", r"C:\x")
+    } else {
+        ("/mnt/dl", "/x")
+    };
+    let m = e.svc.create_mapping("nas", "/downloads", dl).await.unwrap();
     assert!(matches!(
-        e.svc.create_mapping("nas", "/downloads", "/x").await,
+        e.svc.create_mapping("nas", "/downloads", x).await,
         Err(ProviderError::Conflict(_))
     ));
     assert!(matches!(
@@ -471,7 +472,7 @@ async fn tags_mappings_and_download_clients() {
     ));
     assert_eq!(
         e.svc.map_remote_path("nas", "/downloads/movies/a.mkv"),
-        PathBuf::from("/mnt/dl/movies/a.mkv")
+        Path::new(dl).join("movies/a.mkv")
     );
     assert_eq!(
         e.svc.map_remote_path("other", "/downloads/a"),

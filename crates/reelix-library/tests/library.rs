@@ -687,8 +687,10 @@ async fn series_add_monitor_scan_refresh_and_calendar() {
         .await
         .unwrap();
     assert!(
-        ren.iter()
-            .any(|r| r.new_path.starts_with("Season 02/The Show (2020) - S02E01-02 - ")),
+        ren.iter().any(|r| r
+            .new_path
+            .replace('\\', "/")
+            .starts_with("Season 02/The Show (2020) - S02E01-02 - ")),
         "{ren:?}"
     );
 

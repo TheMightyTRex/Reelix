@@ -4188,6 +4188,7 @@ dependencies = [
  "fs4",
  "reelix-parser",
  "regex",
+ "same-file",
  "serde",
  "serde_json",
  "tempfile",

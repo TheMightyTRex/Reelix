@@ -178,19 +178,13 @@ pub(crate) fn transfer_impl(
     Ok(outcome(method))
 }
 
-/// Same path after canonicalisation, or (unix) the same inode, e.g. an existing hardlink.
+/// Same path after canonicalisation, or the same file on disk (inode on unix, volume and
+/// file index on Windows), e.g. an existing hardlink.
 fn same_file(a: &Path, b: &Path) -> bool {
     if matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y) {
         return true;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b)) {
-            return x.dev() == y.dev() && x.ino() == y.ino();
-        }
-    }
-    false
+    same_file::is_same_file(a, b).unwrap_or(false)
 }
 
 fn temp_path(dst: &Path) -> PathBuf {

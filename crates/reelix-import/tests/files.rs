@@ -186,7 +186,8 @@ fn path_guard_containment() {
     ));
     assert!(matches!(
         guard.check(&lib.join("missing/../../other")),
-        Err(Error::InvalidPath { .. })
+        // Windows resolves `..` lexically, so the path exists and lands outside the roots.
+        Err(Error::InvalidPath { .. }) | Err(Error::OutsideRoots(_))
     ));
     assert!(matches!(
         guard.check(Path::new("relative/x")),

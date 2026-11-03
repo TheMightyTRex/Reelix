@@ -693,7 +693,7 @@ async fn multi_disc_albums_get_disc_folders_and_move_removes_sources() {
     assert!(
         preview
             .iter()
-            .any(|p| p.new_path == "Kid A (2000)/02-01 - The National Anthem.flac")
+            .any(|p| p.new_path.replace('\\', "/") == "Kid A (2000)/02-01 - The National Anthem.flac")
     );
     assert_eq!(e.svc.execute_rename(artist_id).await.unwrap(), 4);
     assert!(base.join("02-01 - The National Anthem.flac").is_file());

@@ -247,7 +247,12 @@ mod tests {
             assert!(inside(&root.join("link/sub")).is_err());
         }
         // Roots not on disk are checked lexically.
-        assert!(ensure_inside("/nowhere/movies/Film", ["/nowhere/movies"]).is_ok());
-        assert!(ensure_inside("/nowhere/movies/../etc", ["/nowhere/movies"]).is_err());
+        let nowhere = if cfg!(windows) {
+            r"C:\nowhere\movies"
+        } else {
+            "/nowhere/movies"
+        };
+        assert!(ensure_inside(&format!("{nowhere}/Film"), [nowhere]).is_ok());
+        assert!(ensure_inside(&format!("{nowhere}/../etc"), [nowhere]).is_err());
     }
 }
