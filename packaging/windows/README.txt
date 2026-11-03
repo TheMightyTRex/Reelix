@@ -4,6 +4,12 @@ Reelix @VERSION@ for Windows (@ARCH@)
 Pre-alpha build. Nothing has been tested against real indexers, download
 clients or media servers yet.
 
+If you unzipped this folder yourself, this is the portable version. The
+release also has an installer, reelix-@VERSION@-windows-x86_64-setup.exe,
+which installs Reelix just for you or for all users as a Windows service,
+adds Start menu shortcuts and updates in place. Don't run both on the same
+port.
+
 Run
 ---
 1. Unzip this folder anywhere (keep reelix.exe and the "web" folder together).
