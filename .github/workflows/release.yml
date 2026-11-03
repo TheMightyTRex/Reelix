@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds the Windows and Linux downloads, a multi-arch Docker image,
-# checksums and an SBOM, and publishes a GitHub release with the CHANGELOG.md section as notes.
+# Pushing a tag like v0.2.0 builds the Windows and Linux downloads (archives, the Windows
+# installer and the Linux install.sh), a multi-arch Docker image, checksums and an SBOM, and publishes a GitHub release with the CHANGELOG.md section as notes.
 # Running it manually does a dry run: everything is built and uploaded as workflow artifacts,
 # but nothing is published.
 
@@ -162,15 +162,10 @@ jobs:
           path: target/release/reelix.exe
           if-no-files-found: error
 
-  package:
-    name: package
+  archives:
+    name: archives
     needs: [prepare, web, linux, windows]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # Signed build provenance for the archives (verify with `gh attestation verify`).
-      id-token: write
-      attestations: write
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -209,6 +204,7 @@ jobs:
         run: |
           mkdir smoke && tar -C smoke -xzf "dist/reelix-$VERSION-linux-x86_64.tar.gz"
           cd "smoke/reelix-$VERSION-linux-x86_64"
+          grep -qx '{"kind": "portable"}' install.json
           ./reelix --port 7799 --data-dir "$RUNNER_TEMP/data" &
           pid=$!
           for i in $(seq 1 30); do
@@ -218,6 +214,143 @@ jobs:
           curl -fsS http://127.0.0.1:7799/api/v1/setup
           curl -fsS -o /dev/null http://127.0.0.1:7799/
           kill "$pid"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: archives
+          path: dist
+          if-no-files-found: error
+
+  windows-installer:
+    name: windows installer
+    needs: [prepare, archives]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: dl7
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        continue-on-error: true
+        with:
+          name: archives
+          path: archives
+      - name: retry download (archives)
+        if: steps.dl7.outcome == 'failure'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: archives
+          path: archives
+      # The installer is built from the released zip, so both ship byte-identical files.
+      - name: build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          $name = "reelix-$env:VERSION-windows-x86_64"
+          Expand-Archive "archives\$name.zip" -DestinationPath "$env:RUNNER_TEMP\win"
+          & $iscc /Qp "/DAppVersion=$env:VERSION" "/DSourceDir=$env:RUNNER_TEMP\win\$name" "/O$env:GITHUB_WORKSPACE\installer" packaging\windows\reelix.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem installer
+      - name: smoke test (install for me only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = "installer\reelix-$env:VERSION-windows-x86_64-setup.exe"
+          $p = Start-Process $setup -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/CURRENTUSER', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup-user.log"
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup-user.log"; throw "setup exited $($p.ExitCode)" }
+          $dir = "$env:LOCALAPPDATA\Programs\Reelix"
+          foreach ($f in 'reelix.exe', 'install.json', 'web\index.html', 'unins000.exe') {
+            if (-not (Test-Path "$dir\$f")) { throw "$dir\$f missing" }
+          }
+          $kind = (Get-Content "$dir\install.json" -Raw | ConvertFrom-Json).kind
+          if ($kind -ne 'windows-user') { throw "install.json kind is '$kind'" }
+          & "$dir\reelix.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "reelix --version exited $LASTEXITCODE" }
+          # Leave it running: the uninstaller has to stop it.
+          $rx = Start-Process "$dir\reelix.exe" -WorkingDirectory $dir -PassThru -ArgumentList '--port', '7799', '--data-dir', "$env:RUNNER_TEMP\rx-data"
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7799/api/v1/system/health | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) { throw 'installed reelix.exe did not become healthy' }
+          $p = Start-Process "$dir\unins000.exe" -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\uninstall-user.log"
+          if ($p.ExitCode -ne 0) { throw "uninstall exited $($p.ExitCode)" }
+          # The uninstaller re-launches itself from %TEMP%; wait for it to finish.
+          foreach ($i in 1..60) { if (-not (Test-Path "$dir\reelix.exe")) { break }; Start-Sleep 1 }
+          if (Test-Path "$dir\reelix.exe") { Get-Content "$env:RUNNER_TEMP\uninstall-user.log" -ErrorAction SilentlyContinue; throw 'reelix.exe still installed' }
+          if (-not $rx.HasExited) { throw 'uninstall did not stop the running reelix.exe' }
+      # TODO: drop continue-on-error once `reelix.exe service install|uninstall` has shipped.
+      - name: smoke test (install for all users, Windows service)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = "installer\reelix-$env:VERSION-windows-x86_64-setup.exe"
+          $p = Start-Process $setup -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/ALLUSERS', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup-service.log"
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\setup-service.log"; throw "setup exited $($p.ExitCode)" }
+          $dir = "$env:ProgramFiles\Reelix"
+          $kind = (Get-Content "$dir\install.json" -Raw | ConvertFrom-Json).kind
+          if ($kind -ne 'windows-service') { throw "install.json kind is '$kind'" }
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7700/api/v1/system/health | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          Get-Service Reelix | Format-List Name, Status, StartType
+          if (-not $ok) { Get-Content "$env:RUNNER_TEMP\setup-service.log"; throw 'service did not become healthy' }
+          $p = Start-Process "$dir\unins000.exe" -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\uninstall-service.log"
+          foreach ($i in 1..60) { if (-not (Test-Path "$dir\reelix.exe")) { break }; Start-Sleep 1 }
+          if (Get-Service Reelix -ErrorAction SilentlyContinue) { throw 'service still registered after uninstall' }
+          if (-not (Test-Path "$env:ProgramData\Reelix")) { throw 'uninstall deleted the data folder' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer
+          path: installer/*.exe
+          if-no-files-found: error
+
+  package:
+    name: package
+    needs: [prepare, archives, windows-installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Signed build provenance for the release assets (verify with `gh attestation verify`).
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: dl8
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        continue-on-error: true
+        with:
+          name: archives
+          path: dist
+      - name: retry download (archives)
+        if: steps.dl8.outcome == 'failure'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: archives
+          path: dist
+      - id: dl9
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        continue-on-error: true
+        with:
+          name: windows-installer
+          path: dist
+      - name: retry download (windows-installer)
+        if: steps.dl9.outcome == 'failure'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: windows-installer
+          path: dist
+      - name: add Linux install script
+        run: |
+          install -m 755 packaging/linux/install.sh dist/install.sh
+          ls -l dist
       # Syft reads the workspace Cargo.lock (copied alone so the fuzz crate's lockfile stays out).
       - name: prepare SBOM input
         run: mkdir sbom-src && cp Cargo.toml Cargo.lock sbom-src/
@@ -231,7 +364,9 @@ jobs:
       - name: checksums
         working-directory: dist
         run: |
-          sha256sum "reelix-$VERSION-sbom.spdx.json" > "reelix-$VERSION-sbom.spdx.json.sha256"
+          for f in "reelix-$VERSION-sbom.spdx.json" "reelix-$VERSION-windows-x86_64-setup.exe" install.sh; do
+            sha256sum "$f" > "$f.sha256"
+          done
           cat *.sha256 | sort -k2 > SHA256SUMS
           cat SHA256SUMS
       - name: attest build provenance
@@ -241,6 +376,8 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.exe
+            dist/install.sh
             dist/*.spdx.json
             dist/SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -248,6 +385,47 @@ jobs:
           name: dist
           path: dist
           if-no-files-found: error
+
+  linux-installer:
+    name: linux installer
+    needs: [prepare, package]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - id: dl10
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        continue-on-error: true
+        with:
+          name: dist
+          path: dist
+      - name: retry download (dist)
+        if: steps.dl10.outcome == 'failure'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: dist
+          path: dist
+      # Runs the published install.sh against the built tarball under the runner's systemd.
+      - name: smoke test install.sh
+        run: |
+          sudo sh dist/install.sh --archive-dir dist --version "$VERSION" --port 7798
+          systemctl is-active reelix
+          grep -qx '{"kind": "linux-systemd"}' /opt/reelix/install.json
+          [ "$(stat -c %U /opt/reelix/reelix)" = reelix ]
+          curl -fsS http://127.0.0.1:7798/api/v1/system/health
+          curl -fsS http://127.0.0.1:7798/api/v1/setup
+          # Re-running is an upgrade that keeps the port.
+          sudo sh dist/install.sh --archive-dir dist --version "$VERSION"
+          grep -q -- '--port 7798' /etc/systemd/system/reelix.service
+          curl -fsS http://127.0.0.1:7798/api/v1/system/health
+          sudo journalctl -u reelix --no-pager | tail -n 20
+          sudo sh dist/install.sh --uninstall
+          test ! -e /opt/reelix
+          test ! -e /etc/systemd/system/reelix.service
+          sudo test -d /var/lib/reelix
+          sudo sh dist/install.sh --uninstall --purge
+          sudo test ! -e /var/lib/reelix
+          if id reelix; then echo "::error::reelix user still exists"; exit 1; fi
 
   docker:
     name: docker image
@@ -344,7 +522,7 @@ jobs:
 
   publish:
     name: publish release
-    needs: [prepare, package, docker]
+    needs: [prepare, package, docker, linux-installer]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -397,6 +575,8 @@ jobs:
           files: |
             artifacts/dist/*.tar.gz
             artifacts/dist/*.zip
+            artifacts/dist/*.exe
+            artifacts/dist/install.sh
             artifacts/dist/*.spdx.json
             artifacts/dist/*.sha256
             artifacts/dist/SHA256SUMS

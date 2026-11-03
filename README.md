@@ -85,7 +85,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 
 ## Installation
 
-Release archives and `SHA256SUMS` carry signed build provenance; check a download with `gh attestation verify <file> --repo demonzoned/Reelix`.
+Release archives, installers and `SHA256SUMS` carry signed build provenance; check a download with `gh attestation verify <file> --repo demonzoned/Reelix`.
 
 ### Docker
 
@@ -116,6 +116,15 @@ To build the image yourself, run `docker build -f docker/Dockerfile -t reelix .`
 
 ### Windows
 
+**Installer (recommended):** download `reelix-<version>-windows-x86_64-setup.exe` and run it. Setup asks how to install:
+
+- **Install for me only** (no admin rights): installs to `%LOCALAPPDATA%\Programs\Reelix` and keeps data in `%LOCALAPPDATA%\Reelix`. Start Reelix from the Start menu; optionally it starts when you sign in.
+- **Install for all users** (admin): installs to `C:\Program Files\Reelix` and runs Reelix as the Windows service `Reelix`, which starts with Windows even when nobody is signed in. Data lives in `C:\ProgramData\Reelix`.
+
+Either way, **Open Reelix** in the Start menu opens <http://localhost:7700>, updates install in place from **System → Updates**, and uninstalling keeps your data unless you ask to delete it. See [docs/installers.md](docs/installers.md).
+
+**Portable zip:**
+
 1. Download `reelix-<version>-windows-x86_64.zip` and unzip it anywhere.
 2. Double-click `start-reelix.cmd`.
 3. Open <http://localhost:7700>.
@@ -124,7 +133,17 @@ Settings and the database are stored in the `data` folder next to `reelix.exe`. 
 
 ### Linux
 
-Runs on any x86_64 distribution with glibc 2.17 or newer (CentOS 7, Ubuntu 16.04, Debian 9 and later). On Alpine or other musl-based systems, use Docker.
+Runs on any x86_64 or aarch64 distribution with glibc 2.17 or newer (CentOS 7, Ubuntu 16.04, Debian 9 and later). On Alpine or other musl-based systems, use Docker.
+
+**systemd service (one line):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/demonzoned/Reelix/master/packaging/linux/install.sh | sudo sh
+```
+
+This verifies the download against `SHA256SUMS`, installs to `/opt/reelix` (owned by a `reelix` system user so Reelix can update itself), keeps data in `/var/lib/reelix` and starts the `reelix` service. Run it again to upgrade; pass options after `sh -s --`, e.g. `| sudo sh -s -- --port 8080` or `--version 0.7.0`, and `--uninstall` to remove it (data is kept unless you add `--purge`). Logs: `journalctl -u reelix -f`. Media folders under `/home` need a `ReadWritePaths=` drop-in (`systemctl edit reelix`); see [docs/installers.md](docs/installers.md).
+
+**Tarball:**
 
 ```bash
 tar xzf reelix-<version>-linux-x86_64.tar.gz
@@ -132,7 +151,7 @@ cd reelix-<version>-linux-x86_64
 ./start-reelix.sh
 ```
 
-Then open <http://localhost:7700>. Settings and the database are stored in the `data` folder next to the binary (or pass `--data-dir`). Install `ffprobe` with your package manager (e.g. `apt install ffmpeg`). The bundled `README.txt` includes an example systemd unit.
+Then open <http://localhost:7700>. Settings and the database are stored in the `data` folder next to the binary (or pass `--data-dir`). Install `ffprobe` with your package manager (e.g. `apt install ffmpeg`).
 
 ### From source
 
@@ -155,7 +174,7 @@ Run the binary from the repository root so it finds the web UI in `crates/reelix
 
 Open <http://localhost:7700>. The setup wizard walks you through:
 
-1. Creating the admin account. Unless you are browsing from the server itself, the wizard asks for the one-time setup token that Reelix prints to its log (and stdout) when it starts without any users, e.g. `docker logs reelix`.
+1. Creating the admin account. Unless you are browsing from the server itself, the wizard asks for the one-time setup token that Reelix prints to its log (and stdout) when it starts without any users, e.g. `docker logs reelix` or `journalctl -u reelix`.
 2. Connecting a media server (optional).
 3. Adding root folders for each library you want to manage.
 4. Adding a download client and indexers.

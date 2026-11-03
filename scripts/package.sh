@@ -4,11 +4,12 @@
 #   scripts/package.sh <linux|windows> <arch> <version> <binary> <web-dist> <out-dir>
 #
 # Produces <out-dir>/reelix-<version>-<os>-<arch>.tar.gz (Linux) or .zip (Windows)
-# plus a matching .sha256 file. Packaging files come from packaging/<os>/.
+# plus a matching .sha256 file. Packaging files come from packaging/<os>/. Every archive
+# carries install.json {"kind": "portable"} next to the binary (see docs/installers.md).
 set -euo pipefail
 
 if [ $# -ne 6 ]; then
-    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
 fi
 
@@ -36,7 +37,9 @@ cp "$binary" "$dir/$exe"
 (cd "$web" && find . -mindepth 1 -maxdepth 1 ! -name '.*' -exec cp -R {} "$dir/web/" \;)
 cp "$root/LICENSE" "$dir/LICENSE.txt"
 mkdir -p "$dir/docs"
-cp "$root/docs/direct-downloads.md" "$dir/docs/"
+cp "$root/docs/direct-downloads.md" "$root/docs/installers.md" "$dir/docs/"
+# Install marker read by the self-updater; installers replace it with their own kind.
+printf '{"kind": "portable"}\n' > "$dir/install.json"
 
 # README: fill in version and architecture, and keep the title underline the same length.
 sed -e "s/@VERSION@/$version/g" -e "s/@ARCH@/$arch/g" "$root/packaging/$os/README.txt" |

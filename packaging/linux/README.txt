@@ -28,22 +28,22 @@ REELIX_WEB_DIR).
 
 Running as a service (systemd)
 ------------------------------
-Example unit, assuming the folder was extracted to /opt/reelix and a
-"reelix" user exists:
+The easiest way is the install script, which sets up /opt/reelix, a
+"reelix" system user, /var/lib/reelix for data and the reelix.service unit,
+and lets Reelix update itself from System > Updates:
 
-  [Unit]
-  Description=Reelix
-  After=network-online.target
-  Wants=network-online.target
+  curl -fsSL https://raw.githubusercontent.com/demonzoned/Reelix/master/packaging/linux/install.sh | sudo sh
 
-  [Service]
-  User=reelix
-  WorkingDirectory=/opt/reelix
-  ExecStart=/opt/reelix/reelix --data-dir /var/lib/reelix
-  Restart=on-failure
+To install this exact download without fetching anything, put install.sh
+and SHA256SUMS from the same release next to the tarball and run, there:
 
-  [Install]
-  WantedBy=multi-user.target
+  sudo sh install.sh --archive-dir . --version @VERSION@
+
+Run it again to upgrade, add --port N to change the port, --uninstall to
+remove it (the data is kept unless you also pass --purge). Logs:
+journalctl -u reelix -f. Media folders under /home need a drop-in
+(systemctl edit reelix) with ReadWritePaths=/path/to/media. Details:
+https://github.com/demonzoned/Reelix/blob/master/docs/installers.md
 
 Coming from Radarr, Sonarr, Readarr, Lidarr, Prowlarr or Jellyseerr?
 --------------------------------------------------------------------
