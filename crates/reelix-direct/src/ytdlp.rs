@@ -4,6 +4,7 @@
 use crate::{
     DirectService,
     process::{command, safe_name},
+    youtube::channel_artist,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use reelix_api_types::direct::*;
@@ -22,7 +23,7 @@ use tokio::{
 const PROGRESS: &str = "REELIX-PROGRESS ";
 const PROGRESS_TEMPLATE: &str = "download:REELIX-PROGRESS %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s";
 /// Printed once a stream is in its final place, so the path reflects the real extension.
-const FILE_TEMPLATE: &str = "after_move:%(.{filepath,title,channel,uploader})j";
+const FILE_TEMPLATE: &str = "after_move:%(.{filepath,title,channel,uploader,artists,artist,album,track})j";
 /// Original-audio containers Reelix publishes unchanged.
 const ORIGINAL_AUDIO: [&str; 2] = ["m4a", "webm"];
 
@@ -34,16 +35,29 @@ pub(crate) struct Info {
     pub title: Option<String>,
     pub channel: Option<String>,
     pub uploader: Option<String>,
+    /// Music metadata, set for YouTube Music tracks.
+    pub artists: Option<Vec<String>>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub track: Option<String>,
     pub filepath: Option<String>,
     pub entries: Option<Vec<Option<Info>>>,
 }
 
 impl Info {
-    fn artist(&self) -> &str {
-        self.channel
-            .as_deref()
-            .or(self.uploader.as_deref())
-            .unwrap_or("YouTube")
+    /// The primary artist, falling back to the channel.
+    fn artist_name(&self) -> &str {
+        let artist = self.artists.as_ref().and_then(|a| a.first()).map(String::as_str);
+        let artist = artist.or_else(|| self.artist.as_deref().and_then(|a| a.split(',').next()));
+        match artist.map(str::trim).filter(|a| !a.is_empty()) {
+            Some(artist) => artist,
+            None => channel_artist(
+                self.channel
+                    .as_deref()
+                    .or(self.uploader.as_deref())
+                    .unwrap_or("YouTube"),
+            ),
+        }
     }
 }
 
@@ -63,22 +77,32 @@ pub(crate) fn parse_progress(value: &str) -> Option<f64> {
     Some((downloaded / total * 100.0).clamp(0.0, 100.0))
 }
 
-/// Find a published file for `id` from an earlier attempt, whatever its title was.
+/// Find a published file for `id` from an earlier attempt, whatever its title was,
+/// in the job folder or its `Artist/Album` subfolders.
 async fn existing_output(folder: &Path, id: &str, extensions: &[&str]) -> Result<Option<PathBuf>> {
-    let mut dir = match tokio::fs::read_dir(folder).await {
-        Ok(dir) => dir,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
-    };
-    while let Some(entry) = dir.next_entry().await? {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !name.starts_with('.')
-            && extensions
+    let mut pending = vec![(folder.to_path_buf(), 0)];
+    while let Some((folder, depth)) = pending.pop() {
+        let mut dir = match tokio::fs::read_dir(&folder).await {
+            Ok(dir) => dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e.into()),
+        };
+        while let Some(entry) = dir.next_entry().await? {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            if entry.file_type().await?.is_dir() {
+                if depth < 2 {
+                    pending.push((entry.path(), depth + 1));
+                }
+            } else if extensions
                 .iter()
                 .any(|ext| name.ends_with(&format!(" [{id}].{ext}")))
-        {
-            return Ok(Some(entry.path()));
+            {
+                return Ok(Some(entry.path()));
+            }
         }
     }
     Ok(None)
@@ -275,8 +299,10 @@ impl DirectService {
         settings: &DirectSettings,
     ) -> Result<()> {
         let r = &job.request;
+        let mut playlist = String::new();
         let ids: Vec<String> = if r.playlist {
-            let (_, items, _) = self.ytdlp_list(settings, r, false).await?;
+            let (title, items, _) = self.ytdlp_list(settings, r, false).await?;
+            playlist = title.strip_prefix("Album - ").unwrap_or(&title).to_owned();
             items.into_iter().filter_map(|e| e.id).collect()
         } else {
             let url = url::Url::parse(&r.url)?;
@@ -330,8 +356,12 @@ impl DirectService {
             };
             inputs.push(audio);
             let title = info.title.as_deref().unwrap_or(id);
-            let output = folder.join(format!("{} [{id}].{extension}", safe_name(title)));
-            self.publish_youtube(job, settings, inputs, &output, id, title, info.artist())
+            let artist = info.artist_name();
+            let album = info.album.as_deref().or(Some(playlist.as_str()));
+            let output = Self::youtube_folder(job, artist, album)
+                .join(format!("{} [{id}].{extension}", safe_name(title)));
+            let tag_title = info.track.as_deref().unwrap_or(title);
+            self.publish_youtube(job, settings, inputs, &output, id, tag_title, artist, album)
                 .await?;
         }
         Ok(())

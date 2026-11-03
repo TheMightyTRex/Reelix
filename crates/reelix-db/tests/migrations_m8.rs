@@ -220,7 +220,7 @@ async fn upgrade_from_0007_keeps_every_row() {
     assert_eq!((requests_seq, roots_seq), (Some(6), Some(4)));
     pool.close().await;
 
-    // 2. Upgrade with the embedded migrator (0008–0010), twice to check it is idempotent.
+    // 2. Upgrade with the embedded migrator (0008 onwards), twice to check it is idempotent.
     let url = format!("sqlite://{}", db_path.display());
     Db::connect(&url).await.unwrap().pool().close().await;
     let db = Db::connect(&url).await.unwrap();
@@ -230,7 +230,11 @@ async fn upgrade_from_0007_keeps_every_row() {
         .fetch_all(pool)
         .await
         .unwrap();
-    assert_eq!(versions, (1..=12).collect::<Vec<i64>>());
+    let latest = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations/sqlite"))
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "sql"))
+        .count() as i64;
+    assert_eq!(versions, (1..=latest).collect::<Vec<i64>>());
 
     // Every old column of every table keeps every value.
     for (t, cols, rows) in &before {

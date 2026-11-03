@@ -448,7 +448,7 @@ if [ "$id" = bbbbbbbbbbb ]; then echo "ERROR: [youtube] $id: Sign in to confirm 
 file="$dir/$(echo "$out" | sed 's/%(ext)s/webm/')"
 printf audio > "$file"
 echo 'REELIX-PROGRESS 5 10 NA' >&2
-printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan"}}\n' "$file" "$id"
+printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan - Topic"}}\n' "$file" "$id"
 "#,
             log = log.display()
         ),
@@ -483,7 +483,8 @@ printf '{{"filepath": "%s", "title": "Song/%s", "channel": "Chan"}}\n' "$file" "
         "yt-dlp failed: [youtube] bbbbbbbbbbb: Sign in to confirm you're not a bot"
     );
     let folder = Path::new(&job.output_dir);
-    let output = folder.join("Song_aaaaaaaaaaa [aaaaaaaaaaa].webm");
+    // Audio is sorted into Artist/Album, using the playlist when there is no album.
+    let output = folder.join("Chan/List/Song_aaaaaaaaaaa [aaaaaaaaaaa].webm");
     assert_eq!(tokio::fs::read(&output).await.unwrap(), b"audio");
     assert!(!folder.join(".aaaaaaaaaaa.audio.webm").exists());
 

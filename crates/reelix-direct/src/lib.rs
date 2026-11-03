@@ -66,10 +66,9 @@ impl DirectService {
         if !Path::new(&settings.output_dir).is_absolute() {
             bail!("Download folder must be an absolute server path");
         }
-        for tool in [&settings.ffmpeg] {
-            if tool.trim().is_empty() || tool.contains(['\n', '\r', '\0']) {
-                bail!("Executable paths must be nonempty paths or executable names");
-            }
+        let ffmpeg = &settings.ffmpeg;
+        if ffmpeg.trim().is_empty() || ffmpeg.contains(['\n', '\r', '\0']) {
+            bail!("The FFmpeg path must be a path or executable name");
         }
         if settings.yt_dlp.contains(['\n', '\r', '\0']) {
             bail!("The yt-dlp path must be a path or executable name, or empty");

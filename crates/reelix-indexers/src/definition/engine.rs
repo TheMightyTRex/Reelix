@@ -1411,7 +1411,9 @@ fn parse_xml(body: &str) -> Result<Html, String> {
                     .map(|a| html5ever::Attribute {
                         name: qual(a.key.as_ref()),
                         value: StrTendril::from(
-                            a.unescape_value().map(|v| v.into_owned()).unwrap_or_default(),
+                            a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .map(|v| v.into_owned())
+                                .unwrap_or_default(),
                         ),
                     })
                     .collect();
@@ -1428,8 +1430,12 @@ fn parse_xml(body: &str) -> Result<Html, String> {
                     stack.pop();
                 }
             }
-            Event::Text(t) => {
-                let s = t.unescape().map(|v| v.into_owned()).unwrap_or_default();
+            Event::Text(_) | Event::GeneralRef(_) => {
+                let s = match &ev {
+                    Event::Text(t) => t.xml10_content().map(|v| v.into_owned()).unwrap_or_default(),
+                    Event::GeneralRef(r) => crate::xml::reference_text(r),
+                    _ => unreachable!(),
+                };
                 push(
                     &mut html,
                     &stack,

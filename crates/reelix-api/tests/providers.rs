@@ -303,12 +303,18 @@ async fn tags_mappings_settings_and_search() {
     let (s, _) = call(&app, Method::DELETE, &format!("/api/v1/tags/{tid}"), &admin, None).await;
     assert_eq!(s, StatusCode::NO_CONTENT);
 
+    // Local paths must be absolute on the server's platform.
+    let (mnt, data) = if cfg!(windows) {
+        (r"C:\mnt\dl", r"C:\data")
+    } else {
+        ("/mnt/dl", "/data")
+    };
     let (s, m) = call(
         &app,
         Method::POST,
         "/api/v1/remotepathmappings",
         &admin,
-        Some(json!({"host": "nas", "remote_path": "/dl", "local_path": "/mnt/dl"})),
+        Some(json!({"host": "nas", "remote_path": "/dl", "local_path": mnt})),
     )
     .await;
     assert_eq!(s, StatusCode::CREATED);
@@ -318,11 +324,11 @@ async fn tags_mappings_settings_and_search() {
         Method::PUT,
         &format!("/api/v1/remotepathmappings/{mid}"),
         &admin,
-        Some(json!({"host": "nas", "remote_path": "/dl", "local_path": "/data"})),
+        Some(json!({"host": "nas", "remote_path": "/dl", "local_path": data})),
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(m2["local_path"], "/data");
+    assert_eq!(m2["local_path"], data);
     let (s, list) = call(&app, Method::GET, "/api/v1/remotepathmappings", &admin, None).await;
     assert_eq!((s, list.as_array().unwrap().len()), (StatusCode::OK, 1));
     let (s, _) = call(

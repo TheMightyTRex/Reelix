@@ -149,9 +149,14 @@ fn parse_tree(xml: &str) -> Result<Node, ClientError> {
                 }
             }
             Ok(Event::Text(t)) => {
-                let s = t.unescape().map_err(|e| ClientError::Parse(e.to_string()))?;
+                let s = t.xml10_content().map_err(|e| ClientError::Parse(e.to_string()))?;
                 if let Some(top) = stack.last_mut() {
                     top.text.push_str(&s);
+                }
+            }
+            Ok(Event::GeneralRef(r)) => {
+                if let Some(top) = stack.last_mut() {
+                    top.text.push_str(&reference_text(&r));
                 }
             }
             Ok(Event::CData(t)) => {
@@ -267,6 +272,18 @@ pub fn decode_response(xml: &str) -> Result<XValue, ClientError> {
         .and_then(|p| p.child("value"))
         .ok_or_else(|| ClientError::Parse("XML-RPC response without value".into()))?;
     decode_value(value)
+}
+
+/// The text of an entity or character reference; unknown entities are kept verbatim.
+fn reference_text(r: &quick_xml::events::BytesRef<'_>) -> String {
+    if let Ok(Some(c)) = r.resolve_char_ref() {
+        return c.to_string();
+    }
+    let name = r.decode().unwrap_or_default();
+    match quick_xml::escape::resolve_predefined_entity(&name) {
+        Some(text) => text.to_owned(),
+        None => format!("&{name};"),
+    }
 }
 
 #[cfg(test)]

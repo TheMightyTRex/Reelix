@@ -75,7 +75,7 @@ futures = "0.3"
 hex = "0.4"
 # Audio tags and embedded covers (MP3/FLAC/M4A/M4B/OGG/Opus) for books and music.
 lofty = "0.22"
-quick-xml = { version = "0.37", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "cookies", "socks", "multipart", "stream"] }
 http-body-util = "0.1"
@@ -90,7 +90,7 @@ tempfile = "3"
 url = { version = "2", features = ["serde"] }
 wiremock = "0.6"
 # EPUB (OPF) metadata.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"

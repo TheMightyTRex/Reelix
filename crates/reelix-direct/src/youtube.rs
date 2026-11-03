@@ -27,6 +27,19 @@ impl DirectService {
             .build()?)
     }
 
+    /// The job folder, or for audio its `Artist/Album` (or `Artist`) subfolder, sorted
+    /// like Spotify downloads so music is ready to import.
+    pub(crate) fn youtube_folder(job: &DirectDownload, artist: &str, album: Option<&str>) -> PathBuf {
+        let mut folder = PathBuf::from(&job.output_dir);
+        if job.request.mode == DownloadMode::Audio {
+            folder.push(safe_name(artist));
+            if let Some(album) = album.map(str::trim).filter(|a| !a.is_empty()) {
+                folder.push(safe_name(album));
+            }
+        }
+        folder
+    }
+
     async fn youtube_player(&self, client: &RustyPipe, id: &str) -> Result<VideoPlayer> {
         rustypipe::validate::video_id(id)?;
         let player = client.query().player_from_clients(id, &[ClientType::Ios, ClientType::Android]).await
@@ -134,7 +147,9 @@ impl DirectService {
 
     async fn download_youtube_native(&self, job: &DirectDownload, settings: &DirectSettings) -> Result<()> {
         let client = self.youtube_client()?;
-        let (_, items, _) = self.youtube_ids(&client, &job.request, false).await?;
+        let (playlist, items, _) = self.youtube_ids(&client, &job.request, false).await?;
+        // YouTube Music names album playlists "Album - <title>".
+        let album = playlist.strip_prefix("Album - ").unwrap_or(&playlist);
         if items.is_empty() {
             bail!("YouTube playlist has no downloadable videos");
         }
@@ -145,7 +160,9 @@ impl DirectService {
             let player = self.youtube_player(&client, &id).await?;
             let user_agent = client.query().user_agent(player.client_type).into_owned();
             let title = player.details.name.as_deref().unwrap_or(&id);
-            let folder = Path::new(&job.output_dir);
+            let channel = player.details.channel_name.as_deref().unwrap_or("YouTube");
+            let artist = channel_artist(channel);
+            let folder = Self::youtube_folder(job, artist, Some(album));
             let name = format!("{} [{id}]", safe_name(title));
             let audio = player
                 .select_audio_stream(&StreamFilter::new())
@@ -164,7 +181,9 @@ impl DirectService {
             if tokio::fs::try_exists(&output).await? {
                 continue;
             }
-            let audio_part = folder.join(format!(".{id}-{}.audio.part", audio.itag));
+            // Streams download into the job folder; only the published file is sorted.
+            let parts = Path::new(&job.output_dir);
+            let audio_part = parts.join(format!(".{id}-{}.audio.part", audio.itag));
             let mut inputs = Vec::<PathBuf>::new();
             if job.request.mode == DownloadMode::Video {
                 let stream = player
@@ -175,7 +194,7 @@ impl DirectService {
                     .filter(|v| job.request.max_height.is_none_or(|h| v.height <= h))
                     .max_by_key(|v| (v.height, v.fps, v.bitrate))
                     .context("No video stream fits the selected resolution")?;
-                let video_part = folder.join(format!(".{id}-{}.video.part", stream.itag));
+                let video_part = parts.join(format!(".{id}-{}.video.part", stream.itag));
                 self.transfer_youtube(&stream.url, &video_part, job.id, &user_agent)
                     .await?;
                 inputs.push(video_part);
@@ -183,8 +202,7 @@ impl DirectService {
             self.transfer_youtube(&audio.url, &audio_part, job.id, &user_agent)
                 .await?;
             inputs.push(audio_part);
-            let channel = player.details.channel_name.as_deref().unwrap_or("YouTube");
-            self.publish_youtube(job, settings, inputs, &output, &id, title, channel)
+            self.publish_youtube(job, settings, inputs, &output, &id, title, artist, Some(album))
                 .await?;
         }
         Ok(())
@@ -201,13 +219,15 @@ impl DirectService {
         output: &Path,
         id: &str,
         title: &str,
-        channel: &str,
+        artist: &str,
+        album: Option<&str>,
     ) -> Result<()> {
         self.progress(job.id, Some(100.0), "Processing downloaded streams")
             .await?;
         let audio_part = inputs.last().context("No downloaded audio stream")?;
         let extension = output.extension().and_then(|e| e.to_str()).unwrap_or_default();
         let folder = output.parent().context("Output has no folder")?;
+        tokio::fs::create_dir_all(folder).await?;
         let staging = folder.join(format!(".{id}.{}.staging.{extension}", reelix_db::now_ms()));
         if job.request.mode == DownloadMode::Audio && job.request.format == "original" {
             tokio::fs::copy(audio_part, &staging).await?;
@@ -222,7 +242,7 @@ impl DirectService {
             .await?;
         }
         if job.request.mode == DownloadMode::Audio && extension != "webm" {
-            crate::spotify::write_tags(&staging, title, channel, None, None, None, None).await?;
+            crate::spotify::write_tags(&staging, title, artist, album, None, None, None).await?;
         }
         tokio::fs::rename(&staging, output).await?;
         for input in inputs {
@@ -230,4 +250,9 @@ impl DirectService {
         }
         Ok(())
     }
+}
+
+/// Auto-generated YouTube Music channels are named "<artist> - Topic".
+pub(crate) fn channel_artist(channel: &str) -> &str {
+    channel.strip_suffix(" - Topic").unwrap_or(channel)
 }

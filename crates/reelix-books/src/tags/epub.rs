@@ -10,7 +10,7 @@ use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-use quick_xml::{Reader, Writer};
+use quick_xml::{Reader, Writer, XmlVersion};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -59,7 +59,10 @@ fn opf_path<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Result<String, 
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rootfile" => {
                 for a in e.attributes().flatten() {
                     if a.key.local_name().as_ref() == b"full-path" {
-                        return Ok(a.unescape_value().map_err(err)?.into_owned());
+                        return Ok(a
+                            .normalized_value(XmlVersion::Implicit1_0)
+                            .map_err(err)?
+                            .into_owned());
                     }
                 }
             }
@@ -92,15 +95,20 @@ pub fn read_info(path: &Path) -> Result<EpubInfo, String> {
     let mut reader = Reader::from_str(&xml);
     let mut info = EpubInfo::default();
     let mut current: Option<Vec<u8>> = None;
+    // Text arrives in pieces around entity references; join them before using it.
+    let mut text = String::new();
     loop {
         match reader.read_event().map_err(err)? {
             Event::Start(e) => {
                 let name = e.local_name().as_ref().to_vec();
                 current = matches!(name.as_slice(), b"title" | b"creator" | b"identifier").then_some(name);
+                text.clear();
             }
-            Event::Text(t) => {
-                let Some(name) = &current else { continue };
-                let text = t.unescape().map_err(err)?.trim().to_string();
+            Event::Text(t) if current.is_some() => text.push_str(&t.xml10_content().map_err(err)?),
+            Event::GeneralRef(r) if current.is_some() => text.push_str(&reference_text(&r)),
+            Event::End(_) => {
+                let Some(name) = current.take() else { continue };
+                let text = std::mem::take(&mut text).trim().to_string();
                 if text.is_empty() {
                     continue;
                 }
@@ -115,7 +123,6 @@ pub fn read_info(path: &Path) -> Result<EpubInfo, String> {
                     _ => {}
                 }
             }
-            Event::End(_) => current = None,
             Event::Eof => break,
             _ => {}
         }
@@ -127,7 +134,11 @@ fn attr(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
     e.attributes()
         .flatten()
         .find(|a| a.key.as_ref() == name)
-        .and_then(|a| a.unescape_value().ok().map(|v| v.into_owned()))
+        .and_then(|a| {
+            a.normalized_value(XmlVersion::Implicit1_0)
+                .ok()
+                .map(|v| v.into_owned())
+        })
 }
 
 /// Whether an element inside `<metadata>` is replaced by ours.
@@ -193,7 +204,7 @@ pub(crate) fn rewrite_opf(xml: &str, t: &BookTags, cover: Option<(&str, &str)>) 
                 in_metadata = true;
                 let mut declares_dc = false;
                 for a in e.attributes().flatten() {
-                    let v = a.unescape_value().map_err(err)?;
+                    let v = a.normalized_value(XmlVersion::Implicit1_0).map_err(err)?;
                     if v == "http://purl.org/dc/elements/1.1/"
                         && let Some(p) = a.key.as_ref().strip_prefix(b"xmlns:")
                     {
@@ -224,7 +235,7 @@ pub(crate) fn rewrite_opf(xml: &str, t: &BookTags, cover: Option<(&str, &str)>) 
                 w.write_event(Event::Start(e)).map_err(err)?;
                 match reader.read_event().map_err(err)? {
                     Event::Text(tx) => {
-                        let text = tx.unescape().map_err(err)?.into_owned();
+                        let text = tx.xml10_content().map_err(err)?.into_owned();
                         if isbn.is_some() && isbn_digits(&text) == isbn {
                             has_isbn = true;
                         }
@@ -314,7 +325,7 @@ pub fn write(path: &Path, t: &BookTags) -> Result<(), String> {
         }
         for i in 0..zip.len() {
             let f = zip.by_index_raw(i).map_err(err)?;
-            let name = f.name().to_string();
+            let name = f.name().map_err(err)?.into_owned();
             let ours = name.starts_with(&format!("{opf_dir}{COVER_ID}."));
             if name == "mimetype" || name == opf || ours {
                 continue;
@@ -359,6 +370,18 @@ pub fn fuzz_rewrite_opf(xml: &str) {
     };
     let _ = rewrite_opf(xml, &t, None);
     let _ = rewrite_opf(xml, &t, Some(("cover.jpg", "image/jpeg")));
+}
+
+/// The text of an entity or character reference; unknown entities are kept verbatim.
+fn reference_text(r: &quick_xml::events::BytesRef<'_>) -> String {
+    if let Ok(Some(c)) = r.resolve_char_ref() {
+        return c.to_string();
+    }
+    let name = r.decode().unwrap_or_default();
+    match quick_xml::escape::resolve_predefined_entity(&name) {
+        Some(text) => text.to_owned(),
+        None => format!("&{name};"),
+    }
 }
 
 #[cfg(test)]
@@ -440,7 +463,7 @@ pub(crate) mod tests {
         assert_eq!(info.isbns, ["9780765311788"]);
 
         let mut zip = ZipArchive::new(File::open(&p).unwrap()).unwrap();
-        assert_eq!(zip.by_index(0).unwrap().name(), "mimetype");
+        assert_eq!(zip.by_index(0).unwrap().name().unwrap(), "mimetype");
         assert_eq!(zip.by_index(0).unwrap().compression(), CompressionMethod::Stored);
         let mut opf = String::new();
         zip.by_name("OEBPS/content.opf")

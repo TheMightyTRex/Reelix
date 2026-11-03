@@ -14,6 +14,9 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
+  # Full debug info for every test binary fills the runners' disks (the Linux linker
+  # crashed with SIGBUS); line tables keep backtraces readable.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   fmt:

@@ -125,6 +125,12 @@ are published by renaming a separate staging file after processing; an unfinishe
 job is requeued on server restart. Duplicate URLs/options are rejected while
 queued/running and after completion.
 
+Spotify tracks, and YouTube audio, are sorted into `Artist/Album` folders inside
+the job folder. For YouTube the artist is the track's music metadata or else the
+channel (without YouTube Music's " - Topic" suffix), and the album is the track's
+album, or else the playlist name; a single video without an album goes directly in
+the artist folder. YouTube video downloads stay in the job folder.
+
 Artist/album music can be matched using **Music → Import Library** after adding
 its job folder as a music root. General videos and mixed individual tracks are
 not automatically converted into movie/episode/MusicBrainz album records. YouTube

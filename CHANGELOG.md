@@ -6,6 +6,12 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+### Fixed
+- YouTube audio downloads are sorted into `Artist/Album` folders when they complete, like Spotify downloads, instead of being left loose in the job folder. The artist comes from YouTube Music metadata or the channel (without " - Topic"); the album from the track or the playlist name.
+
+### Security
+- Updated `zip` to 9.x and `quick-xml` to 0.41, fixing RustSec advisories for EPUB/backup archive extraction and XML parsing. Remaining advisories in librespot's and openidconnect's dependencies are documented in `deny.toml`.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added
