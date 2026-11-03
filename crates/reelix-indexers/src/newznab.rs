@@ -523,6 +523,13 @@ impl Indexer for NewznabIndexer {
         self.flavor.protocol()
     }
 
+    fn owns_url(&self, url: &Url) -> bool {
+        match (url.host_str(), self.api.host_str()) {
+            (Some(h), Some(own)) => crate::http::host_within(h, own),
+            _ => false,
+        }
+    }
+
     async fn capabilities(&self) -> Result<IndexerCapabilities, IndexerError> {
         self.caps
             .get_or_try_init(|| async {
@@ -570,6 +577,9 @@ impl Indexer for NewznabIndexer {
             .timeout(Duration::from_secs(60))
             .send()
             .await?;
+        // The redirect policy hands back the 3xx when it stops: magnet links (and other
+        // non-HTTP schemes), hops to blocked address literals, or too many hops. Host names
+        // resolving to private addresses never get here; the guarded resolver fails the hop.
         if resp.status().is_redirection() {
             let loc = resp
                 .headers()
@@ -579,7 +589,7 @@ impl Indexer for NewznabIndexer {
             if loc.starts_with("magnet:") {
                 return Err(IndexerError::MagnetRedirect(loc.to_string()));
             }
-            return Err(IndexerError::Blocked(format!("redirect to {loc}")));
+            return Err(IndexerError::Blocked(format!("redirect to {loc} not followed")));
         }
         if let Some(e) = status_error(&resp) {
             return Err(e);

@@ -499,13 +499,69 @@ async fn interactive_search_ranks_and_grabs_from_cache() {
             guid: "zzz".into(),
             download_url: Some(format!("{}/getnzb/zzz.nzb", e.indexer.uri())),
             title: Some("Some.Release.2020.1080p.WEB-DL-X".into()),
-            ..req
+            ..req.clone()
         })
         .await
         .unwrap();
     let t = tracked::get(&e.db, r.queue_id).await.unwrap().unwrap();
     assert_eq!(t.movie_id, None);
     assert_eq!(t.title, "Some.Release.2020.1080p.WEB-DL-X");
+
+    // A raw link to another host is refused (the indexer's credentials would go along).
+    let err = e
+        .svc
+        .grab_request(&GrabRequest {
+            guid: "elsewhere".into(),
+            download_url: Some("http://elsewhere.invalid/getnzb/x.nzb".into()),
+            title: Some("Some.Release.2020.1080p.WEB-DL-X".into()),
+            ..req
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("must point at indexer"), "{err}");
+}
+
+#[tokio::test]
+async fn raw_grab_of_private_url_is_rejected() {
+    let e = env().await;
+    // Guard on, indexer on a public host name (never contacted).
+    e.providers
+        .set_indexer_settings(IndexerSettingsDto::default())
+        .await
+        .unwrap();
+    let idx = e
+        .providers
+        .create(
+            ProviderKind::Indexer,
+            &ProviderInput {
+                implementation: "newznab".into(),
+                name: "Public".into(),
+                enabled: true,
+                priority: 25,
+                tags: vec![],
+                settings: json!({"base_url": "https://indexer.example.com", "api_key": "k"}),
+            },
+        )
+        .await
+        .unwrap();
+    for url in ["http://127.0.0.1/getnzb/x.nzb", "http://[::ffff:10.0.0.1]/x.nzb"] {
+        let err = e
+            .svc
+            .grab_request(&GrabRequest {
+                guid: "raw".into(),
+                indexer_id: idx.id,
+                force: false,
+                movie_id: None,
+                episode_ids: None,
+                download_client_id: None,
+                download_url: Some(url.into()),
+                title: Some("Some.Release.2020.1080p.WEB-DL-X".into()),
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("blocked"), "{url}: {err}");
+    }
+    assert!(e.sab.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

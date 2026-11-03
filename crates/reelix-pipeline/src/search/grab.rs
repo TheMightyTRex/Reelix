@@ -290,11 +290,19 @@ impl SearchService {
         if url.starts_with("magnet:") {
             return Ok(ReleasePayload::Magnet(url));
         }
-        if pref == PayloadPreference::Url {
-            return Ok(ReleasePayload::Url(url));
-        }
-        let Some(ix) = rel.indexer_id else {
-            return Ok(ReleasePayload::Url(url));
+        let ix = match rel.indexer_id {
+            Some(ix) if pref != PayloadPreference::Url => ix,
+            _ => {
+                // The link is handed on as-is (to the download client, or fetched by the
+                // torrent adapter), so the SSRF guard has to run here.
+                let parsed = url::Url::parse(url.trim())
+                    .map_err(|e| SearchError::Validation(format!("invalid download link: {e}")))?;
+                self.guard()
+                    .check(&parsed)
+                    .await
+                    .map_err(|e| SearchError::Validation(format!("download link rejected: {e}")))?;
+                return Ok(ReleasePayload::Url(url));
+            }
         };
         match self.providers.indexer_manager().download(ix, &url).await {
             Ok(bytes) => Ok(match rel.protocol {

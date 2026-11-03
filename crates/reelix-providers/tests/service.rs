@@ -280,6 +280,74 @@ async fn unsaved_test_uses_stored_secrets_with_id() {
 }
 
 #[tokio::test]
+async fn unsaved_test_with_changed_host_refuses_stored_secret() {
+    let e = env().await;
+    allow_private(&e.svc).await;
+    let server = torznab_server().await;
+    let attacker = torznab_server().await;
+    let row = e
+        .svc
+        .create(ProviderKind::Indexer, &indexer_input(&server.uri(), "A"))
+        .await
+        .unwrap();
+    // Same host, different port: the stored API key must not follow.
+    let mut input = indexer_input(&attacker.uri(), "A");
+    input.settings["api_key"] = json!(SECRET_MASK);
+    let res = e
+        .svc
+        .test_input(
+            ProviderKind::Indexer,
+            &ProviderTestRequest {
+                id: Some(row.id),
+                provider: input.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!res.ok);
+    assert_eq!(res.checks[0].name, "settings");
+    assert!(res.message.unwrap().contains("re-enter"));
+    assert!(attacker.received_requests().await.unwrap().is_empty());
+
+    // Re-entering the secret makes the test go through.
+    input.settings["api_key"] = json!("other");
+    let res = e
+        .svc
+        .test_input(
+            ProviderKind::Indexer,
+            &ProviderTestRequest {
+                id: Some(row.id),
+                provider: input,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(res.ok, "{res:?}");
+}
+
+#[tokio::test]
+async fn email_smtp_server_is_address_checked() {
+    let e = env().await;
+    let input = ProviderInput {
+        implementation: "email".into(),
+        name: "Mail".into(),
+        enabled: true,
+        priority: 25,
+        tags: vec![],
+        settings: json!({"server": "127.0.0.1", "from": "r@example.com", "to": ["a@example.com"]}),
+    };
+    let err = e
+        .svc
+        .create(ProviderKind::Notification, &input)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ProviderError::Validation(ref m) if m.contains("blocked")),
+        "{err}"
+    );
+}
+
+#[tokio::test]
 async fn notifications_fan_out_by_event_mask_and_ssrf() {
     let e = env().await;
     let server = MockServer::start().await;

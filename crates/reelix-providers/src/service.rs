@@ -1,7 +1,7 @@
 //! [`ProviderService`]: CRUD, live instance cache, indexer manager, notifications fan-out,
 //! metadata clients, tags, remote path mappings and health.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -15,7 +15,7 @@ use reelix_api_types::providers::{
 };
 use reelix_api_types::{HealthCheck, HealthLevel};
 use reelix_core::bus::EventBus;
-use reelix_core::provider::ProviderSchema;
+use reelix_core::provider::{ProviderSchema, SECRET_MASK};
 use reelix_core::{DomainEvent, MediaKind, Protocol};
 use reelix_db::Db;
 use reelix_db::secrets::SecretBox;
@@ -114,6 +114,9 @@ pub struct ProviderService {
     secrets: SecretBox,
     events: EventBus,
     http: reqwest::Client,
+    /// Client for notifications and import lists while private addresses are blocked: the
+    /// SSRF guard is enforced at connect time and on every redirect hop, not just on save.
+    guarded_http: reqwest::Client,
     opts: ProviderOptions,
     client_id: String,
     definitions: RwLock<Arc<DefinitionStore>>,
@@ -162,6 +165,42 @@ fn failed(name: &str, msg: impl Into<String>) -> TestResultDto {
     ok_result(None, vec![check(name, Err(msg.into()))])
 }
 
+/// Where a provider's settings point: `host:port` of every URL value plus the plain
+/// host/port fields. Masked secrets are only reused while this is unchanged.
+fn endpoints(settings: &Map<String, Value>) -> BTreeSet<String> {
+    settings
+        .iter()
+        .filter_map(|(k, v)| {
+            let raw = match v {
+                Value::String(s) => s.trim().to_ascii_lowercase(),
+                Value::Number(n) => n.to_string(),
+                _ => return None,
+            };
+            if raw.contains("://")
+                && let Ok(u) = url::Url::parse(&raw)
+                && let Some(h) = u.host_str()
+            {
+                return Some(format!("{k}={h}:{}", u.port_or_known_default().unwrap_or(0)));
+            }
+            matches!(k.as_str(), "host" | "hostname" | "server" | "port").then(|| format!("{k}={raw}"))
+        })
+        .collect()
+}
+
+/// The definitions catalog is code-like input: HTTPS only (plain HTTP just for loopback mirrors).
+fn definitions_source_ok(url: &url::Url) -> bool {
+    match url.scheme() {
+        "https" => url.host_str().is_some(),
+        "http" => match url.host() {
+            Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
 impl ProviderService {
     /// Loads definitions, settings and every provider; builds live instances.
     pub async fn new(
@@ -179,6 +218,15 @@ impl ProviderService {
                 id
             }
         };
+        let guard = AddressGuard { allow_private: false };
+        let guarded_http = guard
+            .secure(reqwest::Client::builder())
+            .user_agent(concat!("Reelix/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(60))
+            .redirect(guard.redirect_policy())
+            .build()
+            .map_err(|e| ProviderError::Upstream(format!("http client: {e}")))?;
         let mut xem_opts = XemOptions::default();
         if let Some(u) = &opts.xem_base_url {
             xem_opts.base_url = u.clone();
@@ -189,6 +237,7 @@ impl ProviderService {
             secrets,
             events,
             http,
+            guarded_http,
             opts,
             client_id,
             definitions: RwLock::new(Arc::new(DefinitionStore::default())),
@@ -441,6 +490,25 @@ impl ProviderService {
         if guard.allow_private {
             return Ok(());
         }
+        let hint = |e: reelix_indexers::IndexerError| {
+            validation(format!(
+                "{e} (enable \"allow private addresses\" in Settings → Indexers to allow LAN targets)"
+            ))
+        };
+        if row.kind == ProviderKind::Notification
+            && row.implementation == reelix_notify::email::ID
+            && let Some(server) = row.settings.get("server").and_then(Value::as_str)
+        {
+            let server = server.trim();
+            let host = if server.contains(':') && !server.starts_with('[') {
+                format!("[{server}]")
+            } else {
+                server.to_owned()
+            };
+            let url = url::Url::parse(&format!("http://{host}/"))
+                .map_err(|e| validation(format!("SMTP server: {e}")))?;
+            guard.check(&url).await.map_err(hint)?;
+        }
         for v in row.settings.values() {
             let Some(s) = v.as_str() else { continue };
             let s = s.trim();
@@ -448,11 +516,7 @@ impl ProviderService {
                 continue;
             }
             let Ok(url) = url::Url::parse(s) else { continue };
-            guard.check(&url).await.map_err(|e| {
-                validation(format!(
-                    "{e} (enable \"allow private addresses\" in Settings → Indexers to allow LAN targets)"
-                ))
-            })?;
+            guard.check(&url).await.map_err(hint)?;
         }
         Ok(())
     }
@@ -585,8 +649,18 @@ impl ProviderService {
             .map_err(|e| e.to_string())
     }
 
+    /// HTTP client for notifications and import lists, guarded unless private addresses are
+    /// allowed (instances are rebuilt when that setting changes).
+    fn outbound_http(&self) -> reqwest::Client {
+        if read(&self.cache).indexer_settings.allow_private_addresses {
+            self.http.clone()
+        } else {
+            self.guarded_http.clone()
+        }
+    }
+
     fn build_notifier(&self, row: &ProviderRow) -> std::result::Result<Arc<dyn Notifier>, String> {
-        let mut ctx = reelix_notify::BuildContext::new(self.http.clone());
+        let mut ctx = reelix_notify::BuildContext::new(self.outbound_http());
         ctx.timeout = self.opts.test_timeout;
         reelix_notify::build(&row.implementation, &Value::Object(row.settings.clone()), &ctx)
             .map(Arc::from)
@@ -604,7 +678,7 @@ impl ProviderService {
     }
 
     fn build_list(&self, row: &ProviderRow) -> std::result::Result<Arc<dyn ImportList>, String> {
-        let mut ctx = reelix_lists::BuildContext::new(self.http.clone());
+        let mut ctx = reelix_lists::BuildContext::new(self.outbound_http());
         if let Some(b) = &self.opts.list_base_urls {
             ctx.base_urls = b.clone();
         }
@@ -907,6 +981,21 @@ impl ProviderService {
             Err(ProviderError::Validation(m)) => return Ok(failed("settings", m)),
             Err(e) => return Err(e),
         };
+        // Stored secrets only go back to the host they were saved for.
+        let reuses_secret = req
+            .provider
+            .settings
+            .as_object()
+            .is_some_and(|o| o.values().any(|v| v.as_str() == Some(SECRET_MASK)));
+        if reuses_secret
+            && let Some(prev) = &previous
+            && endpoints(&prev.settings) != endpoints(&row.settings)
+        {
+            return Ok(failed(
+                "settings",
+                "the address changed; re-enter the password / API key to test against the new host",
+            ));
+        }
         if let Err(ProviderError::Validation(m)) = self.check_addresses(&row).await {
             return Ok(failed("address", m));
         }
@@ -1056,8 +1145,13 @@ impl ProviderService {
             *pw = crypto::seal(&self.secrets, pw)?;
         }
         self.db.settings().set(INDEXER_SETTINGS_KEY, &stored).await?;
+        let guard_changed = previous.allow_private_addresses != s.allow_private_addresses;
         write(&self.cache).indexer_settings = s;
         self.reload_kind(ProviderKind::Indexer, true).await?;
+        if guard_changed {
+            self.reload_kind(ProviderKind::Notification, false).await?;
+            self.reload_kind(ProviderKind::ImportList, false).await?;
+        }
         self.publish("indexer_settings", "updated", 0);
         Ok(self.indexer_settings())
     }
@@ -1647,8 +1741,8 @@ impl ProviderService {
     ) -> Result<DefinitionsSettingsDto> {
         let source_url = s.source_url.trim().to_owned();
         let parsed = url::Url::parse(&source_url).map_err(|e| validation(format!("source URL: {e}")))?;
-        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-            return Err(validation("source URL must be an http(s) URL"));
+        if !definitions_source_ok(&parsed) {
+            return Err(validation("source URL must be an https URL"));
         }
         let version = s.schema_version.trim().to_owned();
         let valid_version = version.len() >= 2
@@ -1772,8 +1866,8 @@ impl ProviderService {
         let settings = self.definitions_settings();
         let url = url::Url::parse(&settings.source_url)
             .map_err(|e| validation(format!("definitions source URL: {e}")))?;
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err(validation("definitions source URL must be http(s)"));
+        if !definitions_source_ok(&url) {
+            return Err(validation("definitions source URL must be https"));
         }
         let root = self.opts.definitions_dir.clone();
         let have_upstream = upstream_count(&root) > 0;
@@ -1787,6 +1881,11 @@ impl ProviderService {
         }
         let upstream = |e: reqwest::Error| ProviderError::Upstream(format!("download failed: {e}"));
         let mut resp = req.send().await.map_err(upstream)?;
+        if !definitions_source_ok(resp.url()) {
+            return Err(ProviderError::Upstream(
+                "download failed: redirected to a non-https URL".into(),
+            ));
+        }
         if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
             return Ok(DefinitionsSyncOutcome::UpToDate);
         }
