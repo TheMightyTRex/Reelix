@@ -133,7 +133,7 @@ fn playlist_entry(v: &Value, albums: bool) -> Option<MusicListItem> {
 /// Maps the accounts service's OAuth errors (400 `invalid_client` / `invalid_grant`).
 async fn token_error(resp: reqwest::Response) -> ListError {
     let status = resp.status().as_u16();
-    let body = resp.text().await.unwrap_or_default();
+    let body = common::error_text(resp).await;
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     match v.get("error").and_then(Value::as_str) {
         Some("invalid_client" | "invalid_grant" | "unauthorized_client") => ListError::Unauthorized,

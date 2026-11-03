@@ -42,13 +42,24 @@ impl Node {
     }
 }
 
+/// Deepest element nesting accepted. Real RSS/caps documents are a handful of levels
+/// deep; a hostile indexer could otherwise nest elements deeply enough that dropping or
+/// cloning the (recursive) tree overflows the stack.
+const MAX_DEPTH: usize = 256;
+
 /// Parses a document and returns its root element.
 pub(crate) fn parse(input: &str) -> Result<Node, String> {
     let mut reader = Reader::from_str(input);
     let mut stack: Vec<Node> = vec![Node::default()];
     loop {
         match reader.read_event().map_err(|e| e.to_string())? {
-            Event::Start(e) => stack.push(element(&e)?),
+            Event::Start(e) => {
+                // `stack[0]` is the synthetic document node.
+                if stack.len() > MAX_DEPTH {
+                    return Err(format!("XML nested deeper than {MAX_DEPTH} elements"));
+                }
+                stack.push(element(&e)?);
+            }
             Event::Empty(e) => {
                 let n = element(&e)?;
                 stack.last_mut().ok_or("unbalanced")?.children.push(n);
@@ -120,6 +131,24 @@ pub(crate) fn reference_text(r: &quick_xml::events::BytesRef<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rejects_deep_nesting() {
+        // Run on a small stack so a recursive Drop/Clone of a deep tree would crash.
+        let res = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let depth = 100_000;
+                let doc = format!("{}{}", "<a>".repeat(depth), "</a>".repeat(depth));
+                super::parse(&doc).map(|_| ())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(res.unwrap_err().contains("nested"));
+        let ok = format!("{}{}", "<a>".repeat(200), "</a>".repeat(200));
+        assert!(super::parse(&ok).is_ok());
+    }
+
     #[test]
     fn parses_nested() {
         let n = super::parse(

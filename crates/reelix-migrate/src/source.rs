@@ -13,6 +13,25 @@ use serde_json::Value;
 use crate::MigrateError;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// Largest API reply read (after decompression). Unpaged endpoints such as a big Radarr
+/// `/movie` list run to tens of MB, so this is generous; it only stops runaway bodies.
+const MAX_RESPONSE_BYTES: usize = 256 * 1024 * 1024;
+
+/// Reads a body, failing once it exceeds `limit` bytes.
+async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, String> {
+    let too_big = || format!("response larger than {} MB", limit / (1024 * 1024));
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(too_big());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if out.len() + chunk.len() > limit {
+            return Err(too_big());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
 
 /// A connection to the app being migrated from.
 #[derive(Debug, Clone)]
@@ -82,11 +101,10 @@ impl Source {
                 self.kind.label()
             )));
         }
-        let text = resp
-            .text()
+        let bytes = read_limited(resp, MAX_RESPONSE_BYTES)
             .await
             .map_err(|e| MigrateError::Source(format!("reading {path}: {e}")))?;
-        serde_json::from_str(&text).map_err(|e| {
+        serde_json::from_slice(&bytes).map_err(|e| {
             MigrateError::Source(format!(
                 "unexpected response from {} for {path} (is this really {}?): {e}",
                 self.base,

@@ -646,6 +646,39 @@ async fn url_list_rejects_non_array() {
 }
 
 #[tokio::test]
+async fn oversized_bodies_are_rejected() {
+    let (server, ctx) = setup().await;
+    Mock::given(path("/big.json"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(vec![b' '; 33 * 1024 * 1024], "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/err.json"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("e".repeat(1024 * 1024)))
+        .mount(&server)
+        .await;
+    let big = list(
+        &ctx,
+        "url_list",
+        json!({"url": format!("{}/big.json", server.uri())}),
+    );
+    match big.fetch().await {
+        Err(ListError::Parse(m)) => assert!(m.contains("larger than"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    let err = list(
+        &ctx,
+        "url_list",
+        json!({"url": format!("{}/err.json", server.uri())}),
+    );
+    match err.fetch().await {
+        Err(ListError::Status { status: 500, body }) => assert_eq!(body.len(), 200),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn reelix_instance_pages_movies_and_series() {
     let (server, ctx) = setup().await;
     for (page, f) in [("1", "reelix_movies_p1.json"), ("2", "reelix_movies_p2.json")] {

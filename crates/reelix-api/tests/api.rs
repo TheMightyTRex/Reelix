@@ -982,4 +982,28 @@ async fn ui_settings_are_per_user_and_maintenance_is_admin_only() {
         .await;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{uri}");
     }
+
+    // A restore upload from a non-admin is refused before any of the body is read.
+    let polled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = polled.clone();
+    let body = futures::stream::poll_fn(move |_| {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        std::task::Poll::Ready(Some(Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+            &[0u8; 1024],
+        ))))
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/system/backups/restore")
+        .header(header::COOKIE, &bob)
+        .header("x-reelix-request", "1")
+        .header(header::CONTENT_TYPE, "application/zip")
+        .body(Body::from_stream(body))
+        .unwrap();
+    let res = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert!(
+        !polled.load(std::sync::atomic::Ordering::SeqCst),
+        "the body was read"
+    );
 }

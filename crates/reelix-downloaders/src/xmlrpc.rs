@@ -130,15 +130,27 @@ struct Node {
     children: Vec<Node>,
 }
 
+/// Deepest element nesting accepted. Bounding the tree also bounds the recursion in
+/// [`decode_value`] and in dropping the tree, so a hostile server can't overflow the stack.
+const MAX_DEPTH: usize = 256;
+
 fn parse_tree(xml: &str) -> Result<Node, ClientError> {
     let mut reader = Reader::from_str(xml);
     let mut stack: Vec<Node> = vec![Node::default()];
     loop {
         match reader.read_event() {
-            Ok(Event::Start(e)) => stack.push(Node {
-                name: String::from_utf8_lossy(e.local_name().as_ref()).into_owned(),
-                ..Node::default()
-            }),
+            Ok(Event::Start(e)) => {
+                // `stack[0]` is the synthetic document node.
+                if stack.len() > MAX_DEPTH {
+                    return Err(ClientError::Parse(format!(
+                        "XML-RPC nested deeper than {MAX_DEPTH} elements"
+                    )));
+                }
+                stack.push(Node {
+                    name: String::from_utf8_lossy(e.local_name().as_ref()).into_owned(),
+                    ..Node::default()
+                });
+            }
             Ok(Event::Empty(e)) => {
                 let n = Node {
                     name: String::from_utf8_lossy(e.local_name().as_ref()).into_owned(),
@@ -289,6 +301,26 @@ fn reference_text(r: &quick_xml::events::BytesRef<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_deep_nesting() {
+        // Run on a small stack so recursive decoding or dropping of a deep tree would crash.
+        let res = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let depth = 100_000;
+                let xml = format!(
+                    "<methodResponse><params><param>{}{}</param></params></methodResponse>",
+                    "<value><array><data>".repeat(depth),
+                    "</data></array></value>".repeat(depth)
+                );
+                decode_response(&xml).map(|_| ())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(matches!(res, Err(ClientError::Parse(m)) if m.contains("nested")));
+    }
 
     #[test]
     fn roundtrip_shapes() {

@@ -148,7 +148,7 @@ impl ImportList for ImdbList {
 
     async fn fetch(&self) -> Result<Vec<ListItem>, ListError> {
         let items = if let Some((path, kind)) = self.list_type.chart() {
-            let html = common::send(self.get(path)).await?.text().await?;
+            let html = common::text(common::send(self.get(path)).await?).await?;
             parse_chart(&html, kind)
         } else {
             let id = self.list_id.as_deref().unwrap_or_default();
@@ -156,7 +156,7 @@ impl ImportList for ImdbList {
                 ImdbListType::Watchlist => format!("/user/{id}/watchlist/export"),
                 _ => format!("/list/{id}/export"),
             };
-            let text = common::send(self.get(&path)).await?.text().await?;
+            let text = common::text(common::send(self.get(&path)).await?).await?;
             parse_export_csv(&text)?
         };
         Ok(dedupe(

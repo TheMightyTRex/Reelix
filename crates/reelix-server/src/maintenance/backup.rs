@@ -199,6 +199,10 @@ pub fn validate(path: &Path) -> anyhow::Result<()> {
     let mut db = archive
         .by_name(DB_ENTRY)
         .map_err(|_| anyhow::anyhow!("the archive has no {DB_ENTRY}; it is not a Reelix backup"))?;
+    // The declared size can lie; `extract` enforces the cap while writing too.
+    if db.size() > max_entry_bytes(DB_ENTRY) {
+        bail!("{DB_ENTRY} in the archive is too large");
+    }
     let mut magic = [0u8; 16];
     db.read_exact(&mut magic)
         .ok()
@@ -228,10 +232,33 @@ pub fn stage(
     let dir = restore_dir(paths);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let partial = dir.join(format!("{PENDING_ZIP}.partial"));
-    if archive != partial {
-        std::fs::copy(archive, &partial).context("copying the backup")?;
-    }
-    std::fs::rename(&partial, dir.join(PENDING_ZIP))?;
+    std::fs::copy(archive, &partial).context("copying the backup")?;
+    commit(paths, &partial, source, now)
+}
+
+/// A fresh path in the restore directory (created if needed) to save an upload to; it is on
+/// the same filesystem as the staged archive, so [`stage_upload`] can move it into place.
+pub fn upload_path(paths: &Paths) -> std::io::Result<PathBuf> {
+    let dir = restore_dir(paths);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(format!("upload-{}.partial", rand::random::<u64>())))
+}
+
+/// Validates an uploaded archive saved at `upload` (see [`upload_path`]) and moves it into place.
+pub fn stage_upload(paths: &Paths, upload: &Path, now: DateTime<Utc>) -> anyhow::Result<PendingRestoreDto> {
+    validate(upload)?;
+    commit(paths, upload, "upload", now)
+}
+
+/// Moves a validated archive in the restore directory into place as the pending restore.
+fn commit(
+    paths: &Paths,
+    archive: &Path,
+    source: &str,
+    now: DateTime<Utc>,
+) -> anyhow::Result<PendingRestoreDto> {
+    let dir = restore_dir(paths);
+    std::fs::rename(archive, dir.join(PENDING_ZIP))?;
     let info = PendingInfo {
         source: source.to_owned(),
         staged_at: now,
@@ -241,19 +268,6 @@ pub fn stage(
         source: info.source,
         staged_at: info.staged_at,
     })
-}
-
-/// Stages raw uploaded archive bytes.
-pub fn stage_bytes(paths: &Paths, bytes: &[u8], now: DateTime<Utc>) -> anyhow::Result<PendingRestoreDto> {
-    let dir = restore_dir(paths);
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let partial = dir.join(format!("{PENDING_ZIP}.partial"));
-    std::fs::write(&partial, bytes).context("saving the upload")?;
-    let staged = stage(paths, &partial, "upload", now);
-    if staged.is_err() {
-        let _ = std::fs::remove_file(&partial);
-    }
-    staged
 }
 
 pub fn pending(paths: &Paths) -> Option<PendingRestoreDto> {
@@ -299,8 +313,19 @@ fn db_files(db: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Most bytes written for an archive entry on restore, so a crafted archive (a zip bomb) can't
+/// fill the disk.
+fn max_entry_bytes(entry: &str) -> u64 {
+    match entry {
+        DB_ENTRY => 8 * 1024 * 1024 * 1024,
+        CONFIG_ENTRY => 1024 * 1024,
+        _ => 64 * 1024,
+    }
+}
+
 fn extract(archive: &mut zip::ZipArchive<File>, entry: &str, to: &Path) -> anyhow::Result<bool> {
-    let mut file = match archive.by_name(entry) {
+    let limit = max_entry_bytes(entry);
+    let file = match archive.by_name(entry) {
         Ok(f) => f,
         Err(zip::result::ZipError::FileNotFound) => return Ok(false),
         Err(e) => return Err(e.into()),
@@ -311,7 +336,13 @@ fn extract(archive: &mut zip::ZipArchive<File>, entry: &str, to: &Path) -> anyho
         std::fs::create_dir_all(parent)?;
     }
     let mut out = File::create(to).with_context(|| format!("writing {}", to.display()))?;
-    std::io::copy(&mut file, &mut out)?;
+    // One byte past the limit tells "exactly at the limit" apart from "too big".
+    let written = std::io::copy(&mut file.take(limit + 1), &mut out)?;
+    if written > limit {
+        drop(out);
+        let _ = std::fs::remove_file(to);
+        bail!("{entry} in the backup is larger than {} KB", limit / 1024);
+    }
     out.sync_all()?;
     Ok(true)
 }
@@ -711,7 +742,34 @@ mod tests {
         let junk = tmp.path().join("junk.zip");
         std::fs::write(&junk, b"not a zip").unwrap();
         assert!(stage(&p, &junk, "junk", Utc::now()).is_err());
-        assert!(stage_bytes(&p, b"also not a zip", Utc::now()).is_err());
+        let upload = upload_path(&p).unwrap();
+        std::fs::write(&upload, b"also not a zip").unwrap();
+        assert!(stage_upload(&p, &upload, Utc::now()).is_err());
+        assert!(pending(&p).is_none());
+
+        // An entry over its cap is refused while extracting, and the restore rolls back.
+        std::fs::write(&p.secret_key_file, "live-key").unwrap();
+        let bomb = tmp.path().join("bomb.zip");
+        {
+            let db = reelix_db::Db::connect(&url(&p)).await.unwrap();
+            let snap = tmp.path().join("bomb-snap.db");
+            snapshot(&db, &snap).await;
+            db.pool().close().await;
+            let mut zip = zip::ZipWriter::new(File::create(&bomb).unwrap());
+            zip.start_file(DB_ENTRY, SimpleFileOptions::default()).unwrap();
+            zip.write_all(&std::fs::read(&snap).unwrap()).unwrap();
+            zip.start_file(SECRET_ENTRY, SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&vec![b'k'; 1024 * 1024]).unwrap();
+            zip.finish().unwrap();
+        }
+        let upload = upload_path(&p).unwrap();
+        std::fs::copy(&bomb, &upload).unwrap();
+        stage_upload(&p, &upload, Utc::now()).unwrap();
+        assert!(!upload.exists());
+        let err = apply_pending_restore(&p, &url(&p)).await.unwrap_err();
+        assert!(format!("{err:#}").contains("larger than"), "{err:#}");
+        assert_eq!(std::fs::read_to_string(&p.secret_key_file).unwrap(), "live-key");
         assert!(pending(&p).is_none());
 
         // A zip whose "database" is garbage after a valid header fails to open and is rolled back.

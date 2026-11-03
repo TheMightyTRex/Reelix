@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use futures::future::BoxFuture;
+use futures::stream::{BoxStream, StreamExt};
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::system::{
     BackupDto, BackupKind, BackupSettings, BackupsOverview, CalendarView, DateFormat, FirstDayOfWeek,
@@ -31,6 +32,10 @@ use crate::state::AppState;
 
 /// Largest backup archive accepted by the restore upload.
 pub const MAX_BACKUP_UPLOAD: usize = 2 * 1024 * 1024 * 1024;
+
+/// An uploaded archive, streamed. It yields an [`std::io::ErrorKind::FileTooLarge`] error once
+/// more than [`MAX_BACKUP_UPLOAD`] bytes have arrived.
+pub type UploadStream = BoxStream<'static, std::io::Result<Bytes>>;
 
 /// What the log viewer asks for.
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
@@ -56,7 +61,8 @@ pub trait MaintenanceBackend: Send + Sync {
     fn set_backup_settings(&self, settings: BackupSettings) -> BoxFuture<'_, ApiResult<BackupSettings>>;
     /// Validates the backup and stages it to replace the database on the next start.
     fn stage_restore(&self, name: String) -> BoxFuture<'_, ApiResult<PendingRestoreDto>>;
-    fn stage_restore_upload(&self, archive: Bytes) -> BoxFuture<'_, ApiResult<PendingRestoreDto>>;
+    /// Saves the streamed archive to disk (never whole in memory), validates and stages it.
+    fn stage_restore_upload(&self, archive: UploadStream) -> BoxFuture<'_, ApiResult<PendingRestoreDto>>;
     fn cancel_restore(&self) -> BoxFuture<'_, ApiResult<()>>;
 
     fn log_files(&self) -> BoxFuture<'_, ApiResult<Vec<LogFileDto>>>;
@@ -83,9 +89,8 @@ pub fn routes() -> Router<AppState> {
         .route("/system/backups/settings", put(update_backup_settings))
         .route(
             "/system/backups/restore",
-            post(restore_upload)
-                .delete(cancel_restore)
-                .layer(DefaultBodyLimit::max(MAX_BACKUP_UPLOAD)),
+            // The upload is streamed under its own size cap (see `restore_upload`).
+            post(restore_upload).delete(cancel_restore),
         )
         .route(
             "/system/backups/{name}",
@@ -295,19 +300,48 @@ pub async fn restore_backup(
         (status = 202, description = "Restore staged; restart Reelix to apply it", body = PendingRestoreDto),
         (status = 400, description = "Not a valid Reelix backup", body = ApiErrorBody),
         (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 413, description = "The archive is larger than 2 GiB", body = ApiErrorBody),
     ))]
 pub async fn restore_upload(
     State(state): State<AppState>,
     user: CurrentUser,
-    body: Bytes,
+    headers: HeaderMap,
+    body: Body,
 ) -> ApiResult<Response> {
+    // Checked before any of the body is read, so a non-admin can't make the server take in
+    // gigabytes.
     user.require(Permissions::ADMIN)?;
-    if body.is_empty() {
-        return Err(ApiError::validation("upload a backup .zip file"));
+    let backend = backend(&state)?;
+    let declared = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    if declared.is_some_and(|n| n > MAX_BACKUP_UPLOAD as u64) {
+        return Err(upload_too_large());
     }
-    let pending = backend(&state)?.stage_restore_upload(body).await?;
+    let mut received = 0usize;
+    let stream = body.into_data_stream().map(move |chunk| {
+        let chunk = chunk.map_err(std::io::Error::other)?;
+        received += chunk.len();
+        if received > MAX_BACKUP_UPLOAD {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                "the backup is larger than 2 GiB",
+            ));
+        }
+        Ok(chunk)
+    });
+    let pending = backend.stage_restore_upload(stream.boxed()).await?;
     tracing::warn!(by = %user.user.username, "restore staged from an uploaded backup; it is applied on the next restart");
     Ok((StatusCode::ACCEPTED, ApiJson(pending)).into_response())
+}
+
+/// The 413 for an upload over [`MAX_BACKUP_UPLOAD`].
+pub fn upload_too_large() -> ApiError {
+    ApiError::Validation {
+        status: StatusCode::PAYLOAD_TOO_LARGE,
+        message: "the backup is larger than 2 GiB".into(),
+    }
 }
 
 /// Cancels a staged restore (admin).

@@ -383,7 +383,7 @@ pub const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
 /// Reads a response body, failing once it exceeds `limit` bytes.
 pub async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, ClientError> {
     let too_big =
-        || ClientError::InvalidPayload(format!("download larger than {} MB", limit / (1024 * 1024)));
+        || ClientError::InvalidPayload(format!("response larger than {} MB", limit / (1024 * 1024)));
     if resp.content_length().is_some_and(|n| n > limit as u64) {
         return Err(too_big());
     }
@@ -397,10 +397,20 @@ pub async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<V
     Ok(out)
 }
 
+/// Largest API reply read from a download client (after decompression); a torrent list with
+/// thousands of entries stays far below this.
+pub const MAX_API_BYTES: usize = 64 * 1024 * 1024;
+
+/// Reads the body as (lossy UTF-8) text, failing once it exceeds [`MAX_API_BYTES`].
+pub async fn read_text(resp: reqwest::Response) -> Result<String, ClientError> {
+    let bytes = read_limited(resp, MAX_API_BYTES).await?;
+    Ok(String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+}
+
 /// Fails with `Http` unless the status is 2xx; returns the body text.
 pub async fn ok_text(resp: reqwest::Response) -> Result<String, ClientError> {
     let status = resp.status();
-    let body = resp.text().await?;
+    let body = read_text(resp).await?;
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(ClientError::Auth(format!("HTTP {status}")));
     }

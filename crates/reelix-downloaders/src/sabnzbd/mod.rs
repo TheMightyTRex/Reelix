@@ -177,7 +177,7 @@ impl Sabnzbd {
                 resp.status()
             )));
         }
-        Ok(resp.bytes().await?.to_vec())
+        common::read_limited(resp, common::MAX_DOWNLOAD_BYTES).await
     }
 
     /// Runs connect → version → auth → categories; returns the report and the first error.

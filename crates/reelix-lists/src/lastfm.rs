@@ -180,7 +180,7 @@ impl LastFmList {
             }
             let resp = self.http.get(&url).query(&q).send().await?;
             let status = resp.status();
-            let bytes = resp.bytes().await?;
+            let bytes = common::read_limited(resp, common::MAX_BODY_BYTES).await?;
             let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
             if let Some(e) = body_error(&v) {
                 return Err(e);

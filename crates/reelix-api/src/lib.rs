@@ -20,7 +20,7 @@ use utoipa_scalar::{Scalar, Servable};
 pub use auth::{AuthMethod, CurrentUser, MaybeUser};
 pub use error::{ApiError, ApiResult};
 pub use routes::integrations::{IMPORT_LIST_SYNC, Integrations, IntegrationsBackend};
-pub use routes::maintenance::{LogsQuery, Maintenance, MaintenanceBackend};
+pub use routes::maintenance::{LogsQuery, Maintenance, MaintenanceBackend, UploadStream, upload_too_large};
 pub use routes::pipeline_activity::ActivityHealth;
 pub use routes::system::{HealthSource, HealthSources};
 pub use routes::ws::visible_to;

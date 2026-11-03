@@ -5,7 +5,7 @@ use reelix_core::provider::{FieldKind, FieldSchema, ProviderSchema};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::common::{Settings, check, schema as mk_schema, truncate};
+use crate::common::{self, Settings, check, schema as mk_schema, truncate};
 use crate::{BuildContext, EventMask, Message, NotificationEvent, Notifier, NotifyError};
 
 pub const ID: &str = "telegram";
@@ -113,7 +113,7 @@ impl Notifier for Telegram {
         let status = resp.status();
         // Telegram reports errors as JSON `{ok:false, description}` with 4xx statuses.
         if status.is_client_error() && status.as_u16() != 429 {
-            let r: Option<TgResponse> = resp.json().await.ok();
+            let r: Option<TgResponse> = common::json(resp).await.ok();
             let (code, desc) = r
                 .map(|r| {
                     (
@@ -128,7 +128,7 @@ impl Notifier for Telegram {
                 NotifyError::Api(format!("{code}: {desc}"))
             });
         }
-        let r: TgResponse = check(resp).await?.json().await?;
+        let r: TgResponse = common::json(check(resp).await?).await?;
         if !r.ok {
             return Err(NotifyError::Api(r.description.unwrap_or_default()));
         }
