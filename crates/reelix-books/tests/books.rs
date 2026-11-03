@@ -225,13 +225,8 @@ async fn add_author_monitors_works_and_series() {
     assert_eq!(a.sort_name, "Sanderson, Brandon");
     assert_eq!(a.tags, vec![1, 3]);
     assert_eq!(a.statistics.book_count, 3);
-    assert!(a.path.as_deref().unwrap().ends_with("ebooks/Brandon Sanderson"));
-    assert!(
-        a.audio_path
-            .as_deref()
-            .unwrap()
-            .ends_with("audiobooks/Brandon Sanderson")
-    );
+    assert!(Path::new(a.path.as_deref().unwrap()).ends_with("ebooks/Brandon Sanderson"));
+    assert!(Path::new(a.audio_path.as_deref().unwrap()).ends_with("audiobooks/Brandon Sanderson"));
 
     let books = books_of(&env, a.id).await;
     assert_eq!(books.len(), 3);
