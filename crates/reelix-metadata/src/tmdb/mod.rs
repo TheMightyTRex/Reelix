@@ -82,7 +82,7 @@ impl Default for TmdbOptions {
             retry: RetryPolicy::default(),
             details_ttl: Duration::from_secs(6 * 3600),
             feed_ttl: Duration::from_secs(30 * 60),
-            cache_entries: 2000,
+            cache_entries: 300,
         }
     }
 }

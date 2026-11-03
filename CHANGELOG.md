@@ -8,6 +8,7 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ### Fixed
 - YouTube audio downloads are sorted into `Artist/Album` folders when they complete, like Spotify downloads, instead of being left loose in the job folder. The artist comes from YouTube Music metadata or the channel (without " - Topic"); the album from the track or the playlist name.
+- Much lower memory use after library refreshes. Metadata responses (TMDB, TVDB, MusicBrainz, Open Library) are cached as compact JSON instead of parsed trees (about 3.4× smaller), the caches hold fewer entries, and expired entries are swept every 5 minutes instead of lingering until the cache fills.
 
 ### Security
 - Updated `zip` to 9.x and `quick-xml` to 0.41, fixing RustSec advisories for EPUB/backup archive extraction and XML parsing. Remaining advisories in librespot's and openidconnect's dependencies are documented in `deny.toml`.

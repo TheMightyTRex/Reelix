@@ -97,7 +97,7 @@ impl OpenLibrary {
                     reelix_core::VERSION
                 ),
                 opts,
-                cache: TtlCache::new(2000),
+                cache: TtlCache::new(500),
                 limiter,
                 store: OnceLock::new(),
             }),

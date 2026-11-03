@@ -77,7 +77,7 @@ impl Default for TvdbOptions {
             retry: RetryPolicy::default(),
             token_lifetime: Duration::from_secs(25 * 24 * 3600),
             cache_ttl: Duration::from_secs(6 * 3600),
-            cache_entries: 500,
+            cache_entries: 300,
         }
     }
 }

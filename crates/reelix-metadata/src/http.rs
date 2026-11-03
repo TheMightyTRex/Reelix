@@ -117,25 +117,49 @@ pub(crate) async fn send(
     }
 }
 
-/// Small in-memory cache of decoded JSON responses with per-entry expiry.
+/// How often expired cache entries are swept while the server is idle.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// Small in-memory cache of JSON responses with per-entry expiry.
+///
+/// Entries are kept as compact JSON text rather than parsed [`Value`] trees: a parsed tree costs
+/// several times the text size, and metadata responses (credits, images, whole seasons) are
+/// large. Hits re-parse, which is cheap next to the network round-trip they save.
 #[derive(Debug)]
 pub struct TtlCache {
     max_entries: usize,
-    entries: Mutex<HashMap<String, (Instant, Arc<Value>)>>,
+    entries: Arc<Entries>,
 }
 
 impl TtlCache {
     pub fn new(max_entries: usize) -> Self {
-        Self {
-            max_entries,
-            entries: Mutex::new(HashMap::new()),
+        let entries = Arc::new(Mutex::new(HashMap::new()));
+        // Expired entries would otherwise stay resident until the cache fills up again.
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            let weak = Arc::downgrade(&entries);
+            rt.spawn(async move {
+                let mut tick = tokio::time::interval(SWEEP_INTERVAL);
+                tick.tick().await;
+                loop {
+                    tick.tick().await;
+                    let Some(entries) = weak.upgrade() else { break };
+                    sweep(&entries);
+                }
+            });
         }
+        Self { max_entries, entries }
     }
 
     pub fn get(&self, key: &str) -> Option<Arc<Value>> {
-        let mut map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.entries);
         match map.get(key) {
-            Some((exp, v)) if *exp > Instant::now() => Some(v.clone()),
+            Some((exp, text)) if *exp > Instant::now() => match serde_json::from_str(text) {
+                Ok(v) => Some(Arc::new(v)),
+                Err(_) => {
+                    map.remove(key);
+                    None
+                }
+            },
             Some(_) => {
                 map.remove(key);
                 None
@@ -148,8 +172,11 @@ impl TtlCache {
         if self.max_entries == 0 || ttl.is_zero() {
             return;
         }
+        let Ok(text) = serde_json::to_string(&*value) else {
+            return;
+        };
         let now = Instant::now();
-        let mut map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.entries);
         if map.len() >= self.max_entries {
             map.retain(|_, (exp, _)| *exp > now);
         }
@@ -163,19 +190,38 @@ impl TtlCache {
                 map.remove(&k);
             }
         }
-        map.insert(key, (now + ttl, value));
+        map.insert(key, (now + ttl, text.into_boxed_str()));
     }
 
     pub fn clear(&self) {
-        self.entries.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        lock(&self.entries).clear();
     }
 
     pub fn len(&self) -> usize {
-        self.entries.lock().unwrap_or_else(|e| e.into_inner()).len()
+        lock(&self.entries).len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+/// Cache key → (expiry, compact JSON text).
+type EntryMap = HashMap<String, (Instant, Box<str>)>;
+type Entries = Mutex<EntryMap>;
+
+fn lock(entries: &Entries) -> std::sync::MutexGuard<'_, EntryMap> {
+    entries.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Drops expired entries and gives the freed capacity back to the allocator.
+fn sweep(entries: &Entries) {
+    let now = Instant::now();
+    let mut map = lock(entries);
+    let before = map.len();
+    map.retain(|_, (exp, _)| *exp > now);
+    if map.len() < before {
+        map.shrink_to_fit();
     }
 }
 
@@ -212,5 +258,23 @@ mod tests {
         assert!(c.get("a").is_none(), "closest-to-expiry entry evicted");
         tokio::time::advance(Duration::from_secs(51)).await;
         assert!(c.get("b").is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cache_round_trips_values() {
+        let c = TtlCache::new(4);
+        let v = serde_json::json!({"id": 7, "title": "Ünïcode", "cast": [{"n": 1.5}, null, true]});
+        c.insert("k".into(), Arc::new(v.clone()), Duration::from_secs(60));
+        assert_eq!(c.get("k").as_deref(), Some(&v));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_sweep_drops_expired_entries() {
+        let c = TtlCache::new(10);
+        c.insert("short".into(), Arc::new(Value::from(1)), Duration::from_secs(60));
+        c.insert("long".into(), Arc::new(Value::from(2)), SWEEP_INTERVAL * 3);
+        tokio::time::sleep(SWEEP_INTERVAL + Duration::from_secs(1)).await;
+        assert_eq!(c.len(), 1, "expired entry swept without any cache access");
+        assert_eq!(c.get("long").as_deref(), Some(&Value::from(2)));
     }
 }
