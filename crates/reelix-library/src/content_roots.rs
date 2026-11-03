@@ -5,12 +5,12 @@
 //! ever sees movie/series rows.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use reelix_api_types::content::ContentRootFolderDto;
 use reelix_core::ContentKind;
 use reelix_db::{Db, now_ms};
-use reelix_import::files::disk_space;
+use reelix_import::files::{PathGuard, disk_space};
 use sqlx::Row;
 
 use crate::error::{LibraryError, Result};
@@ -53,6 +53,46 @@ pub async fn get(db: &Db, id: i64) -> Result<Option<ContentRoot>> {
         .await?
         .into_iter()
         .find(|r| r.id == id))
+}
+
+/// Fails with `Validation` unless `path` lies strictly inside one of `roots`: absolute, free of
+/// `..` components and, for a root that exists on disk, still inside it once symlinks are
+/// resolved.
+pub fn ensure_inside<'a>(path: &str, roots: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        return Err(LibraryError::validation("path must be absolute"));
+    }
+    if p.components().any(|c| c == Component::ParentDir) {
+        return Err(LibraryError::validation("path must not contain `..`"));
+    }
+    let inside = roots
+        .into_iter()
+        .map(Path::new)
+        .any(|root| p != root && p.starts_with(root) && (!root.is_dir() || resolves_inside(p, root)));
+    if inside {
+        Ok(())
+    } else {
+        Err(LibraryError::validation(format!(
+            "{path} is not inside a root folder"
+        )))
+    }
+}
+
+/// `path` with symlinks resolved is still strictly inside the existing directory `root`.
+fn resolves_inside(path: &Path, root: &Path) -> bool {
+    let Ok(guard) = PathGuard::new([root]) else {
+        return false;
+    };
+    guard
+        .check(path)
+        .is_ok_and(|resolved| guard.roots().iter().all(|r| r != &resolved))
+}
+
+/// [`ensure_inside`] over every root folder of `kinds`.
+pub async fn ensure_inside_kinds(db: &Db, path: &str, kinds: &[ContentKind]) -> Result<()> {
+    let roots = list(db, kinds).await?;
+    ensure_inside(path, roots.iter().map(|r| r.path.as_str()))
 }
 
 /// Fails with `Conflict` when `path` (normalised) overlaps any existing root folder.
@@ -181,5 +221,33 @@ mod tests {
         assert_eq!(d.unmapped_folders.len(), 1);
         assert!(delete(&db, m).await.unwrap());
         assert!(!delete(&db, m).await.unwrap());
+    }
+
+    #[test]
+    fn ensure_inside_rejects_escapes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("movies");
+        std::fs::create_dir_all(&root).unwrap();
+        let root_s = root.to_string_lossy().into_owned();
+        let roots = || [root_s.as_str()];
+        let inside = |p: &Path| ensure_inside(&p.to_string_lossy(), roots());
+        assert!(inside(&root.join("Film (2020)")).is_ok());
+        assert!(inside(&root.join("a/b")).is_ok());
+        assert!(inside(&root).is_err());
+        assert!(inside(&root.join("../../etc")).is_err());
+        assert!(inside(dir.path()).is_err());
+        assert!(ensure_inside("relative/path", roots()).is_err());
+        // Lexically inside, but a symlink leads out of the root.
+        #[cfg(unix)]
+        {
+            let outside = dir.path().join("outside");
+            std::fs::create_dir_all(&outside).unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            assert!(inside(&root.join("link")).is_err());
+            assert!(inside(&root.join("link/sub")).is_err());
+        }
+        // Roots not on disk are checked lexically.
+        assert!(ensure_inside("/nowhere/movies/Film", ["/nowhere/movies"]).is_ok());
+        assert!(ensure_inside("/nowhere/movies/../etc", ["/nowhere/movies"]).is_err());
     }
 }

@@ -831,6 +831,29 @@ async fn collections_import_and_settings() {
     let mut mm = e.svc.media_management().await.unwrap();
     mm.file_mode = Some("999".into());
     assert!(e.svc.set_media_management(mm).await.is_err());
+
+    // The recycle bin may not overlap a root folder.
+    let root = e.svc.root_folders().await.unwrap()[0].path.clone();
+    for bin in [
+        root.clone(),
+        format!("{root}/bin"),
+        std::path::Path::new(&root)
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        format!("{root}/x/../../bin"),
+    ] {
+        let mut mm = e.svc.media_management().await.unwrap();
+        mm.recycle_bin_path = Some(bin.clone());
+        assert!(
+            matches!(
+                e.svc.set_media_management(mm).await,
+                Err(LibraryError::Validation(_))
+            ),
+            "{bin}"
+        );
+    }
     let _ = &e.tv_root;
 }
 

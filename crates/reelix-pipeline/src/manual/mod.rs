@@ -1,7 +1,7 @@
 //! Manual import: preview a folder (or a queue item's output) and import user-assigned files.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use reelix_api_types::library::ImportMode;
 use reelix_api_types::pipeline::{ManualImportItemDto, ManualImportQuery, ManualImportRequest};
@@ -30,11 +30,19 @@ impl ActivityService {
         for t in tracked::active(&self.db).await? {
             if let Some(p) = t.output_path {
                 let p = PathBuf::from(p);
-                roots.push(if p.is_dir() {
+                // Client-reported paths must not widen the guard: absolute, no `..`, never `/`.
+                if !p.is_absolute() || p.components().any(|c| c == Component::ParentDir) {
+                    tracing::warn!(path = %p.display(), "ignoring unsafe download output path");
+                    continue;
+                }
+                let root = if p.is_dir() {
                     p
                 } else {
                     p.parent().map(Path::to_path_buf).unwrap_or(p)
-                });
+                };
+                if root.parent().is_some() {
+                    roots.push(root);
+                }
             }
         }
         Ok(self.library.importer().guard(&roots).await?)

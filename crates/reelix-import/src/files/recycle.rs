@@ -80,7 +80,8 @@ impl RecycleBin {
         Ok(target)
     }
 
-    /// Purge entries older than the retention period.
+    /// Purge entries older than the retention period. Only the timestamp folders the bin
+    /// creates are touched; anything else in the folder is left alone.
     pub fn cleanup(&self) -> Result<CleanupReport> {
         self.cleanup_at(Utc::now())
     }
@@ -93,12 +94,10 @@ impl RecycleBin {
         let cutoff = now - chrono::Duration::from_std(retention).unwrap_or(chrono::Duration::MAX);
         for entry in std::fs::read_dir(&self.path).map_err(|e| Error::io(&self.path, e))? {
             let entry = entry.map_err(|e| Error::io(&self.path, e))?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            let when = NaiveDateTime::parse_from_str(&name, STAMP_FORMAT)
-                .map(|n| n.and_utc())
-                .ok()
-                .or_else(|| entry.metadata().ok()?.modified().ok().map(DateTime::<Utc>::from));
-            if when.is_some_and(|w| w < cutoff) {
+            let Some(when) = stamp_of(&entry) else {
+                continue;
+            };
+            if when < cutoff {
                 remove_any(&entry.path())?;
                 report.removed += 1;
             } else {
@@ -108,16 +107,30 @@ impl RecycleBin {
         Ok(report)
     }
 
-    /// Remove everything in the bin.
+    /// Remove everything the bin put there (its timestamp folders).
     pub fn empty(&self) -> Result<CleanupReport> {
         let mut report = CleanupReport::default();
         for entry in std::fs::read_dir(&self.path).map_err(|e| Error::io(&self.path, e))? {
             let entry = entry.map_err(|e| Error::io(&self.path, e))?;
+            if stamp_of(&entry).is_none() {
+                continue;
+            }
             remove_any(&entry.path())?;
             report.removed += 1;
         }
         Ok(report)
     }
+}
+
+/// Timestamp of a folder created by [`RecycleBin::recycle_at`]; `None` for anything else.
+fn stamp_of(entry: &std::fs::DirEntry) -> Option<DateTime<Utc>> {
+    if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+        return None;
+    }
+    let name = entry.file_name();
+    NaiveDateTime::parse_from_str(name.to_str()?, STAMP_FORMAT)
+        .ok()
+        .map(|n| n.and_utc())
 }
 
 /// Permanently delete a file or folder (when no recycle bin is configured).

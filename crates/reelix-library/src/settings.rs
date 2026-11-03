@@ -1,15 +1,16 @@
 //! Naming and media-management settings.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use reelix_api_types::library::{MediaManagementSettings, NamingErrorDto, NamingPreviewDto, NamingSettings};
+use reelix_core::ContentKind;
 use reelix_import::files::{PathGuard, RecycleBin, delete_permanently};
 use reelix_import::naming::{NamingConfig, validate_template};
 
 use crate::convert::{naming_from_config, naming_to_config};
 use crate::error::{LibraryError, Result};
-use crate::{LibraryService, keys};
+use crate::{LibraryService, content_roots, keys};
 
 impl LibraryService {
     pub async fn naming(&self) -> Result<NamingSettings> {
@@ -85,6 +86,8 @@ impl LibraryService {
                 s.recycle_bin_path = None;
             } else if !Path::new(p).is_absolute() {
                 return Err(LibraryError::validation("recycle_bin_path must be absolute"));
+            } else {
+                self.check_recycle_bin(Path::new(p)).await?;
             }
         }
         s.extra_file_extensions = s
@@ -99,6 +102,41 @@ impl LibraryService {
         self.db.settings().set(keys::MEDIA_MANAGEMENT, &s).await?;
         self.emit("settings", "updated", 0);
         Ok(s)
+    }
+
+    /// The recycle bin must not overlap a root folder of any kind (recycled files would show up
+    /// as media, and purging the bin would delete the library) nor be or contain the data
+    /// directory (the folder of the database file).
+    async fn check_recycle_bin(&self, bin: &Path) -> Result<()> {
+        if bin.components().any(|c| c == Component::ParentDir) {
+            return Err(LibraryError::validation("recycle_bin_path must not contain `..`"));
+        }
+        let bin = resolve_lenient(bin);
+        for r in content_roots::list(&self.db, &ContentKind::ALL).await? {
+            let root = resolve_lenient(Path::new(&r.path));
+            if bin.starts_with(&root) || root.starts_with(&bin) {
+                return Err(LibraryError::validation(format!(
+                    "recycle_bin_path must not overlap the root folder {}",
+                    r.path
+                )));
+            }
+        }
+        let db_file: Option<String> =
+            sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")
+                .fetch_optional(self.db.pool())
+                .await?;
+        if let Some(data_dir) = db_file
+            .as_deref()
+            .filter(|f| !f.is_empty())
+            .and_then(|f| Path::new(f).parent())
+            .map(resolve_lenient)
+            && data_dir.starts_with(&bin)
+        {
+            return Err(LibraryError::validation(
+                "recycle_bin_path must not be or contain the data directory",
+            ));
+        }
+        Ok(())
     }
 
     /// Guard over every root folder that exists on disk.
@@ -131,6 +169,24 @@ impl LibraryService {
                 delete_permanently(path, &guard)?;
                 Ok(None)
             }
+        }
+    }
+}
+
+/// `path` with its deepest existing ancestor canonicalised (symlinks resolved).
+fn resolve_lenient(path: &Path) -> PathBuf {
+    let mut tail = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(base) = std::fs::canonicalize(cur) {
+            return tail.iter().rev().fold(base, |acc, name| acc.join(name));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name);
+                cur = parent;
+            }
+            _ => return path.to_path_buf(),
         }
     }
 }

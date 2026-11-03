@@ -163,6 +163,12 @@ fn colon_and_illegal_character_handling() {
     cfg.replace_illegal_characters = false;
     assert_eq!(sanitize("AC/DC? *x*", &cfg), "ACDC x");
     assert_eq!(sanitize("...hidden.", &cfg), "hidden");
+    // Windows device names get a prefix, with or without an extension.
+    assert_eq!(sanitize("CON", &cfg), "_CON");
+    assert_eq!(sanitize("nul.mkv", &cfg), "_nul.mkv");
+    assert_eq!(sanitize("Lpt9", &cfg), "_Lpt9");
+    assert_eq!(sanitize("Con Air", &cfg), "Con Air");
+    assert_eq!(sanitize("COM10", &cfg), "COM10");
 
     // Titles with slashes never create sub-folders.
     let m = MovieNaming {

@@ -8,6 +8,8 @@ use reelix_api_types::music::{
     AddArtistRequest, AlbumSearchRequest, ArtistDto, ArtistEdit, ArtistListQuery, ArtistLookupDto,
     ArtistMonitor, NewAlbumMonitor,
 };
+use reelix_core::ContentKind;
+use reelix_library::content_roots;
 use reelix_metadata::{ArtistMetadata, ArtistSearchHit};
 
 use crate::error::{MusicError, Result};
@@ -98,7 +100,10 @@ impl MusicService {
         let meta = self.metadata.artist(&mbid).await?;
         let fields = artist_fields(&meta);
         let path = match path {
-            Some(p) => p,
+            Some(p) => {
+                content_roots::ensure_inside(&p, [root.path.as_str()])?;
+                p
+            }
             None => {
                 let settings = self.settings().await?;
                 let cfg = self.naming_config().await?;
@@ -209,8 +214,12 @@ impl MusicService {
         if let Some(t) = e.tags {
             a.tags = t;
         }
+        if a.path != old_path {
+            content_roots::ensure_inside_kinds(&self.db, &a.path, &[ContentKind::Music]).await?;
+        }
         if a.path != old_path && e.move_files && Path::new(&old_path).is_dir() {
             let guard = self.path_guard().await?;
+            guard.check_existing(Path::new(&old_path))?;
             let to = guard.check(Path::new(&a.path))?;
             if to.exists() {
                 return Err(MusicError::Conflict(format!("{} already exists", a.path)));

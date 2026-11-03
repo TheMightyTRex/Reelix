@@ -13,11 +13,11 @@ use reelix_core::MediaKind;
 use reelix_import::files::{FileKind, ScanOptions, scan_async};
 use reelix_metadata::MetaError;
 
-use crate::LibraryService;
 use crate::error::{LibraryError, Result};
 use crate::movies::hit_to_lookup;
 use crate::repo::{misc, movies, series};
 use crate::root_folders::unmapped_folders;
+use crate::{LibraryService, content_roots};
 
 /// Items added at once by [`LibraryService::library_import`] (metadata lookups dominate).
 const IMPORT_CONCURRENCY: usize = 4;
@@ -139,8 +139,8 @@ impl LibraryService {
                             "TMDB id {} is selected for more than one folder",
                             item.tmdb_id
                         )))
-                    } else if !Path::new(&item.path).starts_with(&root.path) {
-                        Err(LibraryError::validation("folder is not inside the root folder"))
+                    } else if let Err(e) = content_roots::ensure_inside(&item.path, [root.path.as_str()]) {
+                        Err(e)
                     } else {
                         self.import_one(root.id, root.media_kind, &item).await
                     };
