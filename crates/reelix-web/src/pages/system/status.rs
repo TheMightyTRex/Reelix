@@ -32,7 +32,7 @@ pub fn StatusPage() -> impl IntoView {
                 ("Web UI", reelix_core::VERSION.to_string()),
                 ("Platform", format!("{} / {}", s.os, s.arch)),
                 ("Database", s.database.clone()),
-                ("Data directory", s.data_dir.clone()),
+                ("Data directory", s.data_dir.clone().unwrap_or_default()),
                 ("URL base", url_base),
                 ("Started", format::datetime(s.start_time)),
                 ("Uptime", format::duration_secs(s.uptime_secs)),

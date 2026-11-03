@@ -16,16 +16,18 @@ pub fn GeneralPage() -> impl IntoView {
     let status = LocalResource::new(|| api::get::<SystemStatus>("/system/status"));
     let settings = LocalResource::new(|| api::get::<ServerSettingsDto>("/system/settings"));
 
-    let paths = move || match status.get() {
+    let paths = move || {
+        match status.get() {
         None => view! { <Skeleton lines=2 /> }.into_any(),
         Some(Err(e)) => view! { <p class="muted">{e.message}</p> }.into_any(),
         Some(Ok(s)) => view! {
             <dl class="kv">
-                <div class="kv-row"><dt>"Data directory"</dt><dd class="mono">{s.data_dir}</dd></div>
+                <div class="kv-row"><dt>"Data directory"</dt><dd class="mono">{s.data_dir.clone().unwrap_or_default()}</dd></div>
                 <div class="kv-row"><dt>"Database"</dt><dd>{s.database}</dd></div>
             </dl>
         }
         .into_any(),
+    }
     };
 
     view! {

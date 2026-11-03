@@ -3,9 +3,11 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use reelix_api_types::{ApiErrorBody, ApiKeyDto, CreateApiKeyRequest, CreatedApiKey, LoginRequest, UserDto};
 
+use reelix_requests::RequestService;
+
 use crate::auth::{
-    CurrentUser, LoginLimiter, RequestMeta, clear_cookie, generate_api_key, has_csrf_header, session_token,
-    sha256_hex, start_session, user_dto, verify_password_blocking,
+    CurrentUser, RequestMeta, clear_cookie, generate_api_key, has_csrf_header, session_token, sha256_hex,
+    start_session, user_dto, verify_password_blocking,
 };
 use crate::error::{ApiError, ApiJson, ApiPath, ApiResult};
 use crate::state::AppState;
@@ -15,6 +17,7 @@ use crate::state::AppState;
     responses(
         (status = 200, description = "Logged in; session cookie set", body = UserDto),
         (status = 401, description = "Invalid credentials", body = ApiErrorBody),
+        (status = 403, description = "Local login is disabled", body = ApiErrorBody),
         (status = 429, description = "Too many failed attempts (see Retry-After)", body = ApiErrorBody),
     ))]
 pub async fn login(
@@ -22,9 +25,16 @@ pub async fn login(
     meta: RequestMeta,
     ApiJson(req): ApiJson<LoginRequest>,
 ) -> ApiResult<Response> {
-    let key = LoginLimiter::key(meta.ip, &req.username);
-    let limiter = &state.inner.limiter;
-    limiter.check(&key)?;
+    // With local login switched off, admins can still sign in with a password from the server
+    // machine itself (break-glass, e.g. after locking themselves out with a broken OIDC setup).
+    let local_disabled = match state.try_ext::<RequestService>() {
+        Some(svc) => !svc.auth_methods().await?.local,
+        None => false,
+    };
+    if local_disabled && !meta.is_local() {
+        return Err(local_login_disabled());
+    }
+    let attempt = state.inner.limiter.begin(meta.ip, &req.username)?;
 
     let found = state.db().users().find_credentials(req.username.trim()).await?;
     let (user, hash) = match found {
@@ -34,11 +44,14 @@ pub async fn login(
     // Unknown users and users without a local password still pay for a (dummy) verify.
     let ok = verify_password_blocking(req.password, hash).await?;
     let Some(user) = user.filter(|_| ok) else {
-        limiter.record_failure(&key);
+        attempt.failed();
         tracing::warn!(username = %req.username, ip = ?meta.ip, "failed login");
         return Err(ApiError::InvalidCredentials);
     };
-    limiter.record_success(&key);
+    attempt.succeeded();
+    if local_disabled && !user.permissions.is_admin() {
+        return Err(local_login_disabled());
+    }
 
     // Replace any session this browser already had.
     if let Some(old) = session_token(&meta.headers) {
@@ -46,6 +59,13 @@ pub async fn login(
     }
     let cookie = start_session(&state, &meta, user.id, req.remember_me).await?;
     Ok(([(header::SET_COOKIE, cookie)], ApiJson(user_dto(&user))).into_response())
+}
+
+fn local_login_disabled() -> ApiError {
+    ApiError::Validation {
+        status: StatusCode::FORBIDDEN,
+        message: "password login is disabled".into(),
+    }
 }
 
 /// Ends the current session and clears the cookie.

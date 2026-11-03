@@ -18,8 +18,7 @@ use utoipa::OpenApi;
 
 use super::requests::svc;
 use crate::auth::{
-    CurrentUser, LoginLimiter, RequestMeta, flow_cookie, flow_matches, session_token, sha256_hex,
-    start_session, user_dto,
+    CurrentUser, RequestMeta, flow_cookie, flow_matches, session_token, sha256_hex, start_session, user_dto,
 };
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult};
 use crate::state::AppState;
@@ -90,19 +89,20 @@ async fn media_login(
     kind: MediaServerKind,
     req: MediaServerLoginDto,
 ) -> ApiResult<Response> {
-    let key = LoginLimiter::key(meta.ip, &format!("{kind:?}:{}", req.username));
-    let limiter = &state.inner.limiter;
-    limiter.check(&key)?;
+    let attempt = state
+        .inner
+        .limiter
+        .begin(meta.ip, &format!("{kind:?}:{}", req.username))?;
     match svc(&state)?
         .media_server_login(kind, &req.username, &req.password)
         .await
     {
         Ok(user) => {
-            limiter.record_success(&key);
+            attempt.succeeded();
             login_response(&state, &meta, &user, req.remember_me).await
         }
         Err(e @ reelix_requests::Error::Unauthorized(_)) => {
-            limiter.record_failure(&key);
+            attempt.failed();
             tracing::warn!(username = %req.username, ip = ?meta.ip, ?kind, "failed media server login");
             Err(e.into())
         }
@@ -307,13 +307,23 @@ pub async fn oidc_callback(
         tracing::warn!(error = %msg, ip = ?meta.ip, "OIDC login failed");
         Ok(redirect(&format!("{base}/login?error={}", percent_encode(&msg))))
     };
+    let flow_ok = q
+        .state
+        .as_deref()
+        .is_some_and(|st| flow_matches(&state, &meta.headers, OIDC_FLOW, st));
     if let Some(err) = q.error {
-        return fail(q.error_description.unwrap_or(err));
+        // Only echo the provider's message for a sign-in this browser started: anyone can
+        // craft a callback link with arbitrary `error_description` text.
+        return fail(if flow_ok {
+            q.error_description.unwrap_or(err)
+        } else {
+            "sign-in failed; try again".into()
+        });
     }
     let (Some(code), Some(st)) = (q.code, q.state) else {
         return fail("missing code or state".into());
     };
-    if !flow_matches(&state, &meta.headers, OIDC_FLOW, &st) {
+    if !flow_ok {
         return fail("this sign-in was started in another browser; try again".into());
     }
     let svc = svc(&state)?;

@@ -17,11 +17,12 @@ use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_scalar::{Scalar, Servable};
 
-pub use auth::{AuthMethod, CurrentUser, MaybeUser};
+pub use auth::{AuthMethod, CurrentUser, IpNet, MaybeUser, SecureCookies, SecurityConfig};
 pub use error::{ApiError, ApiResult};
 pub use routes::integrations::{IMPORT_LIST_SYNC, Integrations, IntegrationsBackend};
 pub use routes::maintenance::{LogsQuery, Maintenance, MaintenanceBackend, UploadStream, upload_too_large};
 pub use routes::pipeline_activity::ActivityHealth;
+pub use routes::setup::require_setup_token;
 pub use routes::system::{HealthSource, HealthSources};
 pub use routes::ws::visible_to;
 pub use state::{ApiConfig, AppState};

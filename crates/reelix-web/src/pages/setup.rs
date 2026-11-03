@@ -8,7 +8,7 @@ use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 use reelix_api_types::providers::ProviderKind;
 use reelix_api_types::requests::RequestSettingsDto;
-use reelix_api_types::{SetupRequest, UserDto};
+use reelix_api_types::{SetupRequest, SetupStatus, UserDto};
 
 use crate::api;
 use crate::components::provider_form::ProviderListCard;
@@ -96,6 +96,10 @@ pub fn SetupPage() -> impl IntoView {
         });
     }
 
+    // Remote browsers must enter the one-time token the server printed in its log.
+    let status = LocalResource::new(|| api::get::<SetupStatus>("/setup"));
+    let token_required = move || matches!(status.get(), Some(Ok(s)) if s.setup_token_required);
+    let setup_token = RwSignal::new(String::new());
     let username = RwSignal::new(String::new());
     let email = RwSignal::new(String::new());
     let password = RwSignal::new(String::new());
@@ -115,6 +119,10 @@ pub fn SetupPage() -> impl IntoView {
     };
     let confirm_err =
         move || (touched.get() && password.get() != confirm.get()).then_some("Passwords don't match.");
+    let token_err = move || {
+        (touched.get() && token_required() && setup_token.with(|t| t.trim().is_empty()))
+            .then_some("Copy the setup token from the server log.")
+    };
 
     let create_account = move |e: ev::SubmitEvent| {
         e.prevent_default();
@@ -123,6 +131,7 @@ pub fn SetupPage() -> impl IntoView {
             || username_err().is_some()
             || password_err().is_some()
             || confirm_err().is_some()
+            || token_err().is_some()
         {
             return;
         }
@@ -131,6 +140,7 @@ pub fn SetupPage() -> impl IntoView {
             username: username.get_untracked().trim().to_string(),
             password: password.get_untracked(),
             email: (!email_value.is_empty()).then_some(email_value),
+            setup_token: Some(setup_token.get_untracked().trim().to_string()).filter(|t| !t.is_empty()),
         };
         busy.set(true);
         error.set(None);
@@ -227,6 +237,18 @@ pub fn SetupPage() -> impl IntoView {
                             <div class="alert-body"><span>{msg}</span></div>
                         </div>
                     })}
+                    <Show when=token_required>
+                        <div class="field" class:invalid=move || token_err().is_some()>
+                            <label for="setup-token">"Setup token"</label>
+                            <input id="setup-token" class="input mono" type="text" autocomplete="off"
+                                autocapitalize="none" spellcheck="false" required
+                                aria-invalid=move || token_err().is_some().to_string()
+                                aria-describedby="setup-token-hint"
+                                prop:value=move || setup_token.get()
+                                on:input=move |e| setup_token.set(event_target_value(&e)) />
+                            <p id="setup-token-hint" class="field-hint">{move || token_err().unwrap_or("Printed in the server log when Reelix starts without any users.")}</p>
+                        </div>
+                    </Show>
                     <div class="field" class:invalid=move || username_err().is_some()>
                         <label for="setup-username">"Username"</label>
                         <input id="setup-username" class="input" type="text" autocomplete="username"

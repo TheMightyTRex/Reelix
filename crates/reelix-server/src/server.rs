@@ -91,7 +91,16 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             start_time: chrono::Utc::now(),
         },
     );
-    let state = modules.attach(&queue, state).with_extension(direct);
+    let state = modules
+        .attach(&queue, state)
+        .with_extension(direct)
+        .with_security(reelix_api::SecurityConfig {
+            trusted_proxies: config.trusted_proxies.clone(),
+            secure_cookies: config.secure_cookies,
+        });
+    let state = reelix_api::require_setup_token(state)
+        .await
+        .map_err(|e| anyhow::anyhow!("checking for first-run setup: {e}"))?;
     let web_dir = web::resolve_web_dir(config.web_dir.as_deref());
     let web_ui = Arc::new(WebUi::load(&web_dir, &config.url_base));
     let app = web::build_app(reelix_api::router(state), web_ui, &config.url_base);

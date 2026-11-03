@@ -155,7 +155,7 @@ Run the binary from the repository root so it finds the web UI in `crates/reelix
 
 Open <http://localhost:7700>. The setup wizard walks you through:
 
-1. Creating the admin account.
+1. Creating the admin account. Unless you are browsing from the server itself, the wizard asks for the one-time setup token that Reelix prints to its log (and stdout) when it starts without any users, e.g. `docker logs reelix`.
 2. Connecting a media server (optional).
 3. Adding root folders for each library you want to manage.
 4. Adding a download client and indexers.
@@ -200,6 +200,7 @@ data_dir = "/config"
 [security]
 # secret_key_file = "/config/secret.key"   # generated on first run
 trusted_proxies = []          # e.g. ["172.16.0.0/12"]
+secure_cookies = "auto"       # auto (X-Forwarded-Proto: https) | always | never
 
 [logging]
 level = "info"                # trace | debug | info | warn | error
@@ -212,6 +213,7 @@ format = "pretty"             # pretty | json
 | `REELIX_DATABASE_URL` | Database URL |
 | `REELIX_DATA_DIR`, `REELIX_LOG_DIR`, `REELIX_WEB_DIR` | Paths |
 | `REELIX_SECRET_KEY_FILE`, `REELIX_SECRET_KEY` | Key used to encrypt stored secrets |
+| `REELIX_SECURE_COOKIES` | `Secure` flag on session cookies |
 | `REELIX_LOG_LEVEL`, `REELIX_LOG_FORMAT` | Logging |
 | `PUID`, `PGID`, `UMASK`, `TZ` | Docker only |
 
@@ -219,7 +221,7 @@ Command-line flags: `--data-dir`, `--config`, `--port` and `--bind`. Run `reelix
 
 ### Reverse proxy
 
-Set `url_base` when serving Reelix under a sub-path, and list your proxy's addresses in `trusted_proxies` so `X-Forwarded-*` headers are honoured. Reelix uses WebSockets for live updates, so the proxy must allow connection upgrades.
+Set `url_base` when serving Reelix under a sub-path, and list your proxy's addresses in `trusted_proxies` so `X-Forwarded-For` is used for the client address (login rate limiting and server-local checks). Reelix uses WebSockets for live updates, so the proxy must allow connection upgrades.
 
 ---
 

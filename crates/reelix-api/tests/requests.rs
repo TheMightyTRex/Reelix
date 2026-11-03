@@ -677,11 +677,32 @@ async fn external_login_routes() {
             .starts_with("/login?error=")
     );
     assert!(r.headers.get(header::SET_COOKIE).is_none());
+    // Provider errors are only echoed for a sign-in this browser started.
     let r = call(
         &app,
         Method::GET,
-        "/api/v1/auth/oidc/callback?error=access_denied",
+        "/api/v1/auth/oidc/callback?error=access_denied&error_description=Call+0800-SCAM",
         None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        r.headers[header::LOCATION],
+        "/login?error=sign-in%20failed%3B%20try%20again"
+    );
+    let started = call(&app, Method::GET, "/api/v1/auth/oidc/login", None, None).await;
+    let st = url::Url::parse(started.headers[header::LOCATION].to_str().unwrap())
+        .unwrap()
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let r = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/auth/oidc/callback?error=access_denied&state={st}"),
+        Some(&cookie_of(&started)),
         None,
     )
     .await;
@@ -690,6 +711,194 @@ async fn external_login_routes() {
     // Plex PIN: disabled.
     let r = call(&app, Method::POST, "/api/v1/auth/plex/pin", None, Some(json!({}))).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+/// `call` from a given TCP peer.
+async fn call_from(app: &TestApp, peer: &str, m: Method, uri: &str, body: Value) -> Resp {
+    let req = Request::builder()
+        .method(m)
+        .uri(uri)
+        .header("x-reelix-request", "1")
+        .header(header::CONTENT_TYPE, "application/json")
+        .extension(axum::extract::ConnectInfo(
+            peer.parse::<std::net::SocketAddr>().unwrap(),
+        ))
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let res = app.router.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let headers = res.headers().clone();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    Resp {
+        status,
+        headers,
+        body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    }
+}
+
+#[tokio::test]
+async fn disabled_local_login_is_enforced_with_local_admin_break_glass() {
+    let app = app().await;
+    let admin = login(&app, "admin").await;
+    let mut s = call(&app, Method::GET, "/api/v1/settings/security", Some(&admin), None)
+        .await
+        .body;
+    s["local_login"] = json!(false);
+    let r = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/security",
+        Some(&admin),
+        Some(s),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+
+    for user in ["admin", "alice"] {
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/auth/login",
+            None,
+            Some(json!({"username": user, "password": PW})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{user}");
+    }
+    let body = |user: &str| json!({"username": user, "password": PW});
+    let r = call_from(
+        &app,
+        "127.0.0.1:40000",
+        Method::POST,
+        "/api/v1/auth/login",
+        body("alice"),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call_from(
+        &app,
+        "127.0.0.1:40000",
+        Method::POST,
+        "/api/v1/auth/login",
+        body("admin"),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = call_from(
+        &app,
+        "192.0.2.1:40000",
+        Method::POST,
+        "/api/v1/auth/login",
+        body("admin"),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn password_changes_need_the_current_password_and_end_other_sessions() {
+    let app = app().await;
+    let admin = login(&app, "admin").await;
+    let alice = login(&app, "alice").await;
+    let alice_other = login(&app, "alice").await;
+    let key = |cookie: &str| {
+        let cookie = cookie.to_owned();
+        let app = &app;
+        async move {
+            call(
+                app,
+                Method::POST,
+                "/api/v1/auth/apikeys",
+                Some(&cookie),
+                Some(json!({"name": "k"})),
+            )
+            .await
+            .body["key"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        }
+    };
+    let alice_key = key(&alice).await;
+    let me = |cred: &str| {
+        let uri = if cred.starts_with("rlx_") {
+            format!("/api/v1/auth/me?apikey={cred}")
+        } else {
+            "/api/v1/auth/me".to_owned()
+        };
+        let cookie = (!cred.starts_with("rlx_")).then(|| cred.to_owned());
+        let app = &app;
+        async move { call(app, Method::GET, &uri, cookie.as_deref(), None).await.status }
+    };
+    let alice_me = call(&app, Method::GET, "/api/v1/auth/me", Some(&alice), None)
+        .await
+        .body;
+    let alice_id = alice_me["id"].as_i64().unwrap();
+    let mut u = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/users/{alice_id}"),
+        Some(&alice),
+        None,
+    )
+    .await
+    .body;
+    u["password"] = json!("brand-new-password");
+
+    // Missing or wrong current password.
+    for current in [None, Some("not-my-password")] {
+        let mut body = u.clone();
+        if let Some(c) = current {
+            body["current_password"] = json!(c);
+        }
+        let r = call(
+            &app,
+            Method::PUT,
+            &format!("/api/v1/users/{alice_id}"),
+            Some(&alice),
+            Some(body),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+    }
+    u["current_password"] = json!(PW);
+    let r = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/users/{alice_id}"),
+        Some(&alice),
+        Some(u),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    // This session and the API key survive; the other session is gone.
+    assert_eq!(me(&alice).await, StatusCode::OK);
+    assert_eq!(me(&alice_key).await, StatusCode::OK);
+    assert_eq!(me(&alice_other).await, StatusCode::UNAUTHORIZED);
+
+    // An admin reset needs no current password and revokes sessions and API keys.
+    let mut u = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/users/{alice_id}"),
+        Some(&admin),
+        None,
+    )
+    .await
+    .body;
+    u["password"] = json!("reset-by-admin-pw");
+    let r = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/users/{alice_id}"),
+        Some(&admin),
+        Some(u),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(me(&alice).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(me(&alice_key).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(me(&admin).await, StatusCode::OK);
 }
 
 #[test]

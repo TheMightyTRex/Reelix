@@ -48,7 +48,7 @@ Reelix runs on a LAN or behind a reverse proxy, possibly exposed to the internet
 | L1 | Low | Address guard: DNS rebinding window, a few special IPv6/benchmark ranges not blocked | Open |
 | L2 | Low | Manage users can grant non-admin permissions they don't hold | Fixed: only permissions the actor holds |
 | L3 | Low | Widening seasons on a pending request skips the quota check | Fixed: added seasons count against the quota |
-| L4 | Low | Rate limit keyed on the proxy's IP behind a reverse proxy; own password change keeps other sessions; no WebSocket Origin check | Open |
+| L4 | Low | Rate limit keyed on the proxy's IP behind a reverse proxy; own password change keeps other sessions; no WebSocket Origin check | Fixed: client IP from `trusted_proxies`; password changes end other sessions; Origin checked for cookie logins |
 | L5 | Low | API keys in debug request logs | Fixed |
 | L6 | Low | Sealed Torznab links had no expiry or purpose separation | Fixed |
 | L7 | Low | Torrent/NZB fetch for releases without an indexer bypasses the address guard | Open |

@@ -11,6 +11,7 @@ use reelix_notify::NotificationEvent;
 use reelix_requests::fakes::{
     self, FakeDirectory, FakeLibrary, FakeMediaServer, FakeMetadata, FakeNotifications,
 };
+use reelix_requests::users::PasswordChange;
 use reelix_requests::{Availability, Error, MediaServerKind, RequestDeps, RequestService};
 
 struct T {
@@ -642,6 +643,7 @@ async fn user_management_rules() {
         music_quota_limit: None,
         music_quota_days: None,
         password: None,
+        current_password: None,
     };
     assert!(matches!(
         t.svc
@@ -662,6 +664,53 @@ async fn user_management_rules() {
         .await
         .unwrap();
     assert_eq!(me.permissions, Permissions::ROLE_USER);
+    // A user manager can't take over or reshape an account with permissions it lacks.
+    let users_only = user(
+        &t.db,
+        "users-only",
+        Permissions::MANAGE_USERS | Permissions::ROLE_USER,
+    )
+    .await;
+    let librarian = user(
+        &t.db,
+        "librarian",
+        Permissions::MANAGE_LIBRARY | Permissions::ROLE_USER,
+    )
+    .await;
+    let reset = || PasswordChange {
+        hash: "h".into(),
+        keep_session: None,
+    };
+    for (perms, pw) in [
+        (librarian.permissions, Some(reset())),
+        (Permissions::ROLE_USER, None),
+    ] {
+        assert!(matches!(
+            t.svc.update_user(&users_only, librarian.id, upd(perms), pw).await,
+            Err(Error::Forbidden(_))
+        ));
+    }
+    t.svc
+        .update_user(&users_only, librarian.id, upd(librarian.permissions), None)
+        .await
+        .unwrap();
+    t.svc
+        .update_user(&manager, librarian.id, upd(librarian.permissions), Some(reset()))
+        .await
+        .unwrap();
+    assert!(matches!(
+        t.svc
+            .import_users(
+                &users_only,
+                99,
+                ImportUsersDto {
+                    external_ids: None,
+                    permissions: Some(Permissions::MANAGE_LIBRARY),
+                },
+            )
+            .await,
+        Err(Error::Forbidden(_))
+    ));
     assert!(matches!(
         t.svc.delete_user(&t.admin, t.admin.id).await,
         Err(Error::Conflict(_))
@@ -671,7 +720,7 @@ async fn user_management_rules() {
         Err(Error::Forbidden(_))
     ));
     t.svc.delete_user(&manager, created.id).await.unwrap();
-    assert_eq!(t.svc.list_users(&t.admin).await.unwrap().len(), 3);
+    assert_eq!(t.svc.list_users(&t.admin).await.unwrap().len(), 5);
     assert_eq!(reelix_requests::users::roles().roles.len(), 4);
 }
 

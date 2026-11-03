@@ -111,6 +111,7 @@ pub fn UsersPage() -> impl IntoView {
     let display = RwSignal::new(String::new());
     let email = RwSignal::new(String::new());
     let password = RwSignal::new(String::new());
+    let current_password = RwSignal::new(String::new());
     let perms = RwSignal::new(Permissions::ROLE_USER);
     let mq_limit = RwSignal::new(String::new());
     let mq_days = RwSignal::new(String::new());
@@ -138,6 +139,7 @@ pub fn UsersPage() -> impl IntoView {
         display.set(u.display_name.clone());
         email.set(u.email.clone().unwrap_or_default());
         password.set(String::new());
+        current_password.set(String::new());
         perms.set(u.permissions);
         mq_limit.set(num(u.movie_quota_limit));
         mq_days.set(num(u.movie_quota_days));
@@ -172,6 +174,9 @@ pub fn UsersPage() -> impl IntoView {
                         book_quota_days: opt_u32(&bq_days.get_untracked()),
                         music_quota_limit: opt_u32(&uq_limit.get_untracked()),
                         music_quota_days: opt_u32(&uq_days.get_untracked()),
+                        current_password: (!pw.is_empty())
+                            .then(|| current_password.get_untracked())
+                            .filter(|c| !c.is_empty()),
                         password: (!pw.is_empty()).then_some(pw),
                     };
                     api::put::<_, UserDetailDto>(&format!("/users/{}", u.id), &body).await
@@ -364,6 +369,12 @@ pub fn UsersPage() -> impl IntoView {
 
     let is_create = move || editing.with(Option::is_none);
     let is_local = move || editing.with(|e| e.as_ref().is_none_or(|u| u.auth_source == "local"));
+    // Changing your own password needs the current one (unless the account has none yet).
+    let needs_current = move || {
+        let me = auth.user.with(|u| u.as_ref().map(|u| u.id));
+        editing.with(|e| e.as_ref().is_some_and(|u| Some(u.id) == me && u.has_password))
+            && password.with(|p| !p.is_empty())
+    };
 
     view! {
         <PageHeader title="Users" subtitle="Who can sign in, what they may do and how much they may request.">
@@ -397,10 +408,17 @@ pub fn UsersPage() -> impl IntoView {
                 <Show when=is_local>
                     <div class="field">
                         <label for="u-pass">{move || if is_create() { "Password" } else { "Reset password" }}
-                            {move || (!is_create()).then(|| view! { <span class="optional">" (leave blank to keep; signs the user out everywhere)"</span> })}
+                            {move || (!is_create()).then(|| view! { <span class="optional">" (leave blank to keep; signs the user out of other sessions)"</span> })}
                         </label>
                         <input id="u-pass" class="input" type="password" autocomplete="new-password" required=is_create
                             prop:value=move || password.get() on:input=move |e| password.set(event_target_value(&e)) />
+                    </div>
+                </Show>
+                <Show when=needs_current>
+                    <div class="field">
+                        <label for="u-current-pass">"Current password"</label>
+                        <input id="u-current-pass" class="input" type="password" autocomplete="current-password" required
+                            prop:value=move || current_password.get() on:input=move |e| current_password.set(event_target_value(&e)) />
                     </div>
                 </Show>
                 <div class="field">

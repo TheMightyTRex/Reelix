@@ -19,7 +19,7 @@ use crate::state::AppState;
         (status = 200, description = "System status", body = SystemStatus),
         (status = 401, description = "Not authenticated", body = ApiErrorBody),
     ))]
-pub async fn status(State(state): State<AppState>, _user: CurrentUser) -> ApiJson<SystemStatus> {
+pub async fn status(State(state): State<AppState>, user: CurrentUser) -> ApiJson<SystemStatus> {
     let cfg = state.config();
     let uptime = (chrono::Utc::now() - cfg.start_time).num_seconds().max(0) as u64;
     ApiJson(SystemStatus {
@@ -29,7 +29,8 @@ pub async fn status(State(state): State<AppState>, _user: CurrentUser) -> ApiJso
         start_time: cfg.start_time,
         uptime_secs: uptime,
         database: cfg.database.clone(),
-        data_dir: cfg.data_dir.display().to_string(),
+        // The server path is only for admins.
+        data_dir: user.is_admin().then(|| cfg.data_dir.display().to_string()),
         url_base: cfg.url_base.clone(),
     })
 }
