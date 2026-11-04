@@ -1,6 +1,9 @@
 //! Shared building blocks for the library screens: view switcher, pager, sort controls,
 //! bulk-selection bar, live refresh hook and a few formatting helpers.
 
+use std::rc::Rc;
+use std::time::Duration;
+
 use leptos::prelude::*;
 use reelix_api_types::DomainEvent;
 
@@ -50,10 +53,60 @@ pub fn pref_set(key: &str, value: &str) {
     }
 }
 
-/// Calls `refetch` whenever an `entity.changed` event arrives for one of `entities`
-/// (or a job finishes, when `on_jobs` is set — refresh / scan jobs change many rows at once).
+/// Timer jobs that finish every few seconds or minutes and do not change library rows in bulk. A page
+/// that refetches "on jobs" ignores them: it still refetches on the `entity.changed` events they publish.
+const QUIET_JOBS: &[&str] = &[
+    "download_monitor",
+    "rss_sync",
+    "process_pending",
+    "client_health",
+    "indexer_health",
+    "health_watch",
+    "request_status_sync",
+    "definitions_sync",
+    "update_check",
+    "watchlist_sync",
+    "media_server_availability",
+    "housekeeping",
+    "backup",
+    "prune_finished",
+];
+/// Changes that arrive together (a refresh sends one event per item) cause one refetch, this long after
+/// the first.
+const SETTLE: Duration = Duration::from_millis(1500);
+/// While the tab is hidden, a waiting refetch looks again this often, and runs once the tab is shown.
+const HIDDEN_RECHECK: Duration = Duration::from_secs(5);
+
+fn tab_hidden() -> bool {
+    document().hidden()
+}
+
+fn refetch_later(pending: StoredValue<bool>, refetch: Rc<dyn Fn()>, after: Duration) {
+    set_timeout(
+        move || {
+            // The page was left, and its resources with it.
+            if pending.try_get_value().is_none() {
+                return;
+            }
+            if tab_hidden() {
+                refetch_later(pending, refetch, HIDDEN_RECHECK);
+                return;
+            }
+            pending.set_value(false);
+            refetch();
+        },
+        after,
+    );
+}
+
+/// Calls `refetch` when an `entity.changed` event arrives for one of `entities` (or a job finishes,
+/// when `on_jobs` is set: refresh and scan jobs change many rows at once). Events that arrive together
+/// cause one refetch after [`SETTLE`], and a hidden tab waits until it is shown, so an open library page
+/// no longer reloads the whole library for every timer job and every item of a refresh.
 pub fn on_entity_changed(entities: &'static [&'static str], on_jobs: bool, refetch: impl Fn() + 'static) {
     let live = LiveEvents::expect();
+    let refetch: Rc<dyn Fn()> = Rc::new(refetch);
+    let pending = StoredValue::new(false);
     Effect::new(move |prev: Option<u64>| {
         let latest = live.latest();
         let seq = latest.as_ref().map_or(0, |e| e.seq);
@@ -62,11 +115,12 @@ pub fn on_entity_changed(entities: &'static [&'static str], on_jobs: bool, refet
         {
             let hit = match &ev.event {
                 DomainEvent::EntityChanged { entity, .. } => entities.iter().any(|e| e == entity),
-                DomainEvent::JobFinished { .. } => on_jobs,
+                DomainEvent::JobFinished { kind, .. } => on_jobs && !QUIET_JOBS.contains(&kind.as_str()),
                 _ => false,
             };
-            if hit {
-                refetch();
+            if hit && !pending.get_value() {
+                pending.set_value(true);
+                refetch_later(pending, refetch.clone(), SETTLE);
             }
         }
         seq
