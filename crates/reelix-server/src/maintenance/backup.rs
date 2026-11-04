@@ -468,14 +468,15 @@ impl Saved {
 /// Applies a staged restore, if any. Runs at startup before the database is opened.
 /// Renames `from` to `to`, falling back to copy + delete across filesystems. On Windows a
 /// file that was just closed (SQLite's connection thread, an antivirus scan) can stay locked
-/// for a moment, so sharing violations are retried for up to two seconds.
+/// for a few seconds (sqlx closes connections on its worker threads), so sharing violations
+/// are retried for up to ten seconds.
 fn move_aside(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut attempt = 0;
     loop {
         let res = std::fs::rename(from, to)
             .or_else(|_| std::fs::copy(from, to).and_then(|_| std::fs::remove_file(from)));
         match res {
-            Err(e) if cfg!(windows) && attempt < 20 && e.raw_os_error() == Some(32) => {
+            Err(e) if cfg!(windows) && attempt < 100 && e.raw_os_error() == Some(32) => {
                 attempt += 1;
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
