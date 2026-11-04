@@ -149,11 +149,23 @@ impl JobRepo<'_> {
         Ok(())
     }
 
-    /// Crash recovery: puts jobs left `running` by a previous process back in the queue.
+    /// Crash recovery: puts jobs left `running` by a previous process back in the queue. A job
+    /// that was on its last attempt is marked failed instead, so a job that takes the process
+    /// down (for example by running out of memory) cannot crash it again on every start.
     pub async fn requeue_running(&self) -> Result<u64> {
+        let mut tx = self.db.pool().begin().await?;
+        sqlx::query(
+            "UPDATE jobs SET status = 'failed', finished_at = ?, \
+             error = 'interrupted on its last attempt (the process stopped while it was running)' \
+             WHERE status = 'running' AND attempts >= max_attempts",
+        )
+        .bind(now_ms())
+        .execute(&mut *tx)
+        .await?;
         let r = sqlx::query("UPDATE jobs SET status = 'queued' WHERE status = 'running'")
-            .execute(self.db.pool())
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(r.rows_affected())
     }
 
@@ -345,6 +357,32 @@ mod tests {
         assert_eq!(j.error.as_deref(), Some("boom2"));
         assert!(j.finished_at.is_some());
         assert!(!db.jobs().is_active("k").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn requeue_fails_jobs_interrupted_on_their_last_attempt() {
+        let db = Db::in_memory().await.unwrap();
+        let mut last = NewJob::new("k", json!({}));
+        last.max_attempts = 1;
+        let last = db.jobs().enqueue(last).await.unwrap().unwrap();
+        let again = db
+            .jobs()
+            .enqueue(NewJob::new("k", json!({})))
+            .await
+            .unwrap()
+            .unwrap();
+        db.jobs().claim("k", now_ms()).await.unwrap().unwrap();
+        db.jobs().claim("k", now_ms()).await.unwrap().unwrap();
+
+        assert_eq!(db.jobs().requeue_running().await.unwrap(), 1);
+        let failed = db.jobs().get(last).await.unwrap().unwrap();
+        assert_eq!(failed.status, JobStatus::Failed);
+        assert!(failed.finished_at.is_some());
+        assert!(failed.error.as_deref().unwrap().contains("last attempt"));
+        assert_eq!(
+            db.jobs().get(again).await.unwrap().unwrap().status,
+            JobStatus::Queued
+        );
     }
 
     #[tokio::test]
