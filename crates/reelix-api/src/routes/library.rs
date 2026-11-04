@@ -19,9 +19,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use reelix_api_types::library::{
     AddMovieRequest, BulkDeleteRequest, CollectionDto, CollectionEdit, CreateRootFolderRequest, DeleteQuery,
-    ImportCandidateDto, LibraryImportRequest, LibraryImportResult, LibraryImportScanQuery, LibraryStats,
-    LookupQuery, LookupResult, MovieBulkEdit, MovieDto, MovieEdit, MovieFileDto, MovieListQuery, Paged,
-    RootFolderDto, SearchRequest,
+    ImportCandidateDto, LibraryImportMatchRequest, LibraryImportRequest, LibraryImportResult,
+    LibraryImportScanQuery, LibraryStats, LookupQuery, LookupResult, MovieBulkEdit, MovieDto, MovieEdit,
+    MovieFileDto, MovieListQuery, Paged, RootFolderDto, SearchRequest,
 };
 use reelix_api_types::{ApiErrorBody, EnqueuedJob};
 use reelix_core::Permissions;
@@ -51,6 +51,7 @@ pub fn routes() -> Router<AppState> {
         .route("/rootfolders", get(list_root_folders).post(add_root_folder))
         .route("/rootfolders/{id}", axum::routing::delete(delete_root_folder))
         .route("/libraryimport/scan", get(import_scan))
+        .route("/libraryimport/match", post(import_match))
         .route("/libraryimport", post(library_import))
         .route("/search", post(search))
         .route("/library/stats", get(stats))
@@ -64,7 +65,7 @@ pub fn routes() -> Router<AppState> {
         list_movies, add_movie, get_movie, edit_movie, delete_movie, bulk_edit_movies, bulk_delete_movies,
         lookup_movies, movie_files, delete_movie_file, refresh_movie, rescan_movie,
         list_collections, edit_collection, list_root_folders, add_root_folder, delete_root_folder,
-        import_scan, library_import, search, stats,
+        import_scan, import_match, library_import, search, stats,
     ),
     components(schemas(
         reelix_api_types::library::MovieDto,
@@ -434,7 +435,30 @@ pub async fn import_scan(
     ApiQuery(q): ApiQuery<LibraryImportScanQuery>,
 ) -> ApiResult<ApiJson<Vec<ImportCandidateDto>>> {
     require_lib(&user)?;
-    Ok(ApiJson(svc(&state)?.import_scan(q.root_folder_id).await?))
+    Ok(ApiJson(
+        svc(&state)?
+            .import_scan(q.root_folder_id, q.lookup.unwrap_or(true))
+            .await?,
+    ))
+}
+
+/// TMDB suggestions for up to 25 folders from a scan (`lookup=false`), so large libraries are
+/// matched in short requests.
+#[utoipa::path(post, path = "/api/v1/libraryimport/match", tag = "library", request_body = LibraryImportMatchRequest,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Candidates with suggestions", body = Vec<ImportCandidateDto>),
+        (status = 400, description = "Too many folders or a folder outside the root folder", body = ApiErrorBody),
+    ))]
+pub async fn import_match(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(req): ApiJson<LibraryImportMatchRequest>,
+) -> ApiResult<ApiJson<Vec<ImportCandidateDto>>> {
+    require_lib(&user)?;
+    Ok(ApiJson(
+        svc(&state)?.import_match(req.root_folder_id, req.paths).await?,
+    ))
 }
 
 /// Bulk-adds existing folders as movies/series (each gets a disk scan).

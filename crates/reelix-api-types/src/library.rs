@@ -782,6 +782,19 @@ pub struct CreateRootFolderRequest {
 #[cfg_attr(feature = "openapi", into_params(parameter_in = Query))]
 pub struct LibraryImportScanQuery {
     pub root_folder_id: i64,
+    /// Look up TMDB suggestions too (default). `false` lists folders only, fast; fetch the
+    /// suggestions afterwards in batches with `POST /libraryimport/match`.
+    #[serde(default)]
+    pub lookup: Option<bool>,
+}
+
+/// Folders of a root folder to look up TMDB suggestions for (`POST /libraryimport/match`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LibraryImportMatchRequest {
+    pub root_folder_id: i64,
+    /// Folder paths from a scan, at most 25.
+    pub paths: Vec<String>,
 }
 
 /// An unmapped folder with TMDB suggestions (`GET /libraryimport/scan`).
@@ -799,6 +812,9 @@ pub struct ImportCandidateDto {
     pub size: u64,
     /// Best guesses, best first (empty when TMDB is not configured or nothing matched).
     pub suggestions: Vec<LookupResult>,
+    /// Why no suggestions could be looked up (TMDB not configured, unreachable, rate limited).
+    #[serde(default)]
+    pub lookup_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -4,8 +4,8 @@ use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use reelix_api_types::library::{
-    ImportCandidateDto, LibraryImportItem, LibraryImportRequest, LibraryImportResult, LookupResult,
-    MediaKind, MinimumAvailability, SeriesMonitor, SeriesType,
+    ImportCandidateDto, LibraryImportItem, LibraryImportMatchRequest, LibraryImportRequest,
+    LibraryImportResult, LookupResult, MediaKind, MinimumAvailability, SeriesMonitor, SeriesType,
 };
 
 use super::library_common::bytes;
@@ -30,7 +30,11 @@ struct Row {
     /// Chosen TMDB id (0 = no match).
     chosen: RwSignal<u32>,
     selected: RwSignal<bool>,
+    lookup_error: RwSignal<Option<String>>,
 }
+
+/// Folders sent per `POST /libraryimport/match` (the server accepts up to 25).
+const MATCH_BATCH: usize = 20;
 
 impl Row {
     fn new(c: ImportCandidateDto) -> Self {
@@ -54,7 +58,30 @@ impl Row {
             suggestions: RwSignal::new(c.suggestions),
             chosen: RwSignal::new(first),
             selected: RwSignal::new(first != 0),
+            lookup_error: RwSignal::new(c.lookup_error),
         }
+    }
+
+    /// Fills in suggestions looked up after the scan, keeping a match the user already picked.
+    fn apply_match(&self, c: ImportCandidateDto) {
+        let first = c
+            .suggestions
+            .iter()
+            .find(|s| !s.in_library)
+            .and_then(|s| s.tmdb_id)
+            .unwrap_or(0);
+        if self.chosen.get_untracked() == 0 && first != 0 {
+            self.chosen.set(first);
+            self.selected.set(true);
+        }
+        self.suggestions.update(|s| {
+            for hit in c.suggestions {
+                if !s.iter().any(|x| x.tmdb_id == hit.tmdb_id) {
+                    s.push(hit);
+                }
+            }
+        });
+        self.lookup_error.set(c.lookup_error);
     }
 }
 
@@ -73,21 +100,68 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
     let busy = RwSignal::new(false);
     let result = RwSignal::new(None::<LibraryImportResult>);
 
+    // Bumped on every scan, so a stale result (or a match batch from an older scan) is ignored.
+    let scan_gen = RwSignal::new(0u32);
+    // (done, total) while suggestions are being looked up after a scan.
+    let matching = RwSignal::new(None::<(usize, usize)>);
     let scan = LocalResource::new(move || {
         let id = scan_root.get();
+        let generation = scan_gen.get();
         async move {
             if id == 0 {
-                None
+                (generation, None)
             } else {
-                Some(
-                    api::get::<Vec<ImportCandidateDto>>(&format!("/libraryimport/scan?root_folder_id={id}"))
-                        .await
-                        .map(|list| list.into_iter().map(Row::new).collect::<Vec<_>>()),
-                )
+                // Folders only (fast); suggestions follow in batches below.
+                let res = api::get::<Vec<ImportCandidateDto>>(&format!(
+                    "/libraryimport/scan?root_folder_id={id}&lookup=false"
+                ))
+                .await
+                .map(|list| list.into_iter().map(Row::new).collect::<Vec<_>>());
+                if let Ok(rows) = &res {
+                    let rows = rows.clone();
+                    spawn_local(async move {
+                        let total = rows.len();
+                        matching.set((total > 0).then_some((0, total)));
+                        for (i, chunk) in rows.chunks(MATCH_BATCH).enumerate() {
+                            if scan_gen.get_untracked() != generation {
+                                return;
+                            }
+                            let req = LibraryImportMatchRequest {
+                                root_folder_id: id,
+                                paths: chunk.iter().map(|r| r.path.clone()).collect(),
+                            };
+                            match api::post::<_, Vec<ImportCandidateDto>>("/libraryimport/match", &req).await
+                            {
+                                Ok(found) => {
+                                    for c in found {
+                                        if let Some(row) = chunk.iter().find(|r| r.path == c.folder.path) {
+                                            row.apply_match(c);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let msg = format!("Looking up matches failed: {e}");
+                                    for row in chunk {
+                                        row.lookup_error.set(Some(msg.clone()));
+                                    }
+                                }
+                            }
+                            if scan_gen.get_untracked() == generation {
+                                matching.set(Some(((i * MATCH_BATCH + chunk.len()).min(total), total)));
+                            }
+                        }
+                        if scan_gen.get_untracked() == generation {
+                            matching.set(None);
+                        }
+                    });
+                }
+                (generation, Some(res))
             }
         }
     });
-    let rows = move || scan.get().flatten().and_then(Result::ok).unwrap_or_default();
+    // The current scan's result; `None` while it (or the first scan) is still loading.
+    let current = move || scan.get().filter(|(g, _)| *g == scan_gen.get()).map(|(_, r)| r);
+    let rows = move || current().flatten().and_then(Result::ok).unwrap_or_default();
 
     // Override search for one row.
     let search_row = RwSignal::new(None::<Row>);
@@ -150,7 +224,7 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
                         r.added.len()
                     ));
                     result.set(Some(r));
-                    scan.refetch();
+                    scan_gen.update(|g| *g += 1);
                 }
                 Err(e) => toasts.error(format!("Import failed: {e}")),
             }
@@ -164,21 +238,39 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
     };
 
     let table = move || {
-        match scan.get() {
-        None => view! { <Skeleton lines=5 /> }.into_any(),
+        match current() {
+        None => view! {
+            <p class="muted"><Spinner />" Scanning folders…"</p>
+            <Skeleton lines=5 />
+        }.into_any(),
         Some(None) => view! {
             <EmptyState icon="folder" title="Pick a root folder"
                 description=format!("Reelix lists the folders that don't belong to any {noun} yet and suggests a match for each.") compact=true />
         }
         .into_any(),
-        Some(Some(Err(e))) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| scan.refetch()) /> }.into_any(),
+        Some(Some(Err(e))) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| scan_gen.update(|g| *g += 1)) /> }.into_any(),
         Some(Some(Ok(list))) if list.is_empty() => view! {
             <EmptyState icon="check" title="Nothing to import" description="Every folder in this root folder is already in your library." compact=true />
         }
         .into_any(),
         Some(Some(Ok(list))) => {
             let all = list.clone();
+            let errs = list.clone();
+            let lookup_error = move || errs.iter().find_map(|r| r.lookup_error.get());
             view! {
+                {move || matching.get().map(|(done, total)| view! {
+                    <p class="muted"><Spinner />{format!(" Matching folders with TMDB… {done} of {total}")}</p>
+                })}
+                {move || lookup_error().map(|e| view! {
+                    <div class="alert alert-warning" role="alert">
+                        <Icon name="warning" />
+                        <div class="alert-body">
+                            <strong>"Folders couldn't be matched automatically"</strong>
+                            <span>{e}</span>
+                            <span>"You can still pick a match for each folder with Search."</span>
+                        </div>
+                    </div>
+                })}
                 <div class="table-wrap">
                     <table class="table">
                         <caption class="visually-hidden">"Unmapped folders"</caption>
@@ -276,7 +368,13 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
         <PageHeader title=title subtitle="Bring folders that already exist on disk into the library." />
         <div class="card">
             <div class="card-body">
-                <form class="form" on:submit=move |e: ev::SubmitEvent| { e.prevent_default(); result.set(None); scan_root.set(root.get_untracked()); }>
+                <form class="form" on:submit=move |e: ev::SubmitEvent| {
+                    e.prevent_default();
+                    result.set(None);
+                    matching.set(None);
+                    scan_root.set(root.get_untracked());
+                    scan_gen.update(|g| *g += 1);
+                }>
                     <div class="field-row">
                         <div class="field">
                             <label for="imp-root">"Root folder"</label>
@@ -333,9 +431,12 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
         <div class="card import-card">
             <div class="card-body">{table}</div>
         </div>
-        <Show when=move || scan.get().flatten().is_some_and(|r| r.is_ok_and(|l| !l.is_empty()))>
+        <Show when=move || current().flatten().is_some_and(|r| r.is_ok_and(|l| !l.is_empty()))>
             <div class="bulk-bar">
-                <span class="bulk-count">{move || format!("{} ready to import", selected_count())}</span>
+                <span class="bulk-count">{move || match selected_count() {
+                    0 => "Nothing selected: choose a match for a folder (or use Search) to import it".to_owned(),
+                    n => format!("{n} ready to import"),
+                }}</span>
                 <div class="bulk-actions">
                     <button type="button" class="btn btn-primary" disabled=move || busy.get() || selected_count() == 0 on:click=import>
                         {move || if busy.get() { view! { <Spinner /> }.into_any() } else { view! { <Icon name="download" /> }.into_any() }}

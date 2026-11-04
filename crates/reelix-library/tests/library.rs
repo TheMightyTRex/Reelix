@@ -759,11 +759,24 @@ async fn collections_import_and_settings() {
     let mr = roots.iter().find(|r| r.id == e.movie_root_id).unwrap();
     assert_eq!(mr.unmapped_folders.len(), 1);
     assert!(mr.free_space.is_some());
-    let cands = e.svc.import_scan(e.movie_root_id).await.unwrap();
+    let cands = e.svc.import_scan(e.movie_root_id, true).await.unwrap();
     assert_eq!(cands.len(), 1);
     assert_eq!(cands[0].parsed_title, "Future Film");
     assert_eq!(cands[0].file_count, 1);
     assert_eq!(cands[0].suggestions[0].tmdb_id, Some(900));
+    assert_eq!(cands[0].lookup_error, None);
+    // Fast listing without TMDB, then matching in a batch.
+    let quick = e.svc.import_scan(e.movie_root_id, false).await.unwrap();
+    assert!(quick[0].suggestions.is_empty());
+    let matched = e
+        .svc
+        .import_match(e.movie_root_id, vec![quick[0].folder.path.clone()])
+        .await
+        .unwrap();
+    assert_eq!(matched[0].suggestions[0].tmdb_id, Some(900));
+    assert_eq!(matched[0].folder.name, "Future Film (2030)");
+    let outside = e.tv_root.path().join("x").to_string_lossy().into_owned();
+    assert!(e.svc.import_match(e.movie_root_id, vec![outside]).await.is_err());
     let res = e
         .svc
         .library_import(LibraryImportRequest {
@@ -800,7 +813,7 @@ async fn collections_import_and_settings() {
     assert_eq!(res.errors.len(), 1);
     let imported = e.svc.get_movie(res.added[0]).await.unwrap();
     assert_eq!(imported.path, cands[0].folder.path);
-    assert!(e.svc.import_scan(e.movie_root_id).await.unwrap().is_empty());
+    assert!(e.svc.import_scan(e.movie_root_id, true).await.unwrap().is_empty());
     // Root folder in use cannot be deleted.
     assert!(matches!(
         e.svc.delete_root_folder(e.movie_root_id).await,

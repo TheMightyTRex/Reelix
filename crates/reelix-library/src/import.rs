@@ -7,7 +7,7 @@ use futures::stream::{self, StreamExt};
 
 use reelix_api_types::library::{
     AddMovieRequest, AddSeriesRequest, ImportCandidateDto, ImportErrorDto, LibraryImportItem,
-    LibraryImportRequest, LibraryImportResult, LookupResult, MovieMonitor, NewItemMonitor,
+    LibraryImportRequest, LibraryImportResult, LookupResult, MovieMonitor, NewItemMonitor, UnmappedFolderDto,
 };
 use reelix_core::MediaKind;
 use reelix_import::files::{FileKind, ScanOptions, scan_async};
@@ -15,12 +15,17 @@ use reelix_metadata::MetaError;
 
 use crate::error::{LibraryError, Result};
 use crate::movies::hit_to_lookup;
+use crate::repo::misc::RootFolder;
 use crate::repo::{misc, movies, series};
 use crate::root_folders::unmapped_folders;
 use crate::{LibraryService, content_roots};
 
 /// Items added at once by [`LibraryService::library_import`] (metadata lookups dominate).
 const IMPORT_CONCURRENCY: usize = 4;
+/// Folders scanned and looked up at once by [`LibraryService::import_scan`].
+const SCAN_CONCURRENCY: usize = 8;
+/// Folders per [`LibraryService::import_match`] request.
+pub const MAX_MATCH_BATCH: usize = 25;
 
 /// Title + year from a folder name like `The Matrix (1999) {tmdb-603}`.
 pub(crate) fn parse_folder_name(name: &str) -> (String, Option<i32>, Option<u32>) {
@@ -55,69 +60,127 @@ pub(crate) fn parse_folder_name(name: &str) -> (String, Option<i32>, Option<u32>
 }
 
 impl LibraryService {
-    /// Unmapped folders of a root folder with up to 5 TMDB suggestions each.
-    pub async fn import_scan(&self, root_folder_id: i64) -> Result<Vec<ImportCandidateDto>> {
+    /// Unmapped folders of a root folder with up to 5 TMDB suggestions each. With
+    /// `lookup = false` only the folders and their files are listed (fast, no TMDB calls), and
+    /// suggestions are fetched afterwards in small batches with [`Self::import_match`], so a
+    /// large library never needs one long request.
+    pub async fn import_scan(&self, root_folder_id: i64, lookup: bool) -> Result<Vec<ImportCandidateDto>> {
         let root = misc::root_folder(&self.db, root_folder_id)
             .await?
             .ok_or_else(|| LibraryError::not_found("root folder", root_folder_id))?;
         let mapped = self.mapped_paths().await?;
         let folders = unmapped_folders(Path::new(&root.path), &mapped);
+        self.candidates(&root, folders, lookup).await
+    }
+
+    /// TMDB suggestions for some folders of a root folder (at most [`MAX_MATCH_BATCH`]).
+    pub async fn import_match(
+        &self,
+        root_folder_id: i64,
+        paths: Vec<String>,
+    ) -> Result<Vec<ImportCandidateDto>> {
+        if paths.len() > MAX_MATCH_BATCH {
+            return Err(LibraryError::validation(format!(
+                "match at most {MAX_MATCH_BATCH} folders per request"
+            )));
+        }
+        let root = misc::root_folder(&self.db, root_folder_id)
+            .await?
+            .ok_or_else(|| LibraryError::not_found("root folder", root_folder_id))?;
+        let mut folders = Vec::with_capacity(paths.len());
+        for path in paths {
+            content_roots::ensure_inside(&path, [root.path.as_str()])?;
+            let name = Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            folders.push(UnmappedFolderDto { name, path });
+        }
+        self.candidates(&root, folders, true).await
+    }
+
+    async fn candidates(
+        &self,
+        root: &RootFolder,
+        folders: Vec<UnmappedFolderDto>,
+        lookup: bool,
+    ) -> Result<Vec<ImportCandidateDto>> {
         let (movie_idx, (series_idx, _)) = (
             movies::tmdb_index(&self.db).await?,
             series::id_index(&self.db).await?,
         );
-        let mut metadata_ok = true;
-        let mut out = Vec::with_capacity(folders.len());
-        for folder in folders {
-            let files = scan_async(
-                folder.path.clone().into(),
-                ScanOptions {
-                    include_non_video: false,
-                    max_depth: 3,
-                },
-            )
-            .await
-            .unwrap_or_default();
-            let videos: Vec<_> = files.iter().filter(|f| f.kind == FileKind::Video).collect();
-            let (title, year, tmdb) = parse_folder_name(&folder.name);
-            let mut suggestions: Vec<LookupResult> = Vec::new();
-            if metadata_ok {
-                let res = match (tmdb, root.media_kind) {
-                    (Some(id), MediaKind::Movie) => self
-                        .metadata
-                        .movie(id)
-                        .await
-                        .map(|m| vec![crate::movies::movie_hit(&m)]),
-                    _ => self.metadata.search(&title, root.media_kind, year).await,
-                };
-                match res {
-                    Ok(hits) => {
-                        suggestions = hits
-                            .iter()
-                            .take(5)
-                            .map(|h| {
-                                let idx = match root.media_kind {
-                                    MediaKind::Movie => &movie_idx,
-                                    MediaKind::Series => &series_idx,
-                                };
-                                hit_to_lookup(h, h.tmdb_id.and_then(|t| idx.get(&t).copied()))
-                            })
-                            .collect();
+        // Set once TMDB is known to be unusable; folders still waiting report it without a call.
+        let not_configured = std::sync::Mutex::new(None::<String>);
+        let (movie_idx, series_idx, not_configured) = (&movie_idx, &series_idx, &not_configured);
+        let out = stream::iter(folders)
+            .map(|folder| async move {
+                let files = scan_async(
+                    folder.path.clone().into(),
+                    ScanOptions {
+                        include_non_video: false,
+                        max_depth: 3,
+                    },
+                )
+                .await
+                .unwrap_or_default();
+                let videos: Vec<_> = files.iter().filter(|f| f.kind == FileKind::Video).collect();
+                let (title, year, tmdb) = parse_folder_name(&folder.name);
+                let mut suggestions: Vec<LookupResult> = Vec::new();
+                let known = not_configured.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let mut lookup_error = known.clone();
+                if lookup && known.is_none() {
+                    let res = match (tmdb, root.media_kind) {
+                        (Some(id), MediaKind::Movie) => self
+                            .metadata
+                            .movie(id)
+                            .await
+                            .map(|m| vec![crate::movies::movie_hit(&m)]),
+                        _ => self.metadata.search(&title, root.media_kind, year).await,
+                    };
+                    match res {
+                        Ok(hits) => {
+                            let idx = match root.media_kind {
+                                MediaKind::Movie => movie_idx,
+                                MediaKind::Series => series_idx,
+                            };
+                            suggestions = hits
+                                .iter()
+                                .take(5)
+                                .map(|h| hit_to_lookup(h, h.tmdb_id.and_then(|t| idx.get(&t).copied())))
+                                .collect();
+                        }
+                        Err(MetaError::NotConfigured(_)) => {
+                            let msg = "TMDB isn't set up: add an API key or read access token under \
+                                       Settings → Metadata to match folders"
+                                .to_owned();
+                            let mut nc = not_configured.lock().unwrap_or_else(|e| e.into_inner());
+                            if nc.is_none() {
+                                tracing::warn!("library import: {msg}");
+                            }
+                            *nc = Some(msg.clone());
+                            lookup_error = Some(msg);
+                        }
+                        Err(e) => {
+                            tracing::warn!(folder = %folder.name, error = %e, "import lookup failed");
+                            lookup_error = Some(format!("TMDB lookup failed: {e}"));
+                        }
                     }
-                    Err(MetaError::NotConfigured(_)) => metadata_ok = false,
-                    Err(e) => tracing::debug!(folder = %folder.name, error = %e, "import lookup failed"),
                 }
-            }
-            out.push(ImportCandidateDto {
-                media_kind: root.media_kind,
-                parsed_title: title,
-                parsed_year: year,
-                file_count: videos.len() as u32,
-                size: videos.iter().map(|f| f.size).sum(),
-                suggestions,
-                folder,
-            });
-        }
+                ImportCandidateDto {
+                    media_kind: root.media_kind,
+                    parsed_title: title,
+                    parsed_year: year,
+                    file_count: videos.len() as u32,
+                    size: videos.iter().map(|f| f.size).sum(),
+                    suggestions,
+                    lookup_error,
+                    folder,
+                }
+            })
+            // Disk scans overlap; TMDB calls are paced by the client's own rate limiter.
+            .buffered(SCAN_CONCURRENCY)
+            .collect()
+            .await;
         Ok(out)
     }
 
