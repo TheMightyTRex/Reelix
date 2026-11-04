@@ -884,9 +884,27 @@ async fn library_import_scans_existing_folders() {
             &tg,
         );
     }
-    let candidates = e.svc.import_scan(e.root_id).await.unwrap();
+    let candidates = e.svc.import_scan(e.root_id, true).await.unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].folder, "Radiohead (existing)");
+    assert_eq!(candidates[0].suggestions[0].musicbrainz_id, ARTIST);
+    assert_eq!(candidates[0].lookup_error, None);
+    // Fast listing without MusicBrainz, then matching in a batch.
+    let quick = e.svc.import_scan(e.root_id, false).await.unwrap();
+    assert!(quick[0].suggestions.is_empty());
+    let matched = e
+        .svc
+        .import_match(e.root_id, vec![quick[0].path.clone()])
+        .await
+        .unwrap();
+    assert_eq!(matched[0].suggestions[0].musicbrainz_id, ARTIST);
+    assert_eq!(matched[0].folder, "Radiohead (existing)");
+    assert_eq!(matched[0].path, quick[0].path);
+    let outside = e.downloads.join("x").to_string_lossy().into_owned();
+    assert!(e.svc.import_match(e.root_id, vec![outside]).await.is_err());
+    // At most 25 folders per match request.
+    let too_many = vec![quick[0].path.clone(); 26];
+    assert!(e.svc.import_match(e.root_id, too_many).await.is_err());
     let res = e
         .svc
         .library_import(MusicLibraryImportRequest {
@@ -907,7 +925,7 @@ async fn library_import_scans_existing_folders() {
     assert!(okc.monitored, "existing → albums with files monitored");
     assert_eq!(okc.statistics.track_file_count, 3);
     assert!(!e.svc.album_by_mbid(KID_A).await.unwrap().unwrap().monitored);
-    assert!(e.svc.import_scan(e.root_id).await.unwrap().is_empty());
+    assert!(e.svc.import_scan(e.root_id, true).await.unwrap().is_empty());
     // Search API targets.
     let api = e.svc.search_api();
     let t = api.target(okc.id).await.unwrap();

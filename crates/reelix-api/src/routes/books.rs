@@ -18,7 +18,9 @@ use reelix_api_types::books::{
     BookSearchRequest, BookSeriesDto, BookSettingsDto, BookWantedQuery, EditionDto, LookupTermQuery,
 };
 use reelix_api_types::content::{ContentRootFolderDto, CreateContentRootFolderRequest};
-use reelix_api_types::library::{DeleteQuery, LibraryImportResult, Paged, RenamePreviewDto};
+use reelix_api_types::library::{
+    DeleteQuery, LibraryImportMatchRequest, LibraryImportResult, Paged, RenamePreviewDto,
+};
 use reelix_api_types::{ApiErrorBody, EnqueuedJob};
 use reelix_books::{BooksError, BooksService};
 use reelix_core::Permissions;
@@ -54,6 +56,7 @@ pub fn routes() -> Router<AppState> {
         .route("/bookrootfolders", get(list_root_folders).post(add_root_folder))
         .route("/bookrootfolders/{id}", delete(delete_root_folder))
         .route("/bookimport/scan", get(import_scan))
+        .route("/bookimport/match", post(import_match))
         .route("/bookimport", post(library_import))
         .route("/settings/books", get(get_settings).put(put_settings))
 }
@@ -65,7 +68,7 @@ pub fn routes() -> Router<AppState> {
         rescan_author, list_books, add_book, lookup_books, monitor_books, search_books, wanted_books,
         rename_preview, rename_run, get_book, edit_book, delete_book, book_editions, list_book_files,
         delete_book_file, list_book_series, list_root_folders, add_root_folder, delete_root_folder,
-        import_scan, library_import, get_settings, put_settings,
+        import_scan, import_match, library_import, get_settings, put_settings,
     ),
     components(schemas(
         reelix_api_types::books::AuthorDto,
@@ -528,7 +531,31 @@ pub async fn import_scan(
     ApiQuery(q): ApiQuery<BookImportScanQuery>,
 ) -> ApiResult<ApiJson<Vec<BookImportCandidateDto>>> {
     require_lib(&user)?;
-    Ok(ApiJson(svc(&state)?.import_scan(q.root_folder_id).await?))
+    Ok(ApiJson(
+        svc(&state)?
+            .import_scan(q.root_folder_id, q.lookup.unwrap_or(true))
+            .await?,
+    ))
+}
+
+/// Open Library suggestions for up to 25 folders from a scan (`lookup=false`), so large
+/// libraries are matched in short requests.
+#[utoipa::path(post, path = "/api/v1/bookimport/match", tag = "books", request_body = LibraryImportMatchRequest,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Candidates with suggestions", body = Vec<BookImportCandidateDto>),
+        (status = 400, description = "Too many folders or a folder outside the root folder", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn import_match(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(req): ApiJson<LibraryImportMatchRequest>,
+) -> ApiResult<ApiJson<Vec<BookImportCandidateDto>>> {
+    require_lib(&user)?;
+    Ok(ApiJson(
+        svc(&state)?.import_match(req.root_folder_id, req.paths).await?,
+    ))
 }
 
 /// Adds existing author folders (each is scanned and monitored per its option).

@@ -812,10 +812,27 @@ async fn library_import_and_root_folders() {
         &env.path("ebooks/Brandon Sanderson/The Final Empire.epub"),
         &epub("The Final Empire", None),
     );
-    let cands = env.svc.import_scan(env.ebook_root).await.unwrap();
+    let cands = env.svc.import_scan(env.ebook_root, true).await.unwrap();
     assert_eq!(cands.len(), 1);
     assert_eq!(cands[0].guessed_author.as_deref(), Some("Brandon Sanderson"));
     assert_eq!(cands[0].suggestions[0].openlibrary_id, "OL1A");
+    assert_eq!(cands[0].lookup_error, None);
+    // Fast listing without Open Library, then matching in a batch.
+    let quick = env.svc.import_scan(env.ebook_root, false).await.unwrap();
+    assert!(quick[0].suggestions.is_empty());
+    let matched = env
+        .svc
+        .import_match(env.ebook_root, vec![quick[0].path.clone()])
+        .await
+        .unwrap();
+    assert_eq!(matched[0].suggestions[0].openlibrary_id, "OL1A");
+    assert_eq!(matched[0].folder, "Brandon Sanderson");
+    assert_eq!(matched[0].guessed_author.as_deref(), Some("Brandon Sanderson"));
+    let outside = env.path("audiobooks/x").to_string_lossy().into_owned();
+    assert!(env.svc.import_match(env.ebook_root, vec![outside]).await.is_err());
+    // At most 25 folders per match request.
+    let too_many = vec![quick[0].path.clone(); 26];
+    assert!(env.svc.import_match(env.ebook_root, too_many).await.is_err());
     let r = env
         .svc
         .library_import(BookLibraryImportRequest {
@@ -840,7 +857,13 @@ async fn library_import_and_root_folders() {
         "missing: books with files are unmonitored"
     );
     assert!(by_title(&books, "The Well of Ascension").monitored_ebook);
-    assert!(env.svc.import_scan(env.ebook_root).await.unwrap().is_empty());
+    assert!(
+        env.svc
+            .import_scan(env.ebook_root, true)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 
     // Root folders: in use → conflict; kind checks.
     assert!(matches!(

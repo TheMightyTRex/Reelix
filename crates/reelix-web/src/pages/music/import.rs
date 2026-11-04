@@ -4,6 +4,7 @@
 use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use reelix_api_types::library::LibraryImportMatchRequest;
 use reelix_api_types::music::{
     ArtistLookupDto, ArtistMonitor, LibraryImportResult, MusicImportCandidateDto, MusicImportItem,
     MusicLibraryImportRequest,
@@ -27,16 +28,25 @@ struct Row {
     selected: RwSignal<bool>,
     lookup: RwSignal<String>,
     searching: RwSignal<bool>,
+    lookup_error: RwSignal<Option<String>>,
+}
+
+/// Folders sent per `POST /musicimport/match` (the server accepts up to 25; at MusicBrainz's
+/// one request a second a batch takes about 10 s).
+const MATCH_BATCH: usize = 10;
+
+/// Best default: the first suggestion that is not in the library yet.
+fn first_new(suggestions: &[ArtistLookupDto]) -> String {
+    suggestions
+        .iter()
+        .find(|s| s.artist_id.is_none())
+        .map(|s| s.musicbrainz_id.clone())
+        .unwrap_or_default()
 }
 
 impl Row {
     fn new(c: MusicImportCandidateDto) -> Self {
-        let first = c
-            .suggestions
-            .iter()
-            .find(|s| s.artist_id.is_none())
-            .map(|s| s.musicbrainz_id.clone())
-            .unwrap_or_default();
+        let first = first_new(&c.suggestions);
         Self {
             folder: c.folder,
             path: c.path,
@@ -45,7 +55,25 @@ impl Row {
             suggestions: RwSignal::new(c.suggestions),
             lookup: RwSignal::new(c.guessed_artist.unwrap_or_default()),
             searching: RwSignal::new(false),
+            lookup_error: RwSignal::new(c.lookup_error),
         }
+    }
+
+    /// Fills in suggestions looked up after the scan, keeping an artist the user already picked.
+    fn apply_match(&self, c: MusicImportCandidateDto) {
+        let first = first_new(&c.suggestions);
+        if self.chosen.get_untracked().is_empty() && !first.is_empty() {
+            self.chosen.set(first);
+            self.selected.set(true);
+        }
+        self.suggestions.update(|s| {
+            for hit in c.suggestions {
+                if !s.iter().any(|x| x.musicbrainz_id == hit.musicbrainz_id) {
+                    s.push(hit);
+                }
+            }
+        });
+        self.lookup_error.set(c.lookup_error);
     }
 
     fn search(&self) {
@@ -83,6 +111,49 @@ impl Row {
     }
 }
 
+/// Looks up MusicBrainz suggestions for `rows` in batches, updating them as batches arrive and
+/// stopping once a newer scan (`scan_gen` moved on) replaced them.
+async fn match_rows(
+    root_folder_id: i64,
+    rows: Vec<Row>,
+    generation: u32,
+    scan_gen: RwSignal<u32>,
+    matching: RwSignal<Option<(usize, usize)>>,
+) {
+    let total = rows.len();
+    matching.set((total > 0).then_some((0, total)));
+    for (i, chunk) in rows.chunks(MATCH_BATCH).enumerate() {
+        if scan_gen.get_untracked() != generation {
+            return;
+        }
+        let req = LibraryImportMatchRequest {
+            root_folder_id,
+            paths: chunk.iter().map(|r| r.path.clone()).collect(),
+        };
+        match api::post::<_, Vec<MusicImportCandidateDto>>("/musicimport/match", &req).await {
+            Ok(found) => {
+                for c in found {
+                    if let Some(row) = chunk.iter().find(|r| r.path == c.path) {
+                        row.apply_match(c);
+                    }
+                }
+            }
+            Err(e) => {
+                let msg = format!("Looking up matches failed: {e}");
+                for row in chunk {
+                    row.lookup_error.set(Some(msg.clone()));
+                }
+            }
+        }
+        if scan_gen.get_untracked() == generation {
+            matching.set(Some(((i * MATCH_BATCH + chunk.len()).min(total), total)));
+        }
+    }
+    if scan_gen.get_untracked() == generation {
+        matching.set(None);
+    }
+}
+
 #[component]
 pub fn ImportArtistsPage() -> impl IntoView {
     require_library();
@@ -96,6 +167,10 @@ pub fn ImportArtistsPage() -> impl IntoView {
     let scanning = RwSignal::new(false);
     let busy = RwSignal::new(false);
     let result = RwSignal::new(None::<LibraryImportResult>);
+    // Bumped on every scan (and import), so a stale scan or match batch is ignored.
+    let scan_gen = RwSignal::new(0u32);
+    // (done, total) while suggestions are being looked up after a scan.
+    let matching = RwSignal::new(None::<(usize, usize)>);
 
     let scan = move |_| {
         let r = root.get_untracked();
@@ -103,15 +178,36 @@ pub fn ImportArtistsPage() -> impl IntoView {
             toasts.error("Choose a music root folder first.");
             return;
         }
+        scan_gen.update(|g| *g += 1);
+        let generation = scan_gen.get_untracked();
         scanning.set(true);
         result.set(None);
+        rows.set(None);
+        matching.set(None);
         spawn_local(async move {
-            let res =
-                api::get::<Vec<MusicImportCandidateDto>>(&format!("/musicimport/scan?root_folder_id={r}"))
-                    .await;
-            rows.set(Some(res.map(|list| list.into_iter().map(Row::new).collect())));
+            // Folders only (fast); suggestions follow in batches.
+            let res = api::get::<Vec<MusicImportCandidateDto>>(&format!(
+                "/musicimport/scan?root_folder_id={r}&lookup=false"
+            ))
+            .await
+            .map(|list| list.into_iter().map(Row::new).collect::<Vec<_>>());
+            if scan_gen.get_untracked() != generation {
+                return;
+            }
+            let pending = res.as_ref().ok().cloned();
+            rows.set(Some(res));
             scanning.set(false);
+            if let Some(list) = pending {
+                match_rows(r, list, generation, scan_gen, matching).await;
+            }
         });
+    };
+    let selected_count = move || match rows.get() {
+        Some(Ok(list)) => list
+            .iter()
+            .filter(|r| r.selected.get() && !r.chosen.get().is_empty())
+            .count(),
+        _ => 0,
     };
 
     let import = move |e: ev::SubmitEvent| {
@@ -150,6 +246,8 @@ pub fn ImportArtistsPage() -> impl IntoView {
                 Ok(r) => {
                     toasts.success(format!("Added {} artist(s).", r.added.len()));
                     result.set(Some(r));
+                    scan_gen.update(|g| *g += 1);
+                    matching.set(None);
                     rows.set(None);
                 }
                 Err(e) => toasts.error(format!("Import failed: {e}")),
@@ -160,7 +258,10 @@ pub fn ImportArtistsPage() -> impl IntoView {
 
     let table = move || {
         match rows.get() {
-        None if scanning.get() => view! { <Skeleton lines=6 /> }.into_any(),
+        None if scanning.get() => view! {
+            <p class="muted"><Spinner />" Scanning folders…"</p>
+            <Skeleton lines=6 />
+        }.into_any(),
         None => view! {
             <div class="card">
                 <EmptyState icon="folder" title="Import existing music"
@@ -175,7 +276,23 @@ pub fn ImportArtistsPage() -> impl IntoView {
             </div>
         }
         .into_any(),
-        Some(Ok(list)) => view! {
+        Some(Ok(list)) => {
+            let errs = list.clone();
+            let lookup_error = move || errs.iter().find_map(|r| r.lookup_error.get());
+            view! {
+            {move || matching.get().map(|(done, total)| view! {
+                <p class="muted"><Spinner />{format!(" Matching folders with MusicBrainz… {done} of {total}")}</p>
+            })}
+            {move || lookup_error().map(|e| view! {
+                <div class="alert alert-warning" role="alert">
+                    <Icon name="warning" />
+                    <div class="alert-body">
+                        <strong>"Folders couldn't be matched automatically"</strong>
+                        <span>{e}</span>
+                        <span>"You can still search MusicBrainz for each folder by hand."</span>
+                    </div>
+                </div>
+            })}
             <form class="card" on:submit=import>
                 <div class="card-body">
                     <div class="field-row">
@@ -256,15 +373,20 @@ pub fn ImportArtistsPage() -> impl IntoView {
                         </table>
                     </div>
                     <div class="modal-footer">
-                        <button type="submit" class="btn btn-primary" disabled=move || busy.get()>
+                        <span class="muted">{move || match selected_count() {
+                            0 => "Nothing selected: choose an artist for a folder (or use Search) to import it".to_owned(),
+                            n => format!("{n} ready to import"),
+                        }}</span>
+                        <button type="submit" class="btn btn-primary" disabled=move || busy.get() || selected_count() == 0>
                             {move || if busy.get() { view! { <Spinner /> }.into_any() } else { view! { <Icon name="plus" /> }.into_any() }}
                             "Import selected"
                         </button>
                     </div>
                 </div>
             </form>
+            }
+            .into_any()
         }
-        .into_any(),
     }
     };
 

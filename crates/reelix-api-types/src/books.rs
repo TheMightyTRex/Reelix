@@ -468,6 +468,9 @@ pub struct BookImportCandidateDto {
     pub kind: ContentKind,
     pub guessed_author: Option<String>,
     pub suggestions: Vec<AuthorLookupDto>,
+    /// Why no suggestions could be looked up (Open Library unreachable, rate limited).
+    #[serde(default)]
+    pub lookup_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -505,6 +508,10 @@ pub struct BookFilesQuery {
 #[cfg_attr(feature = "openapi", into_params(parameter_in = Query))]
 pub struct BookImportScanQuery {
     pub root_folder_id: i64,
+    /// Look up Open Library suggestions too (default). `false` lists folders only, fast; fetch
+    /// the suggestions afterwards in batches with `POST /bookimport/match`.
+    #[serde(default)]
+    pub lookup: Option<bool>,
 }
 
 /// `GET/POST /books/rename?author_id=`.

@@ -12,7 +12,9 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{delete, get, post, put};
 use reelix_api_types::content::{ContentRootFolderDto, CreateContentRootFolderRequest};
-use reelix_api_types::library::{DeleteQuery, LibraryImportResult, LookupQuery, Paged, RenamePreviewDto};
+use reelix_api_types::library::{
+    DeleteQuery, LibraryImportMatchRequest, LibraryImportResult, LookupQuery, Paged, RenamePreviewDto,
+};
 use reelix_api_types::music::{
     AddAlbumRequest, AddArtistRequest, AlbumDto, AlbumEdit, AlbumIdQuery, AlbumListQuery, AlbumLookupDto,
     AlbumMonitorRequest, AlbumReleaseDto, AlbumSearchRequest, AlbumWantedQuery, ArtistDto, ArtistEdit,
@@ -71,6 +73,7 @@ pub fn routes() -> Router<AppState> {
         .route("/musicrootfolders", get(list_root_folders).post(add_root_folder))
         .route("/musicrootfolders/{id}", delete(delete_root_folder))
         .route("/musicimport/scan", get(import_scan))
+        .route("/musicimport/match", post(import_match))
         .route("/musicimport", post(library_import))
         .route("/settings/music", get(get_settings).put(put_settings))
 }
@@ -85,7 +88,7 @@ pub fn routes() -> Router<AppState> {
         list_tracks, list_track_files, delete_track_file,
         list_metadata_profiles, create_metadata_profile, get_metadata_profile, update_metadata_profile,
         delete_metadata_profile, list_root_folders, add_root_folder, delete_root_folder,
-        import_scan, library_import, get_settings, put_settings,
+        import_scan, import_match, library_import, get_settings, put_settings,
     ),
     components(schemas(
         reelix_api_types::music::AlbumType,
@@ -696,7 +699,8 @@ pub async fn delete_root_folder(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Folders under a music root that are not artists yet, with MusicBrainz suggestions.
+/// Folders under a music root that are not artists yet, with MusicBrainz suggestions (for the
+/// first 25 folders; `lookup=false` lists folders only).
 #[utoipa::path(get, path = "/api/v1/musicimport/scan", tag = "music", params(MusicImportScanQuery),
     security(("session" = []), ("api_key" = [])),
     responses((status = 200, description = "Candidates", body = Vec<MusicImportCandidateDto>)))]
@@ -706,7 +710,30 @@ pub async fn import_scan(
     ApiQuery(q): ApiQuery<MusicImportScanQuery>,
 ) -> ApiResult<ApiJson<Vec<MusicImportCandidateDto>>> {
     require_lib(&user)?;
-    Ok(ApiJson(svc(&state)?.import_scan(q.root_folder_id).await?))
+    Ok(ApiJson(
+        svc(&state)?
+            .import_scan(q.root_folder_id, q.lookup.unwrap_or(true))
+            .await?,
+    ))
+}
+
+/// MusicBrainz suggestions for up to 25 folders from a scan (`lookup=false`), so every folder of
+/// a large library is matched in short requests.
+#[utoipa::path(post, path = "/api/v1/musicimport/match", tag = "music", request_body = LibraryImportMatchRequest,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Candidates with suggestions", body = Vec<MusicImportCandidateDto>),
+        (status = 400, description = "Too many folders or a folder outside the root folder", body = ApiErrorBody),
+    ))]
+pub async fn import_match(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(req): ApiJson<LibraryImportMatchRequest>,
+) -> ApiResult<ApiJson<Vec<MusicImportCandidateDto>>> {
+    require_lib(&user)?;
+    Ok(ApiJson(
+        svc(&state)?.import_match(req.root_folder_id, req.paths).await?,
+    ))
 }
 
 /// Adds the chosen folders as artists and scans their files.

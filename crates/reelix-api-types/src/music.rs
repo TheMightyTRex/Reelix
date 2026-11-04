@@ -470,6 +470,9 @@ pub struct MusicImportCandidateDto {
     pub path: String,
     pub guessed_artist: Option<String>,
     pub suggestions: Vec<ArtistLookupDto>,
+    /// Why no suggestions could be looked up (MusicBrainz unreachable, rate limited).
+    #[serde(default)]
+    pub lookup_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -515,6 +518,11 @@ pub struct AlbumIdQuery {
 #[cfg_attr(feature = "openapi", into_params(parameter_in = Query))]
 pub struct MusicImportScanQuery {
     pub root_folder_id: i64,
+    /// Look up MusicBrainz suggestions too (default; only the first 25 folders). `false` lists
+    /// folders only, fast; fetch the suggestions afterwards in batches with
+    /// `POST /musicimport/match`.
+    #[serde(default)]
+    pub lookup: Option<bool>,
 }
 
 /// `POST /artists/refresh` and `POST /artists/rescan` (empty `artist_ids` = every artist).
