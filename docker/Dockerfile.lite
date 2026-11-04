@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+# The fork's lite image (TheMightyTRex/Reelix, 4 November 2026): the same build as docker/Dockerfile, without
+# direct downloads (YouTube, Spotify) or the /api/docs page, and with a stand-alone ffprobe instead of Debian's
+# full ffmpeg, Deno and yt-dlp. For films, series, books and music Reelix only runs ffprobe.
+#
+# Build: docker build -f docker/Dockerfile.lite -t reelix:lite .
+# Kept in step with upstream by .github/workflows/lite.yml: only this file and the build options differ.
+
+# Cargo features for reelix-server: empty for lite, "direct,docs" for the full feature set.
+ARG REELIX_FEATURES=""
+# A static ffprobe, pinned. Change the tag to update it.
+ARG FFPROBE_IMAGE=mwader/static-ffmpeg:7.1
+
+FROM rust:1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS chef
+RUN cargo install --locked cargo-chef
+WORKDIR /src
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+ARG REELIX_FEATURES
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json --package reelix-server \
+    --no-default-features ${REELIX_FEATURES:+--features "$REELIX_FEATURES"}
+COPY . .
+RUN cargo build --release --locked --package reelix-server --bin reelix \
+    --no-default-features ${REELIX_FEATURES:+--features "$REELIX_FEATURES"} \
+    && cp target/release/reelix /reelix
+
+# The web app is the same as upstream's (8 MB on disk, nothing at run time while nobody opens it).
+FROM chef AS web
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install --locked trunk
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json \
+    --target wasm32-unknown-unknown --package reelix-web
+COPY . .
+RUN cd crates/reelix-web && trunk build --release
+
+FROM ${FFPROBE_IMAGE} AS ffprobe
+
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS runtime
+# util-linux (setpriv) is part of the base image; tzdata makes TZ work.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# --chmod on COPY, not a later RUN chmod, which would store a second copy of each file in a new layer.
+COPY --from=ffprobe --chmod=0755 /ffprobe /usr/local/bin/ffprobe
+COPY --from=builder --chmod=0755 /reelix /app/reelix
+COPY --from=web /src/crates/reelix-web/dist /app/web
+COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh
+
+# Two glibc malloc arenas instead of up to eight per core. For headless use with Starboard as the only
+# interface, set REELIX_WEB_DIR to an empty folder: Reelix then serves a short notice and the API as usual.
+ENV REELIX_DATA_DIR=/config \
+    REELIX_WEB_DIR=/app/web \
+    REELIX_DOCKER=1 \
+    MALLOC_ARENA_MAX=2 \
+    PUID=1000 \
+    PGID=1000 \
+    UMASK=022
+
+EXPOSE 7700
+VOLUME /config
+WORKDIR /app
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=60s --timeout=10s --start-period=20s --retries=3 CMD ["/app/reelix", "healthcheck"]
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -19,4 +19,5 @@ pub mod torznab;
 pub mod users;
 pub mod ws;
 
+#[cfg(feature = "direct")]
 pub mod direct;

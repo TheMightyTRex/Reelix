@@ -22,19 +22,28 @@ fn main() -> ExitCode {
             client_id,
             redirect_uri,
         }) => {
-            let runtime = tokio::runtime::Runtime::new().expect("create Spotify login runtime");
-            match runtime.block_on(reelix_direct::spotify::login(
-                credentials,
-                client_id.as_deref(),
-                redirect_uri,
-            )) {
-                Ok(()) => {
-                    println!("Spotify session saved to {}", credentials.display());
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("Spotify login failed: {e}");
-                    ExitCode::FAILURE
+            #[cfg(not(feature = "direct"))]
+            {
+                let _ = (credentials, client_id, redirect_uri);
+                eprintln!("This build of Reelix has no direct downloads, so there is no Spotify login.");
+                ExitCode::FAILURE
+            }
+            #[cfg(feature = "direct")]
+            {
+                let runtime = tokio::runtime::Runtime::new().expect("create Spotify login runtime");
+                match runtime.block_on(reelix_direct::spotify::login(
+                    credentials,
+                    client_id.as_deref(),
+                    redirect_uri,
+                )) {
+                    Ok(()) => {
+                        println!("Spotify session saved to {}", credentials.display());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("Spotify login failed: {e}");
+                        ExitCode::FAILURE
+                    }
                 }
             }
         }

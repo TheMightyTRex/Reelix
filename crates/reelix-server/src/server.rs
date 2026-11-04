@@ -76,10 +76,12 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     // Shared with `lifecycle`, so a self-update restart or a Windows service Stop shuts down too.
     let cancel = crate::lifecycle::shutdown_token();
     let jobs_handle = jobs.start(cancel.clone());
+    #[cfg(feature = "direct")]
     let direct = Arc::new(reelix_direct::DirectService::new(
         db.clone(),
         config.data_dir.clone(),
     ));
+    #[cfg(feature = "direct")]
     let direct_handle = tokio::spawn(direct.clone().run(cancel.clone()));
 
     let state = AppState::new(
@@ -94,13 +96,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             start_time: chrono::Utc::now(),
         },
     );
-    let state = modules
-        .attach(&queue, state)
-        .with_extension(direct)
-        .with_security(reelix_api::SecurityConfig {
-            trusted_proxies: config.trusted_proxies.clone(),
-            secure_cookies: config.secure_cookies,
-        });
+    let state = modules.attach(&queue, state);
+    #[cfg(feature = "direct")]
+    let state = state.with_extension(direct);
+    let state = state.with_security(reelix_api::SecurityConfig {
+        trusted_proxies: config.trusted_proxies.clone(),
+        secure_cookies: config.secure_cookies,
+    });
     let state = reelix_api::require_setup_token(state)
         .await
         .map_err(|e| anyhow::anyhow!("checking for first-run setup: {e}"))?;
@@ -134,6 +136,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     if let Err(e) = jobs_handle.await {
         tracing::error!(error = %e, "job system task failed");
     }
+    #[cfg(feature = "direct")]
     if let Err(e) = direct_handle.await? {
         tracing::error!(error = %e, "direct download worker stopped");
     }

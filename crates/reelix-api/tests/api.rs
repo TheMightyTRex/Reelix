@@ -1013,9 +1013,18 @@ async fn openapi_and_docs_are_served() {
     // Round-trips through utoipa's own model.
     let _: utoipa::openapi::OpenApi = serde_json::from_value(doc).unwrap();
 
-    let docs = call(&app, Method::GET, "/api/docs", Req::default()).await;
-    assert_eq!(docs.status, StatusCode::OK);
-    assert!(docs.body.as_str().unwrap().to_lowercase().contains("<html"));
+    // The docs page is a build option (`docs`), off in the fork's lite build.
+    #[cfg(feature = "docs")]
+    {
+        let docs = call(&app, Method::GET, "/api/docs", Req::default()).await;
+        assert_eq!(docs.status, StatusCode::OK);
+        assert!(docs.body.as_str().unwrap().to_lowercase().contains("<html"));
+    }
+    #[cfg(not(feature = "docs"))]
+    {
+        let docs = call(&app, Method::GET, "/api/docs", Req::default()).await;
+        assert_eq!(docs.status, StatusCode::NOT_FOUND);
+    }
 }
 
 #[tokio::test]

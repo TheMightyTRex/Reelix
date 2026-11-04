@@ -12,6 +12,13 @@ path = "src/lib.rs"
 name = "reelix"
 path = "src/main.rs"
 
+[features]
+default = ["direct", "docs"]
+# YouTube and Spotify downloads. Off in the fork's lite image.
+direct = ["dep:reelix-direct", "reelix-api/direct"]
+# The /api/docs page. Off in the fork's lite image.
+docs = ["reelix-api/docs"]
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -28,7 +35,7 @@ reelix-api-types.workspace = true
 reelix-books.workspace = true
 reelix-core = { workspace = true, features = ["bus"] }
 reelix-db.workspace = true
-reelix-direct.workspace = true
+reelix-direct = { workspace = true, optional = true }
 reelix-jobs.workspace = true
 reelix-library.workspace = true
 reelix-pipeline.workspace = true

@@ -5,6 +5,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["direct", "docs"]
+# YouTube and Spotify downloads (reelix-direct, which brings librespot).
+direct = ["dep:reelix-direct"]
+# The Scalar page at /api/docs. /api/v1/openapi.json is always served.
+docs = ["dep:utoipa-scalar"]
+
 [dependencies]
 anyhow.workspace = true
 argon2.workspace = true
@@ -19,7 +26,7 @@ reelix-api-types = { workspace = true, features = ["openapi"] }
 reelix-books.workspace = true
 reelix-core = { workspace = true, features = ["bus"] }
 reelix-db.workspace = true
-reelix-direct.workspace = true
+reelix-direct = { workspace = true, optional = true }
 reelix-decision.workspace = true
 reelix-parser.workspace = true
 reelix-jobs.workspace = true
@@ -39,7 +46,7 @@ tokio.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tracing.workspace = true
 utoipa.workspace = true
-utoipa-scalar.workspace = true
+utoipa-scalar = { workspace = true, optional = true }
 
 [dev-dependencies]
 async-trait.workspace = true

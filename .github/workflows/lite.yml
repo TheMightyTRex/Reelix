@@ -1,0 +1,96 @@
+# Keeps the fork's lite version in step with upstream (TheMightyTRex/Reelix, 4 November 2026).
+#
+# Every day, and by hand: merge upstream's newest release tag into fork/lite, test the lite build, build
+# docker/Dockerfile.lite, start it and check it answers and has ffprobe. A merge clash or a failed check stops
+# the run, and GitHub emails the owner about the failed run; nothing is pushed or published.
+#
+# Publishing ghcr.io/themightytrex/reelix:lite happens only on a run started by hand with "publish" ticked.
+name: Lite
+
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish ghcr.io/themightytrex/reelix:lite after the checks pass"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: lite
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fork/lite
+          fetch-depth: 0
+
+      - name: Merge upstream's newest release
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/demonzoned/Reelix.git
+          git fetch --quiet upstream --tags
+          tag=$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$tag" HEAD; then
+            echo "Already has $tag"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          prev=$(git describe --tags --abbrev=0 --match 'v*.*.*' HEAD 2>/dev/null || true)
+          git merge --no-edit "$tag" -m "Merge upstream $tag into fork/lite"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          # Upstream's runtime image may have gained a tool the lite image also needs.
+          if [ -n "$prev" ] && ! git diff --quiet "$prev" "$tag" -- docker/Dockerfile docker/entrypoint.sh; then
+            echo "::warning::Upstream changed docker/Dockerfile or entrypoint.sh between $prev and $tag. Check Dockerfile.lite still has what it needs."
+            git diff --stat "$prev" "$tag" -- docker/ >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test the lite build
+        run: |
+          cargo check --locked -p reelix-server --no-default-features
+          cargo test --locked -p reelix-server --no-default-features
+          cargo test --locked -p reelix-api --no-default-features
+
+      - name: Build and check the lite image
+        run: |
+          docker build -f docker/Dockerfile.lite -t reelix:lite .
+          docker run -d --name lite -e PUID=1000 -e PGID=1000 reelix:lite
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' lite)" = healthy ] && break; sleep 5
+          done
+          docker inspect -f '{{.State.Health.Status}}' lite | grep -qx healthy
+          docker exec lite ffprobe -version | head -1
+          sleep 60
+          {
+            echo "### Lite image"
+            echo "- Upstream: ${{ steps.merge.outputs.tag }}"
+            echo "- Size: $(docker image inspect reelix:lite --format '{{.Size}}' | awk '{printf "%.0f MB", $1/1e6}')"
+            echo "- Idle: $(docker stats --no-stream --format '{{.MemUsage}}, {{.CPUPerc}} processor' lite)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the merged branch
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin HEAD:fork/lite
+
+      - name: Publish the image
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          tag="${{ steps.merge.outputs.tag }}"
+          for t in lite "${tag#v}-lite"; do
+            docker tag reelix:lite "ghcr.io/themightytrex/reelix:$t"
+            docker push "ghcr.io/themightytrex/reelix:$t"
+          done

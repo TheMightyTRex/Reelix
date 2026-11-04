@@ -42,7 +42,7 @@ reelix-db = { path = "crates/reelix-db" }
 reelix-direct = { path = "crates/reelix-direct" }
 reelix-jobs = { path = "crates/reelix-jobs" }
 reelix-api-types = { path = "crates/reelix-api-types" }
-reelix-api = { path = "crates/reelix-api" }
+reelix-api = { path = "crates/reelix-api", default-features = false }
 reelix-parser = { path = "crates/reelix-parser" }
 reelix-decision = { path = "crates/reelix-decision" }
 reelix-metadata = { path = "crates/reelix-metadata" }

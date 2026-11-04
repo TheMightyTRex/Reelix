@@ -1,3 +1,4 @@
+#![cfg(feature = "direct")]
 use axum::{
     Router,
     body::Body,

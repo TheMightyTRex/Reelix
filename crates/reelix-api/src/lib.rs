@@ -15,6 +15,7 @@ use axum::Router;
 use axum::routing::{delete, get, post};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::{Modify, OpenApi};
+#[cfg(feature = "docs")]
 use utoipa_scalar::{Scalar, Servable};
 
 pub use auth::{AuthMethod, CurrentUser, IpNet, MaybeUser, SecureCookies, SecurityConfig};
@@ -59,18 +60,21 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::books::routes())
         .merge(routes::music::routes())
         .merge(routes::maintenance::routes())
-        .merge(routes::migrate::routes())
-        .merge(routes::direct::routes());
+        .merge(routes::migrate::routes());
+    #[cfg(feature = "direct")]
+    let v1 = v1.merge(routes::direct::routes());
 
     // Compatibility endpoints for other apps (Torznab/Newznab aggregator), outside /api/v1.
     let compat = Router::new().merge(routes::torznab::routes());
 
-    Router::new()
+    let app = Router::new()
         .nest("/api/v1", v1)
         .nest("/api", compat)
         .merge(routes::arr::routes())
-        .with_state(state)
-        .merge(Scalar::with_url("/api/docs", openapi()))
+        .with_state(state);
+    #[cfg(feature = "docs")]
+    let app = app.merge(Scalar::with_url("/api/docs", openapi()));
+    app
 }
 
 async fn openapi_json() -> axum::Json<utoipa::openapi::OpenApi> {
@@ -96,6 +100,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     doc.merge(routes::music::Api::openapi());
     doc.merge(routes::maintenance::Api::openapi());
     doc.merge(routes::migrate::Api::openapi());
+    #[cfg(feature = "direct")]
     doc.merge(routes::direct::Api::openapi());
     doc.info.version = reelix_core::VERSION.to_owned();
     doc
