@@ -309,6 +309,20 @@ async fn unsaved_test_with_changed_host_refuses_stored_secret() {
     assert!(res.message.unwrap().contains("re-enter"));
     assert!(attacker.received_requests().await.unwrap().is_empty());
 
+    // Saving the new address with the masked key is refused too, and the key stays put.
+    let err = e
+        .svc
+        .update(ProviderKind::Indexer, row.id, &input)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ProviderError::Validation(ref m) if m.contains("re-enter")),
+        "{err}"
+    );
+    let saved = e.svc.get(ProviderKind::Indexer, row.id).await.unwrap().unwrap();
+    assert_eq!(saved.setting_str("api_key"), Some("sekrit"));
+    assert_eq!(saved.settings, row.settings);
+
     // Re-entering the secret makes the test go through.
     input.settings["api_key"] = json!("other");
     let res = e
