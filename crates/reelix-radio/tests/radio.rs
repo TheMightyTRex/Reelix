@@ -412,7 +412,8 @@ async fn manual_matches_and_disappearing_files() {
         .unwrap();
     let review = c.svc.library_review().await.unwrap();
     assert_eq!(review.unmatched_files.len(), 2);
-    assert_eq!(review.unmatched_shows.len(), 2);
+    // "The Archers" is covered by the show of the same title.
+    assert_eq!(review.unmatched_shows.len(), 1);
 
     let e = c.svc.set_episode_file(e1, ids[0]).await.unwrap();
     assert_eq!(e.status, RadioEpisodeStatus::InLibrary);

@@ -29,6 +29,7 @@ mod xml;
 
 pub use error::{RadioError, Result};
 pub use library::{LibrarySyncSummary, NewEpisodeFile, NoopLibrarySync, RadioLibrarySync, clean_title};
+pub use matching::source_ids;
 pub use provider::{
     EpisodeData, ProviderError, ProviderRegistry, RadioProvider, SearchPrefs, SeriesData, ShowData,
     ShowFetch, ShowHit, StationData,

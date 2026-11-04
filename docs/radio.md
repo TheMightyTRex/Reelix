@@ -24,7 +24,7 @@ This page describes what exists and where the remaining parts plug in.
 | `src/shows.rs` | Add, edit, delete, list, get; episodes; stations; search; preview; `recompute_statuses` |
 | `src/refresh.rs` | `refresh_show`, `refresh_shows`, merging provider data, broadcast-order numbering, settling |
 | `src/status.rs` | Pure status rules (`monitored_by_follow`, `episode_status`, `is_settled`, `filing_series_number`) |
-| `src/matching.rs` | Hand-set file links (`set_episode_file`, `clear_episode_file`) |
+| `src/matching.rs` | Hand-set file links (`set_episode_file`, `clear_episode_file`), automatic matching (`match_library`, `source_ids`) |
 | `src/library.rs` | `RadioLibrarySync` trait, `NoopLibrarySync`, `NewEpisodeFile`, file rows, automatic links, review |
 | `src/artwork.rs` | Where downloaded artwork and logos are recorded |
 | `src/wanted.rs` | `wanted_episodes`, `episode_file_name` (indexer search / filing hand-off) |
@@ -126,7 +126,7 @@ Registered in `jobs.rs` and listed under System → Tasks.
 |---|---|---|
 | `refresh_radio_shows` | 12 h | `refresh_shows`; scheduled runs skip feed shows (they are read hourly); a payload `{show_ids, manual}` refreshes those shows |
 | `radio_feed_sync` | 1 h | Refreshes shows whose provider `is_feed()` |
-| `radio_library_sync` | 15 min | Calls the attached `RadioLibrarySync` (a no-op until one is attached) |
+| `radio_library_sync` | 15 min | Calls the attached `RadioLibrarySync` (the Audiobookshelf reader, see (a)) |
 
 ## API
 
@@ -162,31 +162,58 @@ it), `library_folder` (as Reelix sees it; must exist and be writable), `default_
 
 ### (a) Audiobookshelf podcast library sync and matching
 
-Implement `reelix_radio::RadioLibrarySync` (`src/library.rs`), e.g. in a new
-`crates/reelix-radio/src/abs.rs` or next to the connector in
-`crates/reelix-mediaserver/src/audiobookshelf.rs`, and attach it in
-`crates/reelix-server/src/modules.rs` with `radio.set_library_sync(Arc::new(...))` (pass it
-whatever finds the Audiobookshelf server, e.g. the providers' media servers; read
-`RadioService::settings().abs_library_id`). The `radio_library_sync` task and
-`POST /command {"name": "RescanRadioLibrary"}` then run it.
+Built. Three parts:
 
-A sync should, with one `seen_at = now` for the whole run:
+**Reading** (`crates/reelix-mediaserver/src/audiobookshelf.rs`): `Audiobookshelf::podcast_libraries()`
+(`GET /api/libraries`, `mediaType` `podcast`; the book refresh still leaves them out),
+`podcast_episodes(library_id)` (summary pages of 100 from
+`GET /api/libraries/{id}/items?limit=100&page=N&minified=1`, stopping at a short page, the
+announced `total` or a page with nothing new; then details 25 items at a time from
+`POST /api/items/batch/get {libraryItemIds}`; each response read up to 32 MB) and
+`scan_library(library_id)` (`POST /api/libraries/{id}/scan`). Only episodes with an
+`audioFile` become an `AbsPodcastEpisode` (item id, episode id, item title, title,
+season/episode as number or string, guid, enclosure URL, `publishedAt`, duration, the audio
+file's path and size). Tests: `crates/reelix-mediaserver/tests/audiobookshelf_podcasts.rs`.
 
-1. Read the podcast items/episodes and call `upsert_episode_files(&[NewEpisodeFile], seen_at)`
-   for episodes with an audio file (returns row ids).
-2. Call `remove_unseen_files(seen_at)`: deletes rows not seen this run; their episodes drop
-   the link (also hand-set ones) and return to Wanted/Not requested.
-3. Match (issue order: source id in guid/enclosure/file name; series + episode number within
-   a show with the same `clean_title` or `abs_item_id`; unique title) using `episode_files()`,
-   `show_match_keys()`, `clean_title()`, `show_episodes(show_id)`, then `link_file_auto(episode,
-   file)`. It refuses (returns false) when the episode or the file has a hand-set link
-   (`manual_match`); an episode with `manual_match` and no file was cleared by hand ("Not this
-   file") and must stay unmatched.
-4. Optionally set `abs_item_id` on shows (`update_show` with `RadioShowEdit { abs_item_id }`).
-5. `mark_library_synced(now)`; return a `LibrarySyncSummary`.
+**The sync** (`crates/reelix-server/src/integrations/radio_library.rs`, `AbsRadioLibrary`):
+attached in `modules.rs` with `radio.set_library_sync(...)`. It uses the enabled
+Audiobookshelf rows of the media servers (same URL and API token), finds the one holding the
+radio settings' `abs_library_id`, reads it and calls
+`RadioService::sync_library_files(&[NewEpisodeFile])`, which upserts with one `seen_at`,
+`remove_unseen_files` (episodes return to Wanted/Not requested from the follow choice),
+`match_library()` and `mark_library_synced`. If the library cannot be read nothing is removed
+and the job fails. `request_scan()` (a default no-op method on `RadioLibrarySync`, for filing)
+scans that library. The `radio_library_sync` task and
+`POST /command {"name": "RescanRadioLibrary"}` run the sync.
 
-`GET /radio/library/review` already reads the table. `check_library_folder(path)` gives the
-plain mounted/writable message for health checks.
+Health (`HealthSource`, source `radio`, refreshed by each sync, only while some show's follow
+choice is not `none`): no Audiobookshelf server; no podcast library chosen (warnings); the
+library is missing or Audiobookshelf cannot be reached (errors); `abs_library_folder` is not
+one of the library's folders; `library_folder` is not mounted or not writable
+(`check_library_folder`) (warnings).
+
+**Matching** (`crates/reelix-radio/src/matching.rs`, `RadioService::match_library`): at most
+one file per episode and one episode per file, in order:
+
+1. Source id: the episode's guid or enclosure address equals the file's, or one of
+   `source_ids(provider, episode external id)` occurs as a whole word (lower case) in the
+   file's guid, enclosure address or file name. `source_ids` is per provider: `bbc` gives the
+   programme pid (`b0abc123`, `p0abc123`, `m001abcd`, `w3…`); other providers add an arm.
+2. Series + episode number: `S20E03` (also `s20e03`, `S20 E03`) in the file's title, else its
+   file name, else Audiobookshelf's season and episode (no season = series 1), compared with
+   `(filing_series_number, number)`. Only files of the show's `abs_item_id`, or when it has
+   none, of items whose title has the show's clean title (no case, accents, punctuation, "The").
+   A number two files or two episodes share matches nothing.
+3. Title: the clean title shared by exactly one file and one episode in the whole library.
+
+Hand-set links are kept and their files offered to no other episode; "Not this file"
+(`manual_match` with no file) is never matched until `DELETE …/file?auto=true`. An automatic
+link that no rule now gives elsewhere is kept. A show without `abs_item_id` gets one when its
+linked files and title-matched items are a single item no other show uses.
+
+Review (`GET /radio/library/review`): `unmatched_shows` = items no show maps to, with no
+linked file and no show of the same clean title; `unmatched_files` = files linked to no
+episode. Tests: `crates/reelix-radio/tests/library_matching.rs`.
 
 ### (b) More providers
 

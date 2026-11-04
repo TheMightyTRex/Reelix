@@ -12,6 +12,7 @@ pub mod bridge;
 pub mod health;
 pub mod lists;
 pub mod music_lists;
+pub mod radio_library;
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
