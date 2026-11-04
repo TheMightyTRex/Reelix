@@ -172,7 +172,7 @@ pub enum InstallKind {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateStatusDto {
     pub current_version: String,
-    /// GitHub repository the releases come from, e.g. `mvanhare/Reelix`.
+    /// GitHub repository the releases come from, e.g. `demonzoned/Reelix`.
     pub repository: String,
     pub install: InstallKind,
     /// Newest published release, if any.
@@ -185,12 +185,69 @@ pub struct UpdateStatusDto {
     pub error: Option<String>,
     /// Check for updates on a schedule (and show a health warning when one is available).
     pub automatic: bool,
+    /// Whether this install can update itself, and the progress of an install.
+    pub self_update: SelfUpdateDto,
+}
+
+/// Progress of an in-app update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SelfUpdateState {
+    #[default]
+    Idle,
+    Downloading,
+    Verifying,
+    BackingUp,
+    Installing,
+    /// Files are swapped; the server is shutting down to start the new version.
+    Restarting,
+    Failed,
+}
+
+impl SelfUpdateState {
+    /// An install is in progress, so another can't start.
+    pub fn busy(self) -> bool {
+        !matches!(self, Self::Idle | Self::Failed)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SelfUpdateDto {
+    /// Reelix can download, install and restart into a new release by itself.
+    pub supported: bool,
+    /// Why it can't (when `supported` is false).
+    pub reason: Option<String>,
+    /// How Reelix was installed: `portable`, `windows-user`, `windows-service`, `linux-systemd`,
+    /// `docker` or `source`.
+    pub kind: String,
+    pub state: SelfUpdateState,
+    /// Version being (or last) installed.
+    pub version: Option<String>,
+    /// Why the last install failed.
+    pub error: Option<String>,
+    /// Backup made before the files were replaced.
+    pub backup: Option<String>,
+    /// Install new (non-pre-release) versions found by the scheduled check.
+    pub auto_install: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateSettings {
     pub automatic: bool,
+    /// Install updates found by the scheduled check (off by default).
+    #[serde(default)]
+    pub auto_install: bool,
+}
+
+/// Body of `POST /system/updates/install`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct InstallUpdateRequest {
+    /// A cached release that is newer than the running version.
+    pub version: String,
 }
 
 // ---------- Server settings (config.toml) ----------

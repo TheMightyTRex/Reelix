@@ -5,7 +5,7 @@ use reelix_api_types::system::{ReleaseAssetDto, ReleaseDto};
 use serde::Deserialize;
 
 /// GitHub repository releases are published to.
-pub const REPOSITORY: &str = "mvanhare/Reelix";
+pub const REPOSITORY: &str = "demonzoned/Reelix";
 pub const GITHUB_API: &str = "https://api.github.com";
 const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 

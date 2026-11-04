@@ -84,11 +84,16 @@ semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Release archives for self-update.
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 tempfile = "3"
 url = { version = "2", features = ["serde"] }
 wiremock = "0.6"
+# Windows service mode (`reelix service ...`).
+windows-service = "0.8"
 # EPUB (OPF) metadata.
 zip = { version = "9", default-features = false, features = ["deflate"] }
 thiserror = "2"

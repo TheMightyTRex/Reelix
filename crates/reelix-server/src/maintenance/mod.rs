@@ -5,11 +5,12 @@
 
 pub mod backup;
 pub mod logs;
+pub mod self_update;
 pub mod server_settings;
 pub mod updates;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -17,7 +18,8 @@ use futures::future::BoxFuture;
 use reelix_api::{ApiError, ApiResult, HealthSource, LogsQuery, MaintenanceBackend, UploadStream};
 use reelix_api_types::system::{
     BackupDto, BackupKind, BackupSettings, BackupsOverview, InstallKind, LogFileDto, LogsDto,
-    PendingRestoreDto, ReleaseDto, ServerSettingsDto, ServerSettingsValues, UpdateSettings, UpdateStatusDto,
+    PendingRestoreDto, ReleaseDto, SelfUpdateDto, SelfUpdateState, ServerSettingsDto, ServerSettingsValues,
+    UpdateSettings, UpdateStatusDto,
 };
 use reelix_api_types::{HealthCheck, HealthLevel};
 use reelix_db::Db;
@@ -85,7 +87,7 @@ pub async fn apply_pending_restore(cfg: &Config) {
 }
 
 fn install_kind() -> InstallKind {
-    if std::path::Path::new("/.dockerenv").exists() || std::env::var_os("REELIX_DOCKER").is_some() {
+    if self_update::in_docker() {
         InstallKind::Docker
     } else if cfg!(windows) {
         InstallKind::Windows
@@ -97,11 +99,16 @@ fn install_kind() -> InstallKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredUpdateSettings {
     automatic: bool,
+    #[serde(default)]
+    auto_install: bool,
 }
 
 impl Default for StoredUpdateSettings {
     fn default() -> Self {
-        Self { automatic: true }
+        Self {
+            automatic: true,
+            auto_install: false,
+        }
     }
 }
 
@@ -111,6 +118,34 @@ struct UpdateCache {
     checked_at: Option<DateTime<Utc>>,
     error: Option<String>,
     automatic: bool,
+    auto_install: bool,
+}
+
+/// Progress of the current (or last) self-update.
+#[derive(Default)]
+struct InstallProgress {
+    state: SelfUpdateState,
+    version: Option<String>,
+    error: Option<String>,
+    backup: Option<String>,
+}
+
+/// Where updates come from and how they are installed; tests point these at a mock server.
+pub struct UpdateOptions {
+    pub github_api: String,
+    pub host_policy: self_update::HostPolicy,
+    /// `None` when the binary's location is unknown (self-update is then unsupported).
+    pub install: Option<self_update::Install>,
+}
+
+impl Default for UpdateOptions {
+    fn default() -> Self {
+        Self {
+            github_api: updates::GITHUB_API.into(),
+            host_policy: self_update::HostPolicy::default(),
+            install: self_update::current().cloned(),
+        }
+    }
 }
 
 pub struct MaintenanceService {
@@ -122,6 +157,13 @@ pub struct MaintenanceService {
     /// One backup or restore operation at a time.
     backup_lock: tokio::sync::Mutex<()>,
     updates: Mutex<UpdateCache>,
+    /// Downloads release archives; only follows redirects to GitHub.
+    download_http: reqwest::Client,
+    host_policy: self_update::HostPolicy,
+    install: Option<self_update::Install>,
+    progress: Mutex<InstallProgress>,
+    /// For spawning the background install from `&self`.
+    me: Weak<MaintenanceService>,
 }
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
@@ -159,25 +201,40 @@ async fn save_upload(archive: &mut UploadStream, to: &Path) -> std::io::Result<u
 
 impl MaintenanceService {
     pub async fn new(db: Db, http: reqwest::Client, config: &Config) -> anyhow::Result<Arc<Self>> {
-        let automatic = db
+        Self::with_options(db, http, config, UpdateOptions::default()).await
+    }
+
+    pub async fn with_options(
+        db: Db,
+        http: reqwest::Client,
+        config: &Config,
+        options: UpdateOptions,
+    ) -> anyhow::Result<Arc<Self>> {
+        let stored = db
             .settings()
             .get::<StoredUpdateSettings>(UPDATE_SETTINGS_KEY)
             .await
             .ok()
             .flatten()
-            .unwrap_or_default()
-            .automatic;
-        Ok(Arc::new(Self {
+            .unwrap_or_default();
+        let download_http = self_update::download_client(options.host_policy)?;
+        Ok(Arc::new_cyclic(|me| Self {
             db,
             http,
             paths: Paths::from_config(config),
             config: config.clone(),
-            github_api: updates::GITHUB_API.into(),
+            github_api: options.github_api,
             backup_lock: tokio::sync::Mutex::new(()),
             updates: Mutex::new(UpdateCache {
-                automatic,
+                automatic: stored.automatic,
+                auto_install: stored.auto_install,
                 ..UpdateCache::default()
             }),
+            download_http,
+            host_policy: options.host_policy,
+            install: options.install,
+            progress: Mutex::new(InstallProgress::default()),
+            me: me.clone(),
         }))
     }
 
@@ -215,6 +272,11 @@ impl MaintenanceService {
             anyhow::bail!("backups are only supported for SQLite databases");
         }
         let _guard = self.backup_lock.lock().await;
+        self.backup_locked(kind).await
+    }
+
+    /// [`Self::make_backup`] for a caller already holding `backup_lock`.
+    async fn backup_locked(&self, kind: BackupKind) -> anyhow::Result<BackupDto> {
         std::fs::create_dir_all(&self.paths.backup_dir)?;
         let snapshot = self
             .paths
@@ -297,10 +359,219 @@ impl MaintenanceService {
         }
     }
 
+    fn self_update_snapshot(&self, auto_install: bool) -> SelfUpdateDto {
+        let progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+        let (kind, reason) = match &self.install {
+            Some(i) => (i.kind.as_str(), i.unsupported.clone()),
+            None => (
+                self_update::Kind::Source.as_str(),
+                Some("the location of the Reelix binary is unknown".into()),
+            ),
+        };
+        SelfUpdateDto {
+            supported: reason.is_none(),
+            reason,
+            kind: kind.into(),
+            state: progress.state,
+            version: progress.version.clone(),
+            error: progress.error.clone(),
+            backup: progress.backup.clone(),
+            auto_install,
+        }
+    }
+
+    fn set_install_state(&self, state: SelfUpdateState) {
+        self.progress.lock().unwrap_or_else(|e| e.into_inner()).state = state;
+    }
+
+    /// Validates `version` and starts installing it in the background.
+    fn start_install(&self, version: &str) -> ApiResult<()> {
+        let install = match &self.install {
+            Some(i) if i.supported() => i.clone(),
+            Some(i) => {
+                return Err(ApiError::Conflict(format!(
+                    "Reelix can't update itself: {}",
+                    i.unsupported.as_deref().unwrap_or_default()
+                )));
+            }
+            None => {
+                return Err(ApiError::Conflict(
+                    "Reelix can't update itself: the location of the binary is unknown".into(),
+                ));
+            }
+        };
+        let version = version.trim().trim_start_matches(['v', 'V']);
+        let release = self
+            .updates
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .releases
+            .iter()
+            .find(|r| r.version == version)
+            .cloned()
+            .ok_or_else(|| {
+                ApiError::validation(format!(
+                    "{version} is not a known release; check for updates first"
+                ))
+            })?;
+        // No downgrades or reinstalls: only versions newer than the running one.
+        if !updates::is_newer(&release.version, reelix_core::VERSION) {
+            return Err(ApiError::Conflict(format!(
+                "{} is not newer than the running version {}",
+                release.version,
+                reelix_core::VERSION
+            )));
+        }
+        let assets = self_update::select_assets_here(&release).map_err(ApiError::validation)?;
+        let me = self
+            .me
+            .upgrade()
+            .ok_or_else(|| internal("the maintenance service is gone"))?;
+        {
+            let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+            if progress.state.busy() {
+                return Err(ApiError::Conflict(format!(
+                    "the update to {} is already being installed",
+                    progress.version.as_deref().unwrap_or("a new version")
+                )));
+            }
+            *progress = InstallProgress {
+                state: SelfUpdateState::Downloading,
+                version: Some(release.version.clone()),
+                ..InstallProgress::default()
+            };
+        }
+        tokio::spawn(async move {
+            let version = release.version.clone();
+            match me.run_install(&install, &release, &assets).await {
+                Ok(()) => {
+                    tracing::warn!(%version, "update installed; restarting Reelix");
+                    me.set_install_state(SelfUpdateState::Restarting);
+                    crate::lifecycle::request_restart(install.binary());
+                }
+                Err(e) => {
+                    let error = format!("{e:#}");
+                    tracing::error!(%version, %error, "installing the update failed");
+                    let mut progress = me.progress.lock().unwrap_or_else(|e| e.into_inner());
+                    progress.state = SelfUpdateState::Failed;
+                    progress.error = Some(error);
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Download, verify, back up and swap. The new files are in place when this returns `Ok`.
+    async fn run_install(
+        &self,
+        install: &self_update::Install,
+        release: &ReleaseDto,
+        assets: &self_update::Assets,
+    ) -> anyhow::Result<()> {
+        let staging = self_update::staging_dir(&install.dir, &release.version);
+        let result = self.stage_and_swap(install, release, assets, &staging).await;
+        let cleanup = staging.clone();
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(cleanup)).await;
+        result
+    }
+
+    async fn stage_and_swap(
+        &self,
+        install: &self_update::Install,
+        release: &ReleaseDto,
+        assets: &self_update::Assets,
+        staging: &Path,
+    ) -> anyhow::Result<()> {
+        use anyhow::Context;
+
+        let _ = std::fs::remove_dir_all(staging);
+        std::fs::create_dir_all(staging).with_context(|| {
+            format!(
+                "Reelix can't write to its install folder {}",
+                install.dir.display()
+            )
+        })?;
+        tracing::info!(version = %release.version, asset = %assets.archive.name, "downloading update");
+        let sums = self_update::fetch_text(
+            &self.download_http,
+            &assets.sums.url,
+            self.host_policy,
+            self_update::MAX_SUMS,
+        )
+        .await?;
+        let archive = staging.join(&assets.archive.name);
+        let sha256 = self_update::download(
+            &self.download_http,
+            &assets.archive.url,
+            self.host_policy,
+            self_update::MAX_ARCHIVE,
+            &archive,
+        )
+        .await?;
+
+        self.set_install_state(SelfUpdateState::Verifying);
+        self_update::verify_checksum(&sums, &assets.archive.name, &sha256).map_err(anyhow::Error::msg)?;
+        let (format, top, dest) = (assets.format, assets.top.clone(), staging.join("unpacked"));
+        let staged = tokio::task::spawn_blocking(move || self_update::extract(&archive, format, &dest, &top))
+            .await??;
+
+        // Held until the files are swapped, so no restore is staged halfway through.
+        self.set_install_state(SelfUpdateState::BackingUp);
+        let _guard = self.backup_lock.lock().await;
+        if self.paths.db_file.is_some() {
+            let backup = self
+                .backup_locked(BackupKind::Manual)
+                .await
+                .context("backing up before the update")?;
+            tracing::info!(name = %backup.name, "backup created before the update; restore it if the new version misbehaves");
+            self.progress.lock().unwrap_or_else(|e| e.into_inner()).backup = Some(backup.name);
+        } else {
+            tracing::warn!("no backup before the update: backups are only supported for SQLite databases");
+        }
+
+        self.set_install_state(SelfUpdateState::Installing);
+        let dir = install.dir.clone();
+        tokio::task::spawn_blocking(move || self_update::swap(&dir, &staged)).await??;
+        Ok(())
+    }
+
+    /// After a scheduled check: installs the newest non-pre-release update when auto-install is on.
+    fn auto_install(&self) {
+        let candidate = {
+            let cache = self.updates.lock().unwrap_or_else(|e| e.into_inner());
+            if !cache.auto_install || cache.error.is_some() {
+                return;
+            }
+            cache
+                .releases
+                .iter()
+                .find(|r| r.newer && !r.prerelease)
+                .map(|r| r.version.clone())
+        };
+        let Some(version) = candidate else {
+            return;
+        };
+        if !self.install.as_ref().is_some_and(|i| i.supported())
+            || self
+                .progress
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .state
+                .busy()
+        {
+            return;
+        }
+        tracing::warn!(%version, "installing update automatically");
+        if let Err(e) = self.start_install(&version) {
+            tracing::warn!(%version, error = %e, "automatic update not started");
+        }
+    }
+
     fn update_snapshot(&self) -> UpdateStatusDto {
         let cache = self.updates.lock().unwrap_or_else(|e| e.into_inner());
         let latest = cache.releases.first().cloned();
         UpdateStatusDto {
+            self_update: self.self_update_snapshot(cache.auto_install),
             current_version: reelix_core::VERSION.into(),
             repository: updates::REPOSITORY.into(),
             install: install_kind(),
@@ -461,10 +732,22 @@ impl MaintenanceBackend for MaintenanceService {
                     UPDATE_SETTINGS_KEY,
                     &StoredUpdateSettings {
                         automatic: settings.automatic,
+                        auto_install: settings.auto_install,
                     },
                 )
                 .await?;
-            self.updates.lock().unwrap_or_else(|e| e.into_inner()).automatic = settings.automatic;
+            {
+                let mut cache = self.updates.lock().unwrap_or_else(|e| e.into_inner());
+                cache.automatic = settings.automatic;
+                cache.auto_install = settings.auto_install;
+            }
+            Ok(self.update_snapshot())
+        })
+    }
+
+    fn install_update(&self, version: String) -> BoxFuture<'_, ApiResult<UpdateStatusDto>> {
+        Box::pin(async move {
+            self.start_install(&version)?;
             Ok(self.update_snapshot())
         })
     }
@@ -559,7 +842,8 @@ impl JobHandler for BackupJob {
     }
 }
 
-/// kind "update_check": refreshes the cached release list (skipped when automatic checks are off).
+/// kind "update_check": refreshes the cached release list (skipped when automatic checks are off)
+/// and, with auto-install on, installs a new release.
 pub struct UpdateCheckJob(pub Arc<MaintenanceService>);
 
 #[async_trait::async_trait]
@@ -573,6 +857,7 @@ impl JobHandler for UpdateCheckJob {
         let automatic = self.0.updates.lock().unwrap_or_else(|e| e.into_inner()).automatic;
         if automatic {
             self.0.check_updates().await;
+            self.0.auto_install();
         } else {
             tracing::debug!("automatic update checks are turned off");
         }
@@ -596,5 +881,205 @@ mod tests {
         );
         assert_eq!(sqlite_file("sqlite::memory:"), None);
         assert_eq!(sqlite_file("postgres://x/y"), None);
+    }
+}
+
+#[cfg(test)]
+mod self_update_tests {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use reelix_api_types::system::SelfUpdateState;
+    use sha2::{Digest, Sha256};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::self_update::{self, BINARY, INSTALL_MARKER};
+    use super::*;
+    use crate::config::CliOverrides;
+
+    const OS: &str = if cfg!(windows) { "windows" } else { "linux" };
+
+    /// A release archive for this platform holding version `version`.
+    fn archive(dir: &Path, version: &str) -> (String, Vec<u8>) {
+        let top = format!("reelix-{version}-{OS}-{}", std::env::consts::ARCH);
+        let name = self_update::archive_name(version, OS, std::env::consts::ARCH);
+        let files: Vec<(String, Vec<u8>)> = vec![
+            (
+                format!("{top}/{BINARY}"),
+                format!("binary {version}").into_bytes(),
+            ),
+            (format!("{top}/web/index.html"), version.as_bytes().to_vec()),
+            (format!("{top}/docs/guide.md"), b"docs".to_vec()),
+            (format!("{top}/README.txt"), b"readme".to_vec()),
+            (format!("{top}/{}", self_update::START_SCRIPT), b"start".to_vec()),
+            (
+                format!("{top}/{INSTALL_MARKER}"),
+                br#"{"kind": "portable"}"#.to_vec(),
+            ),
+        ];
+        let path = dir.join(&name);
+        if cfg!(windows) {
+            let entries: Vec<(&str, &[u8])> = files.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+            self_update::tests::zip_with(&path, &entries);
+        } else {
+            let entries: Vec<(&str, &[u8], u32)> = files
+                .iter()
+                .map(|(n, d)| (n.as_str(), d.as_slice(), 0o644))
+                .collect();
+            self_update::tests::tar_with(&path, &entries);
+        }
+        (name, std::fs::read(path).unwrap())
+    }
+
+    async fn wait_until_done(svc: &MaintenanceService) -> SelfUpdateDto {
+        for _ in 0..300 {
+            let s = svc.update_snapshot().self_update;
+            if matches!(s.state, SelfUpdateState::Restarting | SelfUpdateState::Failed) {
+                return s;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the install did not finish");
+    }
+
+    #[tokio::test]
+    async fn installs_a_verified_release_and_requests_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("install");
+        std::fs::create_dir_all(dir.join("web")).unwrap();
+        std::fs::write(dir.join(BINARY), "binary old").unwrap();
+        std::fs::write(dir.join("web/index.html"), "old").unwrap();
+        std::fs::write(dir.join(self_update::START_SCRIPT), "old start").unwrap();
+        std::fs::write(dir.join(INSTALL_MARKER), r#"{"kind": "portable"}"#).unwrap();
+
+        let server = MockServer::start().await;
+        let base = server.uri();
+        let (good_name, good) = archive(tmp.path(), "99.0.0");
+        let (bad_name, bad) = archive(tmp.path(), "98.0.0");
+        let sha = |b: &[u8]| hex::encode(Sha256::digest(b));
+        // 98.0.0's checksum is wrong on purpose.
+        let sums = format!(
+            "{}  {good_name}\n{}  {bad_name}\n",
+            sha(&good),
+            sha(b"something else")
+        );
+        let asset = |name: &str| serde_json::json!({"name": name, "browser_download_url": format!("{base}/dl/{name}"), "size": 1});
+        Mock::given(method("GET"))
+            .and(path(format!("/repos/{}/releases", updates::REPOSITORY)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"tag_name": "v99.0.0", "html_url": "https://x/99", "assets": [asset(&good_name), asset("SHA256SUMS")]},
+                {"tag_name": "v98.0.0", "html_url": "https://x/98", "assets": [asset(&bad_name), asset("SHA256SUMS")]},
+                {"tag_name": "v97.0.0", "html_url": "https://x/97", "assets": [asset("SHA256SUMS")]},
+                {"tag_name": "v0.0.1", "html_url": "https://x/1", "assets": []}
+            ])))
+            .mount(&server)
+            .await;
+        for (name, body) in [
+            (good_name.clone(), good),
+            (bad_name, bad),
+            ("SHA256SUMS".into(), sums.into_bytes()),
+        ] {
+            Mock::given(method("GET"))
+                .and(path(format!("/dl/{name}")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+                .mount(&server)
+                .await;
+        }
+
+        let config = Config::load(&CliOverrides {
+            data_dir: Some(dir.join("data")),
+            ..CliOverrides::default()
+        })
+        .unwrap();
+        let db = Db::connect(&config.database_url).await.unwrap();
+        let svc = MaintenanceService::with_options(
+            db,
+            reqwest::Client::builder().user_agent("test").build().unwrap(),
+            &config,
+            UpdateOptions {
+                github_api: base.clone(),
+                host_policy: self_update::HostPolicy {
+                    allow_loopback_http: true,
+                },
+                install: Some(self_update::detect(&dir, false)),
+            },
+        )
+        .await
+        .unwrap();
+        let status = svc.update_status(true).await.unwrap();
+        assert!(status.self_update.supported, "{:?}", status.self_update);
+        assert_eq!(status.self_update.kind, "portable");
+
+        let err = svc.install_update("42.0.0".into()).await.unwrap_err();
+        assert_eq!(
+            err.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "unknown version"
+        );
+        let err = svc.install_update("0.0.1".into()).await.unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::CONFLICT, "no downgrades");
+        let err = svc.install_update("97.0.0".into()).await.unwrap_err();
+        assert_eq!(
+            err.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "no archive for this platform"
+        );
+
+        // A checksum mismatch fails before anything is replaced.
+        svc.install_update("98.0.0".into()).await.unwrap();
+        let failed = wait_until_done(&svc).await;
+        assert_eq!(failed.state, SelfUpdateState::Failed);
+        assert!(
+            failed.error.as_deref().unwrap().contains("doesn't match"),
+            "{failed:?}"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join(BINARY)).unwrap(), "binary old");
+        assert!(!self_update::staging_dir(&dir, "98.0.0").exists());
+        assert!(!crate::lifecycle::RESTART_REQUESTED.load(std::sync::atomic::Ordering::SeqCst));
+
+        let started = svc.install_update("v99.0.0".into()).await.unwrap();
+        assert_eq!(started.self_update.state, SelfUpdateState::Downloading);
+        assert_eq!(started.self_update.version.as_deref(), Some("99.0.0"));
+        let done = wait_until_done(&svc).await;
+        assert_eq!(done.state, SelfUpdateState::Restarting, "{done:?}");
+        let backup = done.backup.expect("a backup is made first");
+        assert!(dir.join("data/backups").join(&backup).is_file());
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join(BINARY)).unwrap(),
+            "binary 99.0.0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("web/index.html")).unwrap(),
+            "99.0.0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("docs/guide.md")).unwrap(),
+            "docs"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(format!("{BINARY}.old"))).unwrap(),
+            "binary old"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(INSTALL_MARKER)).unwrap(),
+            r#"{"kind": "portable"}"#
+        );
+        assert!(
+            dir.join("data/reelix.db").is_file(),
+            "the data folder is untouched"
+        );
+        assert!(!self_update::staging_dir(&dir, "99.0.0").exists());
+        assert!(crate::lifecycle::RESTART_REQUESTED.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(crate::lifecycle::shutdown_token().is_cancelled());
+        assert_eq!(crate::lifecycle::take_restart(), Some(dir.join(BINARY)));
+
+        let err = svc.install_update("99.0.0".into()).await.unwrap_err();
+        assert_eq!(
+            err.status(),
+            axum::http::StatusCode::CONFLICT,
+            "already installing"
+        );
     }
 }

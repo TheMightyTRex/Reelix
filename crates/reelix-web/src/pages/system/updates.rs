@@ -1,15 +1,35 @@
-//! `/system/updates` — installed version, new releases from GitHub and their release notes.
+//! `/system/updates` — installed version, new releases from GitHub, their release notes, and
+//! installing an update in place.
+
+use std::time::Duration;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use reelix_api_types::system::{InstallKind, ReleaseDto, UpdateSettings, UpdateStatusDto};
+use reelix_api_types::system::{
+    InstallKind, InstallUpdateRequest, ReleaseDto, SelfUpdateDto, SelfUpdateState, UpdateSettings,
+    UpdateStatusDto,
+};
+use serde::Deserialize;
 
 use super::require_admin;
 use crate::api;
 use crate::components::library_common::bytes;
-use crate::components::{Card, EmptyState, ErrorBox, Icon, PageHeader, Skeleton, StatusBadge, Tone};
+use crate::components::{
+    Card, ConfirmDialog, EmptyState, ErrorBox, Icon, PageHeader, Skeleton, Spinner, StatusBadge, Tone,
+};
 use crate::format;
 use crate::state::Toasts;
+
+const POLL: Duration = Duration::from_secs(2);
+/// How long to wait for the restarted server before giving up.
+const RESTART_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// The part of the status read while the server restarts: the new version's status may have a
+/// different shape.
+#[derive(Deserialize)]
+struct RunningVersion {
+    current_version: String,
+}
 
 /// Release asset name fragment for the platform of this install.
 fn asset_hint(install: InstallKind) -> Option<&'static str> {
@@ -19,16 +39,93 @@ fn asset_hint(install: InstallKind) -> Option<&'static str> {
     }
 }
 
+fn state_text(s: &SelfUpdateDto) -> String {
+    let version = s.version.clone().unwrap_or_default();
+    match s.state {
+        SelfUpdateState::Downloading => format!("Downloading Reelix {version}…"),
+        SelfUpdateState::Verifying => "Verifying the download…".into(),
+        SelfUpdateState::BackingUp => "Backing up the database…".into(),
+        SelfUpdateState::Installing => format!("Installing Reelix {version}…"),
+        SelfUpdateState::Restarting => "Restarting Reelix… This page reloads when it's back.".into(),
+        SelfUpdateState::Idle | SelfUpdateState::Failed => String::new(),
+    }
+}
+
 #[component]
 pub fn UpdatesPage() -> impl IntoView {
     require_admin();
     let toasts = Toasts::expect();
     let status = LocalResource::new(|| api::get::<UpdateStatusDto>("/system/updates"));
-    // Set after "Check now" so the page shows the fresh result without a second request.
+    // Set after "Check now" (and while installing) so the page shows the fresh result.
     let fresh = RwSignal::new(None::<UpdateStatusDto>);
     let checking = RwSignal::new(false);
+    let polling = RwSignal::new(false);
+    let confirm_open = RwSignal::new(false);
+    let confirm_version = RwSignal::new(String::new());
 
     let current = move || fresh.get().map(Ok).or_else(|| status.get());
+
+    // Follows an install until it fails or the restarted server reports a new version.
+    let follow_install = move |from_version: String| {
+        if polling.get_untracked() {
+            return;
+        }
+        polling.set(true);
+        spawn_local(async move {
+            let mut restarting_since = None::<chrono::DateTime<chrono::Utc>>;
+            loop {
+                gloo_timers::future::sleep(POLL).await;
+                if let Some(since) = restarting_since {
+                    // The server is down or the old one is still shutting down: keep asking.
+                    if let Ok(r) = api::get::<RunningVersion>("/system/updates").await
+                        && r.current_version != from_version
+                    {
+                        toasts.success(format!("Reelix {} is installed.", r.current_version));
+                        if let Some(w) = web_sys::window() {
+                            let _ = w.location().reload();
+                        }
+                        break;
+                    }
+                    if (chrono::Utc::now() - since).to_std().unwrap_or_default() > RESTART_TIMEOUT {
+                        toasts.error("Reelix hasn't come back after the update. Check that it's running and look at its logs.");
+                        break;
+                    }
+                    continue;
+                }
+                match api::get::<UpdateStatusDto>("/system/updates").await {
+                    Ok(s) => {
+                        let state = s.self_update.state;
+                        let error = s.self_update.error.clone();
+                        fresh.set(Some(s));
+                        match state {
+                            SelfUpdateState::Restarting => restarting_since = Some(chrono::Utc::now()),
+                            SelfUpdateState::Failed => {
+                                toasts.error(format!(
+                                    "The update failed: {}",
+                                    error.unwrap_or_else(|| "unknown error".into())
+                                ));
+                                break;
+                            }
+                            SelfUpdateState::Idle => break,
+                            _ => {}
+                        }
+                    }
+                    // The server stopped answering mid-install: it is most likely restarting.
+                    Err(_) => restarting_since = Some(chrono::Utc::now()),
+                }
+            }
+            polling.set(false);
+        });
+    };
+
+    // Also follow an install started elsewhere (another tab, or the automatic install).
+    Effect::new(move || {
+        if let Some(Ok(s)) = current()
+            && s.self_update.state.busy()
+        {
+            follow_install(s.current_version.clone());
+        }
+    });
 
     let check_now = move |_| {
         checking.set(true);
@@ -48,19 +145,14 @@ pub fn UpdatesPage() -> impl IntoView {
         });
     };
 
-    let set_automatic = move |on: bool| {
+    let save_settings = move |settings: UpdateSettings| {
         spawn_local(async move {
-            match api::put::<_, UpdateStatusDto>(
-                "/system/updates/settings",
-                &UpdateSettings { automatic: on },
-            )
-            .await
-            {
+            match api::put::<_, UpdateStatusDto>("/system/updates/settings", &settings).await {
                 Ok(s) => {
-                    toasts.success(if on {
-                        "Reelix will check for updates twice a day."
-                    } else {
-                        "Automatic update checks are off."
+                    toasts.success(match (settings.automatic, settings.auto_install) {
+                        (false, _) => "Automatic update checks are off.",
+                        (true, false) => "Reelix will check for updates twice a day.",
+                        (true, true) => "Reelix will check for updates twice a day and install them.",
                     });
                     fresh.set(Some(s));
                 }
@@ -69,12 +161,45 @@ pub fn UpdatesPage() -> impl IntoView {
         });
     };
 
+    let ask_install = move |version: String| {
+        confirm_version.set(version);
+        confirm_open.set(true);
+    };
+    let install = move |()| {
+        let version = confirm_version.get_untracked();
+        spawn_local(async move {
+            match api::post::<_, UpdateStatusDto>(
+                "/system/updates/install",
+                &InstallUpdateRequest { version },
+            )
+            .await
+            {
+                Ok(s) => {
+                    let from = s.current_version.clone();
+                    fresh.set(Some(s));
+                    follow_install(from);
+                }
+                Err(e) => toasts.error(format!("Could not start the update: {e}")),
+            }
+        });
+    };
+    let confirm_message = Signal::derive(move || {
+        format!(
+            "Reelix downloads {} from GitHub, verifies it, makes a backup of the database first, \
+             replaces its program files and restarts. It is unavailable for a moment while it restarts.",
+            confirm_version.get()
+        )
+    });
+
     let content = move || match current() {
         None => view! { <Card><Skeleton lines=6 /></Card> }.into_any(),
         Some(Err(e)) => {
             view! { <ErrorBox error=e on_retry=Callback::new(move |()| status.refetch()) /> }.into_any()
         }
-        Some(Ok(s)) => view! { <UpdatesView s=s on_automatic=Callback::new(set_automatic) /> }.into_any(),
+        Some(Ok(s)) => view! {
+            <UpdatesView s=s on_settings=Callback::new(save_settings) on_install=Callback::new(ask_install) />
+        }
+        .into_any(),
     };
 
     view! {
@@ -85,12 +210,18 @@ pub fn UpdatesPage() -> impl IntoView {
             </button>
         </PageHeader>
         <div class="stack">{content}</div>
+        <ConfirmDialog open=confirm_open title="Install the update and restart?" message=confirm_message
+            confirm_label="Install and restart" on_confirm=Callback::new(install) />
     }
 }
 
 #[component]
-fn UpdatesView(s: UpdateStatusDto, on_automatic: Callback<bool>) -> impl IntoView {
-    let repo_url = format!("https://github.com/{}/releases", s.repository);
+fn UpdatesView(
+    s: UpdateStatusDto,
+    on_settings: Callback<UpdateSettings>,
+    on_install: Callback<String>,
+) -> impl IntoView {
+    let repo_url = format::http_url(&format!("https://github.com/{}/releases", s.repository));
     let how_to = match s.install {
         InstallKind::Docker => {
             "Pull the new image and recreate the container: docker compose pull && docker compose up -d. Your /config volume is kept."
@@ -102,13 +233,60 @@ fn UpdatesView(s: UpdateStatusDto, on_automatic: Callback<bool>) -> impl IntoVie
             "Stop Reelix, replace the reelix binary and web folder with the ones from the release, and start it again."
         }
     };
+    let su = s.self_update.clone();
+    let busy = su.state.busy();
+    let progress = busy.then(|| {
+        let text = state_text(&su);
+        view! {
+            <div class="alert alert-info" role="status" aria-live="polite">
+                <Spinner label=text.clone() />
+                <div class="alert-body">
+                    <strong>{text}</strong>
+                    {su.backup.clone().map(|b| view! { <span>{format!("Backup made first: {b}")}</span> })}
+                </div>
+            </div>
+        }
+    });
+    let failure = (su.state == SelfUpdateState::Failed).then(|| {
+        view! {
+            <div class="alert alert-danger" role="alert">
+                <Icon name="warning" />
+                <div class="alert-body">
+                    <strong>{format!("Installing Reelix {} failed", su.version.clone().unwrap_or_default())}</strong>
+                    <span>{su.error.clone().unwrap_or_default()}</span>
+                    {su.backup.clone().map(|b| view! { <span>{format!("The backup made before the update: {b}")}</span> })}
+                </div>
+            </div>
+        }
+    });
     let headline = match (&s.latest, s.update_available) {
+        (Some(l), true) if su.supported => {
+            let version = l.version.clone();
+            view! {
+                <div class="alert alert-info" role="status">
+                    <Icon name="download" />
+                    <div class="alert-body">
+                        <strong>{format!("Reelix {} is available", l.version)}</strong>
+                        <span>"Reelix can install it and restart by itself; it backs up the database first."</span>
+                        <div>
+                            <button type="button" class="btn btn-primary btn-sm" disabled=busy
+                                on:click=move |_| on_install.run(version.clone())>
+                                <Icon name="download" />
+                                "Install and restart"
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+            .into_any()
+        }
         (Some(l), true) => view! {
             <div class="alert alert-info" role="status">
                 <Icon name="download" />
                 <div class="alert-body">
                     <strong>{format!("Reelix {} is available", l.version)}</strong>
                     <span>{how_to}</span>
+                    {su.reason.clone().map(|r| view! { <span class="muted">{format!("Why it can't update itself: {r}.")}</span> })}
                 </div>
             </div>
         }
@@ -126,6 +304,8 @@ fn UpdatesView(s: UpdateStatusDto, on_automatic: Callback<bool>) -> impl IntoVie
         (None, _) => ().into_any(),
     };
     let automatic = s.automatic;
+    let auto_install = su.auto_install;
+    let supported = su.supported;
     let checked = s
         .checked_at
         .map(|t| format!("Last checked {}", format::relative(t)))
@@ -136,6 +316,11 @@ fn UpdatesView(s: UpdateStatusDto, on_automatic: Callback<bool>) -> impl IntoVie
     let repository = s.repository.clone();
     let repository_label = s.repository.clone();
     let releases = s.releases.clone();
+    let auto_install_desc = if supported {
+        "When the scheduled check finds a new release (not a pre-release), Reelix backs up the database, installs it and restarts."
+    } else {
+        "Not available for this install; see above for how to update."
+    };
 
     view! {
         {s.error.clone().map(|e| view! {
@@ -147,6 +332,8 @@ fn UpdatesView(s: UpdateStatusDto, on_automatic: Callback<bool>) -> impl IntoVie
                 </div>
             </div>
         })}
+        {progress}
+        {failure}
         {headline}
         <Card title="Installed">
             <dl class="kv">
@@ -158,10 +345,24 @@ fn UpdatesView(s: UpdateStatusDto, on_automatic: Callback<bool>) -> impl IntoVie
             </dl>
             <label class="checkbox toggle-row">
                 <input type="checkbox" prop:checked=automatic
-                    on:change=move |e| on_automatic.run(event_target_checked(&e)) />
+                    on:change=move |e| on_settings.run(UpdateSettings {
+                        automatic: event_target_checked(&e),
+                        auto_install,
+                    }) />
                 <span>
                     <span class="perm-label">"Check for updates automatically"</span>
-                    <span class="perm-desc">"Twice a day; System → Health shows a notice when a new release is out. Reelix never installs updates by itself."</span>
+                    <span class="perm-desc">"Twice a day; System → Health shows a notice when a new release is out. Updates are only installed when you choose to, or automatically if you turn that on below."</span>
+                </span>
+            </label>
+            <label class="checkbox toggle-row">
+                <input type="checkbox" prop:checked=auto_install disabled=!(supported && automatic)
+                    on:change=move |e| on_settings.run(UpdateSettings {
+                        automatic,
+                        auto_install: event_target_checked(&e),
+                    }) />
+                <span>
+                    <span class="perm-label">"Install updates automatically"</span>
+                    <span class="perm-desc">{auto_install_desc}</span>
                 </span>
             </label>
         </Card>

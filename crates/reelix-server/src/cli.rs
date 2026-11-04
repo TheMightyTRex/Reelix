@@ -41,6 +41,23 @@ pub enum Command {
         #[arg(long, default_value = "http://127.0.0.1:8898/login")]
         redirect_uri: String,
     },
+    /// Manage the Reelix Windows service (Windows only).
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Subcommand)]
+pub enum ServiceAction {
+    /// Register and start the "Reelix" service (`--data-dir`, default C:\ProgramData\Reelix, and
+    /// `--port` are passed on to it). Needs an elevated prompt. Idempotent: an existing service is
+    /// reconfigured (and started if stopped). Exits non-zero, with the error on stderr, on failure.
+    Install,
+    /// Stop and remove the service; the data directory is kept.
+    Uninstall,
+    /// Run as the service (started by the Windows service manager).
+    Run,
 }
 
 impl Cli {
@@ -79,6 +96,31 @@ mod tests {
         let cli = Cli::parse_from(["reelix", "spotify-login", "--credentials", "credentials.json"]);
         assert!(matches!(cli.command, Some(Command::SpotifyLogin { .. })));
         assert!(Cli::try_parse_from(["reelix", "spotify-login"]).is_err());
+        let cli = Cli::parse_from([
+            "reelix",
+            "service",
+            "install",
+            "--data-dir",
+            r"C:\ProgramData\Reelix",
+            "--port",
+            "7701",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Service {
+                action: ServiceAction::Install
+            })
+        ));
+        assert_eq!(cli.port, Some(7701));
+        assert!(cli.data_dir.is_some());
+        let cli = Cli::parse_from(["reelix", "service", "run", "--data-dir", "x"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Service {
+                action: ServiceAction::Run
+            })
+        ));
+        assert!(Cli::try_parse_from(["reelix", "service"]).is_err());
         assert!(Cli::try_parse_from(["reelix", "--port", "notaport"]).is_err());
     }
 }

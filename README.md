@@ -71,7 +71,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 - Health checks, a task scheduler with manual triggers, an event log and activity history.
 - Scheduled and manual backups of the database, `config.toml` and secret key, with download, retention and one-click restore (applied on the next restart, and rolled back if the restored database won't open).
 - A log viewer with level and text filters, a live tail and log file downloads.
-- Update checks against the [GitHub releases](https://github.com/mvanhare/Reelix/releases), with release notes and a health notice when a new version is out. Reelix never updates itself.
+- Update checks against the [GitHub releases](https://github.com/demonzoned/Reelix/releases), with release notes and a health notice when a new version is out, and one-click (or automatic) install and restart for the Windows and Linux releases.
 - Bind address, port, URL base and logging can be edited in Settings → General; they are saved to `config.toml` and apply after a restart.
 - Per-user UI settings: date and time format, relative dates, first day of the week, and default calendar and library views.
 - REST API with API keys, and interactive API documentation at `/api/docs`.
@@ -133,6 +133,10 @@ cd reelix-<version>-linux-x86_64
 ```
 
 Then open <http://localhost:7700>. Settings and the database are stored in the `data` folder next to the binary (or pass `--data-dir`). Install `ffprobe` with your package manager (e.g. `apt install ffmpeg`). The bundled `README.txt` includes an example systemd unit.
+
+### Updating
+
+On the Windows and Linux releases (portable archive, Windows installer or service, Linux `install.sh`), System → Updates has an **Install and restart** button. Reelix downloads the release archive from GitHub over HTTPS, checks it against the release's `SHA256SUMS`, backs up the database, replaces its program files (`install.json`, `data/` and everything else are left alone) and restarts. Turn on **Install updates automatically** to have the scheduled check do this for new stable releases. Updates never go to an older version. In Docker, run `docker compose pull && docker compose up -d` instead.
 
 ### From source
 

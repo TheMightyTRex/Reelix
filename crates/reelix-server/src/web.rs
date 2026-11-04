@@ -41,12 +41,21 @@ pub fn resolve_web_dir(configured: Option<&Path>) -> PathBuf {
     if let Some(dir) = configured {
         return dir.to_path_buf();
     }
-    let local = PathBuf::from("web");
-    if local.is_dir() {
-        local
-    } else {
-        PathBuf::from("crates/reelix-web/dist")
+    pick_web_dir(Path::new("web"), crate::maintenance::self_update::install_dir())
+}
+
+/// `./web` when it holds the UI, else `<binary dir>/web` (installed copies, e.g. the Windows
+/// service, which starts in System32), else the dev build output.
+fn pick_web_dir(cwd_web: &Path, binary_dir: Option<&Path>) -> PathBuf {
+    if cwd_web.join("index.html").is_file() {
+        return cwd_web.to_path_buf();
     }
+    if let Some(next_to_binary) = binary_dir.map(|d| d.join("web"))
+        && next_to_binary.join("index.html").is_file()
+    {
+        return next_to_binary;
+    }
+    PathBuf::from("crates/reelix-web/dist")
 }
 
 impl WebUi {
@@ -306,6 +315,24 @@ mod tests {
 
     fn sha(s: &str) -> String {
         format!("'sha256-{}'", BASE64.encode(Sha256::digest(s.as_bytes())))
+    }
+
+    #[test]
+    fn web_dir_falls_back_to_the_binary_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd_web = tmp.path().join("cwd/web");
+        let bin = tmp.path().join("bin");
+        let dev = PathBuf::from("crates/reelix-web/dist");
+        assert_eq!(pick_web_dir(&cwd_web, Some(&bin)), dev);
+        std::fs::create_dir_all(bin.join("web")).unwrap();
+        std::fs::write(bin.join("web/index.html"), "x").unwrap();
+        assert_eq!(pick_web_dir(&cwd_web, Some(&bin)), bin.join("web"));
+        // A `web` folder without the UI in the working directory doesn't win.
+        std::fs::create_dir_all(&cwd_web).unwrap();
+        assert_eq!(pick_web_dir(&cwd_web, Some(&bin)), bin.join("web"));
+        std::fs::write(cwd_web.join("index.html"), "x").unwrap();
+        assert_eq!(pick_web_dir(&cwd_web, Some(&bin)), cwd_web);
+        assert_eq!(pick_web_dir(&tmp.path().join("none"), None), dev);
     }
 
     #[test]
