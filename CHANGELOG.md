@@ -6,6 +6,22 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-04
+
+### Fixed
+- **Import Library on large libraries:** scanning a root folder no longer looks up every folder one by one before showing anything.
+  - That could take many minutes, or fail behind a reverse proxy with a timeout (Cloudflare's 524), while the page still said "Pick a root folder".
+  - Folders are now listed right away, with a "Scanning folders…" state. Matches are then filled in batches with a progress counter, so no single request runs long.
+  - Covers movies, series, music and books.
+- **Music import matches every folder:** before, it only matched the first 25 folders on MusicBrainz and left the rest for manual searching. It now matches all of them, about 10 folders per batch because of MusicBrainz's 1-request-per-second limit.
+- **Import shows why folders can't be matched**, for example TMDB not set up or a failed lookup, instead of silently leaving them unmatched. When nothing is selected, it explains why there's nothing to import.
+
+### Added
+- API:
+  - `lookup=false` on the scan endpoints lists folders without metadata lookups.
+  - `POST /api/v1/libraryimport/match`, `/musicimport/match` and `/bookimport/match` take up to 25 folders and return their suggestions.
+  - Scan results gain `lookup_error`.
+
 ## [0.7.0] - 2026-11-04
 
 ### Added
