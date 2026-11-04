@@ -21,6 +21,7 @@ pub mod modal;
 pub mod music;
 pub mod poster;
 pub mod provider_form;
+pub mod radio;
 pub mod request_drawer;
 pub mod request_modal;
 pub mod request_status;
