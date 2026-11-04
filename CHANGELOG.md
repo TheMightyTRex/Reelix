@@ -6,6 +6,29 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-04
+
+### Added
+- **Windows installer** (`reelix-<version>-windows-x86_64-setup.exe`). The installer offers two modes:
+  - **Install for me** needs no admin rights. It installs to `%LOCALAPPDATA%\Programs\Reelix` with data in `%LOCALAPPDATA%\Reelix`, and adds Start menu shortcuts and an optional "start when I sign in".
+  - **Install for all users** installs to Program Files and runs Reelix as a Windows service that starts at boot. Data goes in `C:\ProgramData\Reelix`, readable only by SYSTEM and Administrators, and there's an optional firewall rule.
+  - Upgrading installs over the existing copy. Uninstalling keeps your data unless you choose to delete it.
+- **Linux install script with systemd:** `curl -fsSL https://raw.githubusercontent.com/demonzoned/Reelix/master/packaging/linux/install.sh | sudo sh`.
+  - It verifies the download, installs to `/opt/reelix` with a `reelix` system user, and sets up a hardened `reelix.service`.
+  - Re-running it upgrades. `--uninstall` removes Reelix and keeps your data; `--purge` also removes the data.
+- **In-app updates:** System → Updates now has **Install and restart**. Reelix downloads the release for your platform and checks it against the release's `SHA256SUMS`. Then it takes a backup, swaps in the new files (rolling back if anything fails) and restarts itself.
+  - This works for the Windows installer (both modes), the Linux install script, and the zip/tarball downloads.
+  - Docker installs keep using `docker compose pull`.
+  - An optional **Install updates automatically** setting (off by default) installs new stable releases when the scheduled check finds them.
+- `reelix service install|uninstall` to run Reelix as a Windows service without the installer.
+- `POST /api/v1/system/updates/install`, and the `self_update` field on `GET /api/v1/system/updates`.
+
+### Fixed
+- Re-importing a file that's already hardlinked into the library no longer fails on Windows with "destination exists".
+- Restoring a backup on Windows retries when the database file is briefly locked (for example by antivirus).
+- The web UI is found next to `reelix.exe` when Reelix isn't started from its own folder (for example as a Windows service).
+- Update checks use the repository's new location, `demonzoned/Reelix`.
+
 ## [0.6.0] - 2026-11-03
 
 This release fixes the issues found in a full security audit. Upgrading is recommended.
