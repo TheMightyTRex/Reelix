@@ -76,10 +76,11 @@ impl RadioService {
                 let p = self.enabled_provider(id).await?;
                 let fetch = ShowFetch {
                     max_lookups: settings.max_lookups_per_refresh,
+                    quick: true,
                     ..ShowFetch::default()
                 };
                 let data = p.show(external_id.trim(), &fetch).await?;
-                (p, data)
+                (self.owner(p, &data)?, data)
             }
             (None, None) => {
                 return Err(RadioError::Validation(
@@ -120,7 +121,12 @@ impl RadioService {
         )
         .await?;
         self.apply_show_data(id, &data, true).await?;
+        self.download_artwork(id).await;
         self.emit(entities::SHOW, "created", id);
+        if !data.complete {
+            // A quick first read (e.g. the BBC's newest series only): read the rest now.
+            self.queue_refresh(vec![id]).await?;
+        }
         self.get_show(id).await
     }
 
@@ -225,12 +231,7 @@ impl RadioService {
         };
         let candidates: Vec<_> = match provider {
             Some(id) => vec![self.enabled_provider(id).await?],
-            None => self
-                .providers
-                .enabled(&settings.enabled_providers)
-                .into_iter()
-                .filter(|p| p.supports_search())
-                .collect(),
+            None => self.providers.for_search(&settings.enabled_providers, &prefs),
         };
         if candidates.is_empty() {
             return Err(RadioError::Validation(
@@ -255,6 +256,16 @@ impl RadioService {
         {
             return Err(e.into());
         }
+        // Directories find the same feed: keep the first hit per show and per feed.
+        let mut seen = std::collections::HashSet::new();
+        hits.retain(|h| {
+            let feed = h
+                .feed_url
+                .as_deref()
+                .map(|f| f.trim_end_matches('/').to_ascii_lowercase());
+            let fresh = seen.insert((h.provider.clone(), h.external_id.clone()));
+            fresh && feed.is_none_or(|f| seen.insert((String::new(), f)))
+        });
         self.mark_in_library(hits).await
     }
 
@@ -297,7 +308,7 @@ impl RadioService {
         let mut last_err: Option<ProviderError> = None;
         for p in self.providers.enabled(&settings.enabled_providers) {
             match p.preview(link).await {
-                Ok(Some(data)) => return Ok((p, data)),
+                Ok(Some(data)) => return Ok((self.owner(p, &data)?, data)),
                 Ok(None) => {}
                 Err(e) => last_err = Some(e),
             }
@@ -308,6 +319,22 @@ impl RadioService {
                 "no source recognises this link; paste the show's page or its podcast feed address".into(),
             ),
         })
+    }
+
+    /// The provider that owns `data` ([`ShowData::provider`], e.g. a directory handing a
+    /// feed to `rss`), else `asked`.
+    fn owner(
+        &self,
+        asked: std::sync::Arc<dyn RadioProvider>,
+        data: &ShowData,
+    ) -> Result<std::sync::Arc<dyn RadioProvider>> {
+        match data.provider.as_deref() {
+            Some(id) if id != asked.id() => self
+                .providers
+                .get(id)
+                .ok_or_else(|| RadioError::Validation(format!("unknown radio source {id}"))),
+            _ => Ok(asked),
+        }
     }
 
     pub(crate) async fn enabled_provider(&self, id: &str) -> Result<std::sync::Arc<dyn RadioProvider>> {

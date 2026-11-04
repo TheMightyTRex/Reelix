@@ -76,7 +76,7 @@ impl RssProvider {
 
     /// Fetches and parses `url`; for an HTML page, follows its advertised feed once.
     /// `Ok(None)` = not a feed.
-    async fn read(&self, url: &str) -> Result<Option<ShowData>, ProviderError> {
+    pub(crate) async fn read(&self, url: &str) -> Result<Option<ShowData>, ProviderError> {
         let body = self.fetch(url).await?;
         if let Some(show) = parse_feed(&body, url)? {
             return Ok(Some(show));
@@ -276,6 +276,7 @@ fn channel_data(ch: &Node, url: &str) -> ShowData {
         station: None,
         series,
         episodes,
+        provider: None,
         complete: true,
     }
 }

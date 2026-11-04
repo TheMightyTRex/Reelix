@@ -104,11 +104,23 @@ impl Modules {
             db: deps.db.clone(),
             events: deps.events.clone(),
             http: deps.http.clone(),
-            providers: reelix_radio::ProviderRegistry::default().with(std::sync::Arc::new(
-                reelix_radio::providers::RssProvider::new(deps.http.clone()),
-            )),
+            providers: {
+                use reelix_radio::providers::{
+                    AppleProvider, ArchiveProvider, BbcProvider, PodcastIndexProvider, RssProvider,
+                };
+                use std::sync::Arc;
+                reelix_radio::ProviderRegistry::default()
+                    .with(Arc::new(BbcProvider::new(deps.http.clone())))
+                    .with(Arc::new(AppleProvider::new(deps.http.clone())))
+                    .with(Arc::new(PodcastIndexProvider::new(deps.http.clone())))
+                    .with(Arc::new(ArchiveProvider::new(deps.http.clone())))
+                    .with(Arc::new(RssProvider::new(deps.http.clone())))
+            },
             library_sync: None,
         }));
+        // downloaded artwork and logos under <data_dir>/radio/; provider credentials encrypted
+        radio.set_data_dir(deps.data_dir.clone());
+        radio.set_secrets(deps.secrets.clone());
         let radio_library = {
             let client_id = deps
                 .db

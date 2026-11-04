@@ -1,0 +1,45 @@
+{
+ "resultCount": 1,
+ "results": [
+  {
+   "wrapperType": "track",
+   "kind": "podcast",
+   "collectionId": 1767854856,
+   "trackId": 1767854856,
+   "artistName": "BBC Radio 4",
+   "collectionName": "Just a Minute",
+   "trackName": "Just a Minute",
+   "collectionCensoredName": "Just a Minute",
+   "trackCensoredName": "Just a Minute",
+   "collectionViewUrl": "https://podcasts.apple.com/gb/podcast/just-a-minute/id1767854856?uo=4",
+   "feedUrl": "https://podcasts.files.bbci.co.uk/b006s5dp.rss",
+   "trackViewUrl": "https://podcasts.apple.com/gb/podcast/just-a-minute/id1767854856?uo=4",
+   "artworkUrl30": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/c0/7e/0a/c07e0a0c-b134-2a85-53a1-4518d3ebfdbc/mza_6362207318254558903.jpg/30x30bb.jpg",
+   "artworkUrl60": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/c0/7e/0a/c07e0a0c-b134-2a85-53a1-4518d3ebfdbc/mza_6362207318254558903.jpg/60x60bb.jpg",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/c0/7e/0a/c07e0a0c-b134-2a85-53a1-4518d3ebfdbc/mza_6362207318254558903.jpg/100x100bb.jpg",
+   "collectionPrice": 0.0,
+   "trackPrice": 0.0,
+   "collectionHdPrice": 0,
+   "releaseDate": "2026-09-21T18:00:00Z",
+   "collectionExplicitness": "notExplicit",
+   "trackExplicitness": "cleaned",
+   "trackCount": 55,
+   "trackTimeMillis": 1722,
+   "country": "GBR",
+   "currency": "GBP",
+   "primaryGenreName": "Improv",
+   "contentAdvisoryRating": "Clean",
+   "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/c0/7e/0a/c07e0a0c-b134-2a85-53a1-4518d3ebfdbc/mza_6362207318254558903.jpg/600x600bb.jpg",
+   "genreIds": [
+    "1495",
+    "26",
+    "1303"
+   ],
+   "genres": [
+    "Improv",
+    "Podcasts",
+    "Comedy"
+   ]
+  }
+ ]
+}

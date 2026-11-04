@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use reelix_api_types::radio::RadioSettingsDto;
+use reelix_core::provider::SECRET_MASK;
 
 use crate::error::{RadioError, Result};
 use crate::{RadioService, keys};
@@ -11,19 +12,55 @@ use crate::{RadioService, keys};
 /// Upper bound of [`RadioSettingsDto::max_lookups_per_refresh`].
 const MAX_LOOKUPS: u32 = 1000;
 
+/// Prefix of an encrypted settings value.
+const ENC_PREFIX: &str = "enc:";
+
 impl RadioService {
+    /// The settings with credentials decrypted (internal use; the API reads
+    /// [`settings_masked`](Self::settings_masked)). Every read also hands them to the
+    /// providers ([`crate::RadioProvider::configure`]).
     pub async fn settings(&self) -> Result<RadioSettingsDto> {
-        Ok(self
+        let mut s = self
             .db
             .settings()
             .get::<RadioSettingsDto>(keys::SETTINGS)
             .await?
-            .unwrap_or_default())
+            .unwrap_or_default();
+        if let Some(stored) = s.podcastindex_api_secret.take() {
+            s.podcastindex_api_secret = self.open_secret(&stored);
+        }
+        self.providers.configure(&s);
+        Ok(s)
+    }
+
+    /// The settings for display: the Podcast Index secret is masked.
+    pub async fn settings_masked(&self) -> Result<RadioSettingsDto> {
+        Ok(mask(self.settings().await?))
+    }
+
+    fn open_secret(&self, stored: &str) -> Option<String> {
+        let Some(enc) = stored.strip_prefix(ENC_PREFIX) else {
+            return Some(stored.to_owned()).filter(|s| !s.is_empty());
+        };
+        match self.secrets.get().map(|b| b.decrypt(enc)) {
+            Some(Ok(plain)) => Some(plain),
+            Some(Err(e)) => {
+                tracing::warn!(error = %e, "cannot decrypt the saved Podcast Index secret (was the secret key changed?)");
+                None
+            }
+            None => {
+                tracing::warn!("no secret key attached; the saved Podcast Index secret cannot be read");
+                None
+            }
+        }
     }
 
     /// Normalises and checks the settings (the Reelix-side folder must exist and be
-    /// writable), then stores them.
+    /// writable), then stores them (credentials encrypted). Returns them masked.
     pub async fn set_settings(&self, mut s: RadioSettingsDto) -> Result<RadioSettingsDto> {
+        if s.podcastindex_api_secret.as_deref() == Some(SECRET_MASK) {
+            s.podcastindex_api_secret = self.settings().await?.podcastindex_api_secret;
+        }
         let trim = |v: &mut Option<String>| {
             *v = v
                 .as_deref()
@@ -36,6 +73,8 @@ impl RadioService {
         trim(&mut s.library_folder);
         trim(&mut s.country);
         trim(&mut s.language);
+        trim(&mut s.podcastindex_api_key);
+        trim(&mut s.podcastindex_api_secret);
         if let Some(f) = &s.abs_library_folder
             && !looks_absolute(f)
         {
@@ -84,10 +123,28 @@ impl RadioService {
             s.max_lookups_per_refresh = RadioSettingsDto::default().max_lookups_per_refresh;
         }
         s.max_lookups_per_refresh = s.max_lookups_per_refresh.min(MAX_LOOKUPS);
-        self.db.settings().set(keys::SETTINGS, &s).await?;
+        let mut stored = s.clone();
+        if let Some(secret) = &s.podcastindex_api_secret {
+            let b = self.secrets.get().ok_or_else(|| {
+                RadioError::Internal("no secret key is attached, so credentials cannot be saved".into())
+            })?;
+            let enc = b
+                .encrypt(secret)
+                .map_err(|e| RadioError::Internal(e.to_string()))?;
+            stored.podcastindex_api_secret = Some(format!("{ENC_PREFIX}{enc}"));
+        }
+        self.db.settings().set(keys::SETTINGS, &stored).await?;
+        self.providers.configure(&s);
         self.emit("settings", "updated", 0);
-        Ok(s)
+        Ok(mask(s))
     }
+}
+
+fn mask(mut s: RadioSettingsDto) -> RadioSettingsDto {
+    if s.podcastindex_api_secret.is_some() {
+        s.podcastindex_api_secret = Some(SECRET_MASK.to_owned());
+    }
+    s
 }
 
 /// `/x` or `C:\x` (the Audiobookshelf side may be another machine or container).

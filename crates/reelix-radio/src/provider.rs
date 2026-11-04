@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use reelix_api_types::radio::{RadioProviderDto, RadioSeriesKind};
+use reelix_api_types::radio::{RadioProviderDto, RadioSeriesKind, RadioSettingsDto};
 
 pub use async_trait::async_trait;
 /// A search result (nothing saved). `show_id` is filled in by the service.
@@ -53,6 +53,10 @@ pub struct ShowFetch {
     pub known_episodes: HashSet<String>,
     /// At most this many expensive per-episode lookups (e.g. one request per episode length).
     pub max_lookups: u32,
+    /// The first read when a show is added: a provider that needs many requests for the full
+    /// structure may return a partial view (`complete = false`); the service then queues a
+    /// full refresh.
+    pub quick: bool,
 }
 
 /// The broadcaster's service a show belongs to.
@@ -106,6 +110,10 @@ pub struct ShowData {
     pub station: Option<StationData>,
     pub series: Vec<SeriesData>,
     pub episodes: Vec<EpisodeData>,
+    /// The provider that owns the show when it is not the one asked: directories that only
+    /// find feeds (Apple Podcasts) hand the show to `rss`, so it is saved and refreshed as a
+    /// feed. `None` = the provider asked.
+    pub provider: Option<String>,
     /// The lists are the provider's complete current view (series and episodes missing from
     /// them, other than skipped series, are marked removed — never deleted). `false` for a
     /// partial read, e.g. a lookup budget ran out.
@@ -150,6 +158,28 @@ pub trait RadioProvider: Send + Sync + 'static {
         false
     }
 
+    /// Countries (ISO 3166 alpha-2, upper case) the provider is for; empty = everywhere.
+    /// Name searches leave it out when the settings name another country.
+    fn countries(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Languages (ISO 639-1, lower case) of the provider's shows; empty = any. Name searches
+    /// leave it out when the settings name another language.
+    fn languages(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Takes the current radio settings (credentials). Called whenever the service reads its
+    /// settings, before the provider is used.
+    fn configure(&self, _settings: &RadioSettingsDto) {}
+
+    /// Whether the provider has what it needs (e.g. an API key). Unconfigured providers are
+    /// treated as turned off.
+    fn is_configured(&self) -> bool {
+        true
+    }
+
     /// Shows matching `query`, best first.
     async fn search(&self, _query: &str, _prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
         Err(ProviderError::Unsupported(format!(
@@ -192,13 +222,40 @@ impl ProviderRegistry {
         &self.providers
     }
 
-    /// Providers allowed by the settings (`enabled` empty = all).
+    /// Providers allowed by the settings (`enabled` empty = all) that are configured.
     pub fn enabled(&self, enabled: &[String]) -> Vec<Arc<dyn RadioProvider>> {
         self.providers
             .iter()
-            .filter(|p| enabled.is_empty() || enabled.iter().any(|e| e == p.id()))
+            .filter(|p| p.is_configured() && (enabled.is_empty() || enabled.iter().any(|e| e == p.id())))
             .cloned()
             .collect()
+    }
+
+    /// Enabled providers that can search, for the settings' country and language: providers
+    /// for that country first, then the ones for everywhere; providers for another country or
+    /// language are left out (no preference set = all, in registry order).
+    pub fn for_search(&self, enabled: &[String], prefs: &SearchPrefs) -> Vec<Arc<dyn RadioProvider>> {
+        let fits = |list: &[&str], want: Option<&String>| {
+            list.is_empty() || want.is_none_or(|w| list.iter().any(|x| x.eq_ignore_ascii_case(w)))
+        };
+        let mut out: Vec<_> = self
+            .enabled(enabled)
+            .into_iter()
+            .filter(|p| p.supports_search())
+            .filter(|p| {
+                fits(p.countries(), prefs.country.as_ref()) && fits(p.languages(), prefs.language.as_ref())
+            })
+            .collect();
+        // Stable: country-specific providers that fit go first.
+        out.sort_by_key(|p| p.countries().is_empty());
+        out
+    }
+
+    /// Hands the current settings to every provider ([`RadioProvider::configure`]).
+    pub fn configure(&self, settings: &RadioSettingsDto) {
+        for p in &self.providers {
+            p.configure(settings);
+        }
     }
 
     pub fn dtos(&self, enabled: &[String]) -> Vec<RadioProviderDto> {
@@ -208,7 +265,7 @@ impl ProviderRegistry {
                 id: p.id().to_owned(),
                 name: p.name().to_owned(),
                 supports_search: p.supports_search(),
-                enabled: enabled.is_empty() || enabled.iter().any(|e| e == p.id()),
+                enabled: p.is_configured() && (enabled.is_empty() || enabled.iter().any(|e| e == p.id())),
             })
             .collect()
     }

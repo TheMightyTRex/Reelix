@@ -83,9 +83,11 @@ impl RadioService {
                 .into_iter()
                 .collect(),
             max_lookups: settings.max_lookups_per_refresh,
+            quick: false,
         };
         let data = provider.show(&show.external_id, &fetch).await?;
         let added = self.merge(id, &data, &fetch.skip_series, false).await?;
+        self.download_artwork(id).await;
         self.emit(entities::SHOW, "updated", id);
         Ok(added)
     }

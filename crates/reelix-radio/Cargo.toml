@@ -9,6 +9,7 @@ license.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+hex.workspace = true
 quick-xml.workspace = true
 reelix-api-types.workspace = true
 reelix-core = { workspace = true, features = ["bus"] }
@@ -20,6 +21,8 @@ reelix-parser.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

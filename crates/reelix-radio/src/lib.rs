@@ -9,7 +9,7 @@
 //! Radio root folders share `root_folders` with the library via
 //! [`reelix_library::content_roots`]. See `docs/radio.md`.
 
-mod artwork;
+pub mod artwork;
 mod convert;
 mod error;
 pub mod jobs;
@@ -24,9 +24,11 @@ mod service;
 mod settings;
 mod shows;
 pub mod status;
+pub mod svg;
 mod wanted;
 mod xml;
 
+pub use artwork::{ImageKind, StoredImage};
 pub use error::{RadioError, Result};
 pub use library::{LibrarySyncSummary, NewEpisodeFile, NoopLibrarySync, RadioLibrarySync, clean_title};
 pub use matching::source_ids;

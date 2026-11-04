@@ -404,6 +404,12 @@ pub struct RadioSettingsDto {
     pub language: Option<String>,
     /// Expensive per-episode lookups (lengths, details) a refresh may make per show.
     pub max_lookups_per_refresh: u32,
+    /// Podcast Index API key (podcastindex.org); the source stays off until key and secret
+    /// are set.
+    pub podcastindex_api_key: Option<String>,
+    /// Podcast Index API secret. Stored encrypted; reads return `********` when set, and
+    /// sending `********` back keeps the saved secret.
+    pub podcastindex_api_secret: Option<String>,
 }
 
 impl Default for RadioSettingsDto {
@@ -417,6 +423,8 @@ impl Default for RadioSettingsDto {
             country: None,
             language: None,
             max_lookups_per_refresh: 30,
+            podcastindex_api_key: None,
+            podcastindex_api_secret: None,
         }
     }
 }

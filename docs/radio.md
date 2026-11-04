@@ -20,13 +20,16 @@ This page describes what exists and where the remaining parts plug in.
 | `src/service.rs` | `RadioService`, `RadioDeps`, job queue hand-off, `emit`, `queue_refresh`, `queue_library_sync` |
 | `src/provider.rs` | `RadioProvider` trait, `ProviderRegistry`, `ShowData`/`SeriesData`/`EpisodeData`/`StationData`, `ShowFetch`, `SearchPrefs`, `ProviderError` |
 | `src/providers/rss.rs` | The generic podcast feed provider (`rss`) |
+| `src/providers/{bbc,apple,podcastindex,archive}.rs` | BBC, Apple Podcasts, Podcast Index, Internet Archive (see (b)) |
+| `src/providers/http.rs` | Cached, paced JSON reader shared by the providers |
+| `src/svg.rs` | SVG cleaner for logos and artwork |
 | `src/xml.rs` | Small quick-xml tree (entity handling, depth limit 64) |
 | `src/shows.rs` | Add, edit, delete, list, get; episodes; stations; search; preview; `recompute_statuses` |
 | `src/refresh.rs` | `refresh_show`, `refresh_shows`, merging provider data, broadcast-order numbering, settling |
 | `src/status.rs` | Pure status rules (`monitored_by_follow`, `episode_status`, `is_settled`, `filing_series_number`) |
 | `src/matching.rs` | Hand-set file links (`set_episode_file`, `clear_episode_file`), automatic matching (`match_library`, `source_ids`) |
 | `src/library.rs` | `RadioLibrarySync` trait, `NoopLibrarySync`, `NewEpisodeFile`, file rows, automatic links, review |
-| `src/artwork.rs` | Where downloaded artwork and logos are recorded |
+| `src/artwork.rs` | Downloading, storing and reading show artwork and station logos |
 | `src/wanted.rs` | `wanted_episodes`, `episode_file_name` (indexer search / filing hand-off) |
 | `src/settings.rs` | `radio.settings` and folder checks (`check_library_folder`) |
 | `src/root_folders.rs` | Root folders of kind `radio` |
@@ -146,6 +149,7 @@ root-folder changes need `ADMIN`.
 | `GET /radio/search?q=&provider=` | Search by name (a link is previewed); saves nothing |
 | `GET /radio/preview?link=` | Show + newest 10 episodes; saves nothing |
 | `GET /radio/stations`, `GET /radio/providers` | Stations; sources with `supports_search`/`enabled` |
+| `GET /radio/shows/{id}/artwork`, `GET /radio/stations/{id}/logo` | Downloaded image, ETag/304 (see (c)) |
 | `GET /radio/library/review` | `{unmatched_shows, unmatched_files, synced_at}` from `radio_episode_files` |
 | `GET/POST /radio/rootfolders`, `DELETE /radio/rootfolders/{id}` | Root folders of kind `radio` |
 | `GET/PUT /radio/settings` | `RadioSettingsDto` |
@@ -156,7 +160,10 @@ Events: `entity.changed` with entity `radio_show`, `radio_episode`, `radio_episo
 
 Settings (`radio.settings`): `abs_library_id`, `abs_library_folder` (as Audiobookshelf sees
 it), `library_folder` (as Reelix sees it; must exist and be writable), `default_follow`,
-`enabled_providers` (empty = all), `country`, `language`, `max_lookups_per_refresh`.
+`enabled_providers` (empty = all), `country`, `language`, `max_lookups_per_refresh`,
+`podcastindex_api_key`, `podcastindex_api_secret` (stored encrypted with the server's secret
+key as `enc:…`; `GET` returns `********`, and sending `********` back keeps it; saving a secret
+fails if no key is attached with `RadioService::set_secrets`).
 
 ## Extension points
 
@@ -198,7 +205,8 @@ one file per episode and one episode per file, in order:
 1. Source id: the episode's guid or enclosure address equals the file's, or one of
    `source_ids(provider, episode external id)` occurs as a whole word (lower case) in the
    file's guid, enclosure address or file name. `source_ids` is per provider: `bbc` gives the
-   programme pid (`b0abc123`, `p0abc123`, `m001abcd`, `w3…`); other providers add an arm.
+   programme pid (`b0abc123`, `p0abc123`, `m001abcd`, `w3…`), `archive` the audio file's stem
+   (8+ characters); Apple (saved as `rss`) and Podcast Index rely on the exact guid/enclosure.
 2. Series + episode number: `S20E03` (also `s20e03`, `S20 E03`) in the file's title, else its
    file name, else Audiobookshelf's season and episode (no season = series 1), compared with
    `(filing_series_number, number)`. Only files of the show's `abs_item_id`, or when it has
@@ -215,29 +223,108 @@ Review (`GET /radio/library/review`): `unmatched_shows` = items no show maps to,
 linked file and no show of the same clean title; `unmatched_files` = files linked to no
 episode. Tests: `crates/reelix-radio/tests/library_matching.rs`.
 
-### (b) More providers
+### (b) Sources (providers)
 
-Add a module under `crates/reelix-radio/src/providers/` (`bbc.rs`, `podcastindex.rs`,
-`apple.rs`, `archive.rs`), `pub mod` it in `providers/mod.rs`, implement `RadioProvider`, and
-register it in `modules.rs` with `ProviderRegistry::with(...)` before `RssProvider`. Take the
-shared `reqwest::Client` (`deps.http`). Directories that only find feeds (Podcast Index,
-Apple) can return hits with `provider: "rss"` and `external_id` = feed URL, so the show is
-then followed through the feed provider. Honour `ShowFetch` (skip settled series, spend at
-most `max_lookups` per-episode requests, set `complete = false` when cut short), map 429 to
-`ProviderError::RateLimited`, and keep caching/pacing inside the provider. Test against
-saved fixtures with wiremock (see `tests/radio.rs`). New provider ids become valid values of
-`enabled_providers` automatically.
+Built: registered in `modules.rs` in this order (links are offered to each in turn):
+
+| Id | Module | Search | Links it recognises | Shows |
+|---|---|---|---|---|
+| `bbc` | `providers/bbc.rs` | BBC Sounds | `bbc.co.uk/programmes/{pid}`, `bbc.co.uk/sounds/brand\|series\|play/{pid}`, a bare pid | Its own (external id = brand pid, or the top series) |
+| `apple` | `providers/apple.rs` | iTunes Search API | `podcasts.apple.com/…/id{n}` | Handed to `rss` |
+| `podcastindex` | `providers/podcastindex.rs` | `search/byterm` | `podcastindex.org/podcast/{id}` | Its own (external id = feed id) |
+| `archive` | `providers/archive.rs` | `advancedsearch.php` | `archive.org/details/{identifier}` | Its own (external id = identifier) |
+| `rss` | `providers/rss.rs` | no | any http(s) feed or page advertising one | Its own (external id = feed URL) |
+
+Trait additions (all defaulted): `countries()` / `languages()` (empty = everywhere/any),
+`configure(&RadioSettingsDto)` (called on every settings read, e.g. credentials),
+`is_configured()` (unconfigured = treated as turned off: left out of `enabled()`, `enabled:
+false` in `GET /radio/providers`). `ShowData.provider` lets a directory hand a show to
+another provider (`resolve_link` and `add_show` save it under that one).
+`ShowFetch.quick` marks the first read when a show is added by id: a provider that needs many
+requests may return a partial view (`complete = false`); `add_show` then queues a refresh.
+
+Search (`GET /radio/search` without `provider`): `ProviderRegistry::for_search` takes the
+enabled, configured providers that can search, drops those for another country or language
+than the settings name (the BBC is `GB`, `en`/`cy`/`gd`; the others are for everywhere) and
+puts country-specific ones first; hits are de-duplicated by `(provider, external_id)` and by
+feed URL (first wins). `?provider=bbc` asks one source regardless of country.
+
+Shared plumbing: `providers/http.rs` (`JsonReader`): per-URL in-memory cache (bounded),
+spacing between requests, `429`/`503` with `Retry-After` (a wait up to 5 s is slept and
+retried once; longer fails with `RateLimited` and every request until then fails without
+reaching the source), body size limit.
+
+- **BBC — undocumented endpoints.** `www.bbc.co.uk/programmes/{pid}.json` and
+  `/programmes/{pid}/children.json?limit=50&page=N` (up to 20 pages) and BBC Sounds search
+  `rms.api.bbc.co.uk/v2/programmes/search/container?q=` are public but undocumented and may
+  change: every answer is checked, and a changed one fails with "the BBC programme data has
+  changed …; saved series and episodes are kept" (a failed read changes nothing). Programmes
+  cached 1 h, search 5 min, requests 1.5 s apart. Any pid walks up to six parent levels to the
+  brand (or topmost series). Brand children: series (number = `position`, `expected_child_count`)
+  and episodes straight under the brand (→ `specials`); a series inside a series is folded in
+  (positions dropped, numbered by broadcast order). Settled series are neither listed nor read.
+  Lengths: one `/programmes/{episode}.json` (`versions`, canonical first) per episode not in
+  `known_episodes`, newest broadcast first, at most `max_lookups`; a rate limit stops the
+  lookups, a missing page is skipped. A rate limit while reading series keeps what was read
+  with `complete = false`. Station from `ownership.service` (logo
+  `sounds.files.bbci.co.uk/3.12.0/networks/{id}/blocks-colour_default.svg`), artwork from
+  `image.pid` (`ichef.bbci.co.uk/images/ic/640x640/{pid}.jpg`). Previews and quick adds read
+  the newest series only. The walk follows Storyarr's BBC adapter (MIT, attribution in the
+  module).
+- **Apple Podcasts**: `itunes.apple.com/search?media=podcast&entity=podcast&term=&country=`
+  (settings country, else `US`), `lookup?id=` for a link's `feedUrl`. Apple only knows where
+  the feed is, so hits are `provider: "rss"` with the feed URL, and previews/adds return the
+  feed (read by `RssProvider`) with `ShowData.provider = "rss"`: the show is then refreshed
+  hourly as a feed, de-duplicated with other directories, and keeps working if Apple's API
+  changes. Cached 5 min.
+- **Podcast Index**: needs `podcastindex_api_key` and `podcastindex_api_secret` in the
+  settings (off until both are set). Requests carry `X-Auth-Key`, `X-Auth-Date` (unix
+  seconds) and `Authorization` = hex `sha1(key + secret + date)`. Search hits in the settings'
+  language first. `podcasts/byfeedid` + `episodes/byfeedid?max=1000` map like feed items
+  (season → `season:N`, trailer/bonus → specials; id = guid, else the episode id).
+  Refreshed every 12 h (not a feed provider).
+- **Internet Archive**: search limited to
+  `mediatype:audio AND (collection:oldtimeradio OR subject:radio)` (query syntax stripped from
+  the user's words). `/metadata/{identifier}`: one episode per original audio recording (an MP3
+  derived from a FLAC is the same episode, the MP3 kept), in series 1, numbered by `track`,
+  length from `length`, enclosure `archive.org/download/{id}/{file}`, artwork
+  `archive.org/services/img/{id}`. `source_ids("archive", file)` gives the file stem for
+  matching.
+
+Image hosts of search hits allowed by the page CSP (`crates/reelix-server/src/web.rs`):
+`ichef.bbci.co.uk`, `*.mzstatic.com`, `archive.org`. Other hosts (Podcast Index, feeds) show a
+placeholder in search results; saved shows use the downloaded copy.
+
+Tests: `tests/providers.rs` with trimmed real responses in `tests/fixtures/providers/`
+(Podcast Index fixtures are written to its documented format).
 
 ### (c) Artwork and logos
 
-`artwork_url` (shows) and `logo_url` (stations) are saved on refresh; `artwork_path` and
-`logo_path` are empty. Download during refresh (hook at the end of `RadioService::refresh_show`
-in `src/refresh.rs`, and after `add_show`), store under the data folder, then record with
-`set_show_artwork_path` / `set_station_logo_path` (`src/artwork.rs`); read back with
-`show_artwork_path` / `station_logo_path` / `get_station`. DTOs already expose `has_artwork`
-and `has_logo`. Add the serving routes (e.g. `GET /radio/shows/{id}/artwork`,
-`GET /radio/stations/{id}/logo`) to `routes/radio.rs` with ETags, the size limits (2 MB
-artwork, 256 KB logos) and SVG cleaning with a strict CSP.
+Built (`src/artwork.rs`, `src/svg.rs`). At the end of `refresh_show` and of `add_show`,
+`download_artwork(show_id)` fetches the show's `artwork_url` and its station's `logo_url`
+into `<data_dir>/radio/artwork/{show_id}.{ext}` and `<data_dir>/radio/logos/{station_id}.{ext}`
+(data folder from `RadioService::set_data_dir`; unset = no downloads), then records them with
+`set_show_artwork_path` / `set_station_logo_path`. `{id}.source` next to the file holds the
+URL it came from; a file is fetched again only when the URL changes or the file is gone. Never
+on a page view.
+
+- Limits: 2 MB artwork, 256 KB logos (streamed; bigger is refused).
+- Types from the bytes, not `Content-Type`: JPEG, PNG, WebP, SVG; anything else is refused.
+- SVG (`svg::sanitise`, quick-xml, allow-list): drawing elements and presentation attributes
+  only; drops `<script>`, `<foreignObject>`, `<image>`, `<a>`, animation and unknown elements
+  with their content, `on*` attributes, `href`/`xlink:href` other than `#id`, values with
+  `javascript:`/`data:`/`expression(`/`url()` other than `url(#id)`, `<style>` with `url()` or
+  `@import`, comments and other namespaces. DOCTYPE, malformed XML, nesting over 64 or a
+  non-`<svg>` root is refused.
+- A failed download is logged and keeps the previous file.
+
+Routes (same permission as the other radio reads, `MANAGE_LIBRARY`):
+`GET /radio/shows/{id}/artwork` and `GET /radio/stations/{id}/logo` → the file with a strong
+`ETag` (content hash), `Cache-Control: private, max-age=3600`, `X-Content-Type-Options:
+nosniff`, and for SVG `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';
+sandbox`. `If-None-Match` (lists, weak tags, `*`) → `304`. No file → `404`. Query strings
+(the UI's `?v=`) are ignored. Deleting a show leaves its file on disk (overwritten if the id is
+reused). Tests: `crates/reelix-api/tests/radio_artwork.rs`, `tests/providers.rs`.
 
 ### (d) Indexer search, release parsing and filing
 

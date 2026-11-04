@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::Response;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use reelix_api_types::content::{ContentRootFolderDto, CreateContentRootFolderRequest};
 use reelix_api_types::library::Paged;
@@ -21,7 +21,7 @@ use reelix_api_types::radio::{
 };
 use reelix_api_types::{ApiErrorBody, EnqueuedJob};
 use reelix_core::Permissions;
-use reelix_radio::{ProviderError, RadioError, RadioService};
+use reelix_radio::{ProviderError, RadioError, RadioService, StoredImage};
 use utoipa::OpenApi;
 
 use crate::auth::CurrentUser;
@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
             get(get_show).put(edit_show).delete(delete_show),
         )
         .route("/radio/shows/{id}/episodes", get(show_episodes))
+        .route("/radio/shows/{id}/artwork", get(show_artwork))
         .route("/radio/shows/{id}/refresh", post(refresh_show))
         .route("/radio/episodes/{id}", get(get_episode))
         .route(
@@ -46,6 +47,7 @@ pub fn routes() -> Router<AppState> {
         .route("/radio/search", get(search))
         .route("/radio/preview", get(preview))
         .route("/radio/stations", get(stations))
+        .route("/radio/stations/{id}/logo", get(station_logo))
         .route("/radio/providers", get(providers))
         .route("/radio/library/review", get(library_review))
         .route("/radio/rootfolders", get(list_root_folders).post(add_root_folder))
@@ -56,8 +58,8 @@ pub fn routes() -> Router<AppState> {
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        list_shows, add_show, get_show, edit_show, delete_show, show_episodes, refresh_show,
-        get_episode, set_episode_file, clear_episode_file, search, preview, stations, providers,
+        list_shows, add_show, get_show, edit_show, delete_show, show_episodes, show_artwork, refresh_show,
+        get_episode, set_episode_file, clear_episode_file, search, preview, stations, station_logo, providers,
         library_review, list_root_folders, add_root_folder, delete_root_folder, get_settings, put_settings,
     ),
     components(schemas(
@@ -216,6 +218,68 @@ pub async fn show_episodes(
     Ok(ApiJson(svc(&state)?.show_episodes(id).await?))
 }
 
+/// How long browsers may keep artwork and logos before asking again (with `If-None-Match`).
+const IMAGE_MAX_AGE: &str = "private, max-age=3600";
+/// Opened directly, an SVG still cannot run script or load anything.
+const SVG_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+/// A downloaded image with its ETag; `304` when `If-None-Match` names it.
+fn image_response(img: StoredImage, req: &HeaderMap) -> Response {
+    let matches = req
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map(|t| t.trim().trim_start_matches("W/"))
+        .any(|t| t == img.etag || t == "*");
+    let is_svg = img.is_svg();
+    let mut res = if matches {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else {
+        let mut r = (StatusCode::OK, img.bytes).into_response();
+        r.headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static(img.content_type));
+        r
+    };
+    let h = res.headers_mut();
+    if let Ok(v) = HeaderValue::from_str(&img.etag) {
+        h.insert(header::ETAG, v);
+    }
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static(IMAGE_MAX_AGE));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if is_svg {
+        h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(SVG_CSP));
+    }
+    res
+}
+
+/// The show's artwork, downloaded on refresh (JPEG, PNG, WebP or cleaned SVG). Supports
+/// `If-None-Match`.
+#[utoipa::path(get, path = "/api/v1/radio/shows/{id}/artwork", tag = "radio",
+    params(("id" = i64, Path, description = "Show id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "The image (ETag, Cache-Control)", content_type = "image/*"),
+        (status = 304, description = "Unchanged (If-None-Match)"),
+        (status = 404, description = "No such show, or no artwork downloaded", body = ApiErrorBody),
+    ))]
+pub async fn show_artwork(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_lib(&user)?;
+    let img = svc(&state)?
+        .show_artwork(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("radio show {id} has no artwork")))?;
+    Ok(image_response(img, &headers))
+}
+
 /// Queues a refresh of one show from its source.
 #[utoipa::path(post, path = "/api/v1/radio/shows/{id}/refresh", tag = "radio",
     params(("id" = i64, Path, description = "Show id")),
@@ -332,6 +396,30 @@ pub async fn stations(
     Ok(ApiJson(svc(&state)?.stations().await?))
 }
 
+/// The station's logo, downloaded on refresh (SVG logos are cleaned and served with a strict
+/// content security policy). Supports `If-None-Match`.
+#[utoipa::path(get, path = "/api/v1/radio/stations/{id}/logo", tag = "radio",
+    params(("id" = i64, Path, description = "Station id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "The image (ETag, Cache-Control)", content_type = "image/*"),
+        (status = 304, description = "Unchanged (If-None-Match)"),
+        (status = 404, description = "No such station, or no logo downloaded", body = ApiErrorBody),
+    ))]
+pub async fn station_logo(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_lib(&user)?;
+    let img = svc(&state)?
+        .station_logo(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("radio station {id} has no logo")))?;
+    Ok(image_response(img, &headers))
+}
+
 /// The radio sources and whether they can search and are enabled.
 #[utoipa::path(get, path = "/api/v1/radio/providers", tag = "radio",
     security(("session" = []), ("api_key" = [])),
@@ -402,7 +490,8 @@ pub async fn delete_root_folder(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Radio settings (podcast library, its folders, default follow choice, sources).
+/// Radio settings (podcast library, its folders, default follow choice, sources). The Podcast
+/// Index secret is masked.
 #[utoipa::path(get, path = "/api/v1/radio/settings", tag = "radio",
     security(("session" = []), ("api_key" = [])),
     responses((status = 200, description = "Settings", body = RadioSettingsDto), (status = 403, description = "Requires ADMIN", body = ApiErrorBody)))]
@@ -411,7 +500,7 @@ pub async fn get_settings(
     user: CurrentUser,
 ) -> ApiResult<ApiJson<RadioSettingsDto>> {
     require_admin(&user)?;
-    Ok(ApiJson(svc(&state)?.settings().await?))
+    Ok(ApiJson(svc(&state)?.settings_masked().await?))
 }
 
 /// Validates (the folder must exist and be writable) and stores the radio settings.

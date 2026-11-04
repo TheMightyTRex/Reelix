@@ -44,7 +44,19 @@ pub fn source_ids(provider: &str, external_id: &str) -> Vec<String> {
             .map(str::to_ascii_lowercase)
             .filter(|t| is_bbc_pid(t))
             .collect(),
-        // Feeds: the external id is the guid or enclosure address, compared exactly.
+        // Internet Archive: the external id is the audio file's name in the item; its stem
+        // (long and distinctive enough not to match by chance) in a file name.
+        "archive" => {
+            let name = external_id.rsplit('/').next().unwrap_or(external_id);
+            let stem = name.rsplit_once('.').map_or(name, |(s, _)| s).to_lowercase();
+            if stem.chars().count() >= 8 && stem.chars().any(char::is_alphabetic) {
+                vec![stem]
+            } else {
+                Vec::new()
+            }
+        }
+        // Feeds, Apple Podcasts (saved as feeds) and Podcast Index: the external id is the
+        // guid or enclosure address, compared exactly.
         _ => Vec::new(),
     }
 }
@@ -447,6 +459,15 @@ mod tests {
         assert_eq!(source_ids("bbc", "episode:m001abcd"), ["m001abcd"]);
         assert!(source_ids("bbc", "archers").is_empty());
         assert!(source_ids("rss", "b0abc123").is_empty());
+        assert_eq!(
+            source_ids("archive", "Jeff_Regan_49-10-15_The_Lute.mp3"),
+            ["jeff_regan_49-10-15_the_lute"]
+        );
+        assert!(source_ids("archive", "01.mp3").is_empty());
+        assert!(contains_word(
+            "/podcasts/Jeff Regan/Jeff_Regan_49-10-15_The_Lute.mp3",
+            "jeff_regan_49-10-15_the_lute"
+        ));
         assert!(contains_word("https://x/b0abc123.mp3", "b0abc123"));
         assert!(contains_word("Show_B0ABC123_x", "b0abc123"));
         assert!(contains_word("Show - b0abc123 - x", "b0abc123"));

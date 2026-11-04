@@ -5,11 +5,13 @@
 //! (sync seam, file rows, review) in `library.rs`, settings and root folders in
 //! `settings.rs`/`root_folders.rs`.
 
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use chrono::{DateTime, Utc};
 use reelix_core::DomainEvent;
 use reelix_core::bus::EventBus;
+use reelix_db::secrets::SecretBox;
 use reelix_db::{Db, NewJob};
 use reelix_jobs::JobQueue;
 
@@ -37,6 +39,10 @@ pub struct RadioService {
     pub(crate) providers: ProviderRegistry,
     pub(crate) library_sync: RwLock<Arc<dyn RadioLibrarySync>>,
     pub(crate) queue: OnceLock<JobQueue>,
+    /// The data folder (downloaded artwork and logos go under `radio/`); unset = no downloads.
+    pub(crate) data_dir: OnceLock<PathBuf>,
+    /// Encrypts provider credentials in the settings; unset = credentials cannot be saved.
+    pub(crate) secrets: OnceLock<SecretBox>,
     /// Override "now" (tests).
     pub(crate) now_override: RwLock<Option<DateTime<Utc>>>,
 }
@@ -50,6 +56,8 @@ impl RadioService {
             providers: deps.providers,
             library_sync: RwLock::new(deps.library_sync.unwrap_or_else(|| Arc::new(NoopLibrarySync))),
             queue: OnceLock::new(),
+            data_dir: OnceLock::new(),
+            secrets: OnceLock::new(),
             now_override: RwLock::new(None),
         }
     }
@@ -57,6 +65,18 @@ impl RadioService {
     /// Gives the service the job queue (server `attach` phase). Later calls are ignored.
     pub fn set_queue(&self, queue: JobQueue) {
         let _ = self.queue.set(queue);
+    }
+
+    /// Sets the data folder; artwork and logos are downloaded under `<data_dir>/radio/`
+    /// (server `build` phase). Later calls are ignored.
+    pub fn set_data_dir(&self, dir: PathBuf) {
+        let _ = self.data_dir.set(dir);
+    }
+
+    /// Sets the key that encrypts provider credentials in the radio settings. Later calls are
+    /// ignored.
+    pub fn set_secrets(&self, secrets: SecretBox) {
+        let _ = self.secrets.set(secrets);
     }
 
     /// Replaces the podcast library reader (the Audiobookshelf implementation).
