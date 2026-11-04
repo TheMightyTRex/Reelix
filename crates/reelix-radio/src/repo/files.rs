@@ -98,6 +98,14 @@ pub async fn unmatched_items(db: &Db) -> Result<Vec<RadioLibraryShowDto>> {
         .collect()
 }
 
+/// Shows whose follow choice is not `none`.
+pub async fn followed_shows(db: &Db) -> Result<u32> {
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM radio_shows WHERE follow <> 'none'")
+        .fetch_one(db.pool())
+        .await?;
+    Ok(n.max(0) as u32)
+}
+
 /// Inserts or updates a file by (`abs_item_id`, `abs_episode_id`), stamping `seen_at`.
 /// Returns the id.
 pub async fn upsert(db: &Db, f: &NewEpisodeFile, seen_at: i64) -> Result<i64> {

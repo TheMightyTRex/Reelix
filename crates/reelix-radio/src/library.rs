@@ -2,10 +2,11 @@
 //! `radio_episode_files`, matching files to episodes, and the review of what is left over.
 //!
 //! [`RadioLibrarySync`] is the extension point the Audiobookshelf implementation plugs into
-//! (attached with [`RadioService::set_library_sync`]); until then the `radio_library_sync`
-//! task runs [`NoopLibrarySync`]. The DB side it needs is here already:
-//! [`RadioService::upsert_episode_files`], [`RadioService::remove_unseen_files`],
-//! [`RadioService::link_file_auto`] and [`RadioService::mark_library_synced`].
+//! (attached with [`RadioService::set_library_sync`]; the server's lives in
+//! `reelix-server/src/integrations/radio_library.rs`); until then the `radio_library_sync`
+//! task runs [`NoopLibrarySync`]. A reader hands what it read to
+//! [`RadioService::sync_library_files`], which upserts, removes unseen files, matches
+//! ([`RadioService::match_library`]) and records the sync.
 
 use std::collections::HashSet;
 
@@ -34,6 +35,12 @@ pub struct LibrarySyncSummary {
 #[async_trait::async_trait]
 pub trait RadioLibrarySync: Send + Sync + 'static {
     async fn sync(&self, svc: &RadioService) -> anyhow::Result<LibrarySyncSummary>;
+
+    /// Asks the podcast library to scan for new files (after filing). The default does
+    /// nothing.
+    async fn request_scan(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// The default: no podcast library is connected.
@@ -75,6 +82,28 @@ impl RadioService {
     pub async fn run_library_sync(&self) -> anyhow::Result<LibrarySyncSummary> {
         let sync = self.library_sync();
         sync.sync(self).await
+    }
+
+    /// One whole sync from what the library holds now: saves `files` (episodes with an audio
+    /// file), removes the files no longer there (their episodes return to Wanted or Not
+    /// requested), matches files to episodes ([`RadioService::match_library`]) and records
+    /// the sync.
+    pub async fn sync_library_files(&self, files: &[NewEpisodeFile]) -> Result<LibrarySyncSummary> {
+        let now = self.now();
+        let ids = self.upsert_episode_files(files, now).await?;
+        let removed = self.remove_unseen_files(now).await?;
+        let matched = self.match_library().await?;
+        self.mark_library_synced(now).await?;
+        Ok(LibrarySyncSummary {
+            files_seen: ids.len() as u32,
+            files_removed: removed,
+            episodes_matched: matched,
+        })
+    }
+
+    /// Shows whose follow choice is not `none` (they need the podcast library).
+    pub async fn followed_show_count(&self) -> Result<u32> {
+        repo::files::followed_shows(&self.db).await
     }
 
     /// Saves files seen by a sync (by item + episode id) with `seen_at`. Returns their ids in
@@ -161,11 +190,24 @@ impl RadioService {
         Ok(())
     }
 
-    /// Library podcasts no show covers and files matched to no episode.
+    /// Library podcasts no show covers (by `abs_item_id`, a matched file or the same clean
+    /// title) and files matched to no episode.
     pub async fn library_review(&self) -> Result<RadioLibraryReviewDto> {
         let synced = self.db.settings().get::<i64>(keys::LIBRARY_SYNCED_AT).await?;
+        let titles: HashSet<String> = repo::shows::match_keys(&self.db)
+            .await?
+            .into_iter()
+            .map(|(_, key, _)| key)
+            .filter(|k| !k.is_empty())
+            .collect();
+        let mut unmatched_shows = repo::files::unmatched_items(&self.db).await?;
+        unmatched_shows.retain(|i| {
+            !i.title
+                .as_deref()
+                .is_some_and(|t| titles.contains(&clean_title(t)))
+        });
         Ok(RadioLibraryReviewDto {
-            unmatched_shows: repo::files::unmatched_items(&self.db).await?,
+            unmatched_shows,
             unmatched_files: repo::files::unmatched(&self.db).await?,
             synced_at: synced.map(from_ms),
         })
