@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use reelix_server::cli::{Cli, Command};
 use reelix_server::config::Config;
+use reelix_server::lifecycle;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -14,7 +15,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match cli.command {
+    match &cli.command {
         Some(Command::Healthcheck) => ExitCode::from(reelix_server::healthcheck::run(&config)),
         Some(Command::SpotifyLogin {
             credentials,
@@ -23,9 +24,9 @@ fn main() -> ExitCode {
         }) => {
             let runtime = tokio::runtime::Runtime::new().expect("create Spotify login runtime");
             match runtime.block_on(reelix_direct::spotify::login(
-                &credentials,
+                credentials,
                 client_id.as_deref(),
-                &redirect_uri,
+                redirect_uri,
             )) {
                 Ok(()) => {
                     println!("Spotify session saved to {}", credentials.display());
@@ -37,6 +38,7 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some(Command::Service { action }) => reelix_server::service::main(action, config, &cli),
         None => {
             let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,
@@ -45,8 +47,15 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match runtime.block_on(reelix_server::server::run(config)) {
-                Ok(()) => ExitCode::SUCCESS,
+            let result = runtime.block_on(reelix_server::server::run(config));
+            // Background tasks are done by now; don't wait long for stragglers.
+            runtime.shutdown_timeout(std::time::Duration::from_secs(5));
+            match result {
+                // A self-update replaced the files: start the new binary (see `lifecycle`).
+                Ok(()) => match lifecycle::take_restart() {
+                    Some(exe) => lifecycle::restart(&exe),
+                    None => ExitCode::SUCCESS,
+                },
                 Err(e) => {
                     // Logging may not be initialised yet, so always print to stderr too.
                     tracing::error!("fatal: {e:#}");

@@ -171,7 +171,7 @@ Running it means **one binary, one database, one config, one login, one API**. Y
 - Task scheduler UI showing run time, next run and manual trigger.
 - Event log and activity history.
 - Backups: scheduled and manual, as a ZIP of the DB and config, with restore.
-- Updates: in-app notice, plus a Docker tag strategy.
+- Updates: in-app notice and in-place install with restart for release installs (`install.json` marks the install kind), plus a Docker tag strategy.
 
 ---
 

@@ -23,7 +23,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 /// Event bus capacity per subscriber.
 const EVENT_BUS_CAPACITY: usize = 1024;
 
-/// Runs the server until Ctrl-C / SIGTERM.
+/// Runs the server until Ctrl-C / SIGTERM (or [`crate::lifecycle::shutdown_token`] is cancelled).
 pub async fn run(config: Config) -> anyhow::Result<()> {
     for dir in [&config.data_dir, &config.backup_dir, &config.log_dir] {
         std::fs::create_dir_all(dir).with_context(|| format!("creating directory {}", dir.display()))?;
@@ -42,6 +42,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         }
         None => {}
     }
+    // Leftovers of the last self-update (the replaced files, an interrupted download).
+    crate::maintenance::self_update::startup().await;
 
     // A restore staged before the last shutdown replaces the database before it is opened.
     crate::maintenance::apply_pending_restore(&config).await;
@@ -71,7 +73,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     }
     let jobs = jobs.build();
     let queue = jobs.queue();
-    let cancel = CancellationToken::new();
+    // Shared with `lifecycle`, so a self-update restart or a Windows service Stop shuts down too.
+    let cancel = crate::lifecycle::shutdown_token();
     let jobs_handle = jobs.start(cancel.clone());
     let direct = Arc::new(reelix_direct::DirectService::new(
         db.clone(),

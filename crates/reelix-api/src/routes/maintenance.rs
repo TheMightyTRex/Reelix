@@ -18,9 +18,9 @@ use futures::stream::{BoxStream, StreamExt};
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::system::{
     BackupDto, BackupKind, BackupSettings, BackupsOverview, CalendarView, DateFormat, FirstDayOfWeek,
-    InstallKind, LibraryView, LogEntryDto, LogFileDto, LogLevel, LogsDto, PendingRestoreDto, ReleaseAssetDto,
-    ReleaseDto, ServerSettingsDto, ServerSettingsValues, TimeFormat, UiSettings, UpdateSettings,
-    UpdateStatusDto,
+    InstallKind, InstallUpdateRequest, LibraryView, LogEntryDto, LogFileDto, LogLevel, LogsDto,
+    PendingRestoreDto, ReleaseAssetDto, ReleaseDto, SelfUpdateDto, SelfUpdateState, ServerSettingsDto,
+    ServerSettingsValues, TimeFormat, UiSettings, UpdateSettings, UpdateStatusDto,
 };
 use reelix_core::Permissions;
 use serde::Deserialize;
@@ -72,6 +72,9 @@ pub trait MaintenanceBackend: Send + Sync {
     /// Cached status; `force` checks GitHub now.
     fn update_status(&self, force: bool) -> BoxFuture<'_, ApiResult<UpdateStatusDto>>;
     fn set_update_settings(&self, settings: UpdateSettings) -> BoxFuture<'_, ApiResult<UpdateStatusDto>>;
+    /// Starts downloading and installing `version` in the background (it must be a cached release
+    /// newer than the running version); returns the status with the install under way.
+    fn install_update(&self, version: String) -> BoxFuture<'_, ApiResult<UpdateStatusDto>>;
 
     fn server_settings(&self) -> BoxFuture<'_, ApiResult<ServerSettingsDto>>;
     fn set_server_settings(
@@ -103,6 +106,7 @@ pub fn routes() -> Router<AppState> {
         .route("/system/updates", get(update_status))
         .route("/system/updates/check", post(check_updates))
         .route("/system/updates/settings", put(update_update_settings))
+        .route("/system/updates/install", post(install_update))
         .route(
             "/system/settings",
             get(server_settings).put(update_server_settings),
@@ -127,6 +131,7 @@ pub fn routes() -> Router<AppState> {
         update_status,
         check_updates,
         update_update_settings,
+        install_update,
         server_settings,
         update_server_settings,
         ui_settings,
@@ -147,6 +152,9 @@ pub fn routes() -> Router<AppState> {
         ReleaseDto,
         UpdateStatusDto,
         UpdateSettings,
+        SelfUpdateDto,
+        SelfUpdateState,
+        InstallUpdateRequest,
         ServerSettingsValues,
         ServerSettingsDto,
         DateFormat,
@@ -459,6 +467,33 @@ pub async fn update_update_settings(
 ) -> ApiResult<ApiJson<UpdateStatusDto>> {
     user.require(Permissions::ADMIN)?;
     Ok(ApiJson(backend(&state)?.set_update_settings(body).await?))
+}
+
+/// Downloads, verifies and installs a newer release, then restarts Reelix (admin).
+///
+/// A backup is made before any file is replaced. The install runs in the background; poll
+/// `GET /system/updates` for `self_update.state`.
+#[utoipa::path(post, path = "/api/v1/system/updates/install", tag = "system",
+    request_body = InstallUpdateRequest,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 202, description = "Install started", body = UpdateStatusDto),
+        (status = 400, description = "Unknown release, or it has no download for this platform", body = ApiErrorBody),
+        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 409, description = "Not newer than the running version, self-update unsupported, or an install is already running", body = ApiErrorBody),
+    ))]
+pub async fn install_update(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    body: Bytes,
+) -> ApiResult<Response> {
+    // The body is parsed only after the permission check, so non-admins always get a 403.
+    user.require(Permissions::ADMIN)?;
+    let req: InstallUpdateRequest = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::validation(format!("invalid request body: {e}")))?;
+    let status = backend(&state)?.install_update(req.version.clone()).await?;
+    tracing::warn!(version = %req.version, by = %user.user.username, "update install started");
+    Ok((StatusCode::ACCEPTED, ApiJson(status)).into_response())
 }
 
 // ---------- Server settings ----------

@@ -1201,6 +1201,22 @@ async fn ui_settings_are_per_user_and_maintenance_is_admin_only() {
         .await;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{uri}");
     }
+    // Installing an update is admin-only too, whatever the body says.
+    for body in [json!({"version": "99.0.0"}), json!("not an object")] {
+        let r = call(
+            &app,
+            Method::POST,
+            "/api/v1/system/updates/install",
+            Req {
+                cookie: Some(&bob),
+                csrf: true,
+                body: Some(body),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+    }
 
     // A restore upload from a non-admin is refused before any of the body is read.
     let polled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
