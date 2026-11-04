@@ -3,7 +3,8 @@
 //! blocklist / pending APIs.
 //!
 //! [`SearchService`] is registered as an `AppState` extension; [`jobs::register`] adds the
-//! `search`, `book_search`, `album_search`, `rss_sync` and `process_pending` handlers and tasks.
+//! `search`, `book_search`, `album_search`, `radio_episode_search`, `radio_missing_search`,
+//! `rss_sync` and `process_pending` handlers and tasks.
 
 pub mod context;
 pub mod dto;
@@ -34,6 +35,7 @@ use reelix_indexers::{ReleaseInfo, SearchQuery};
 use reelix_library::{LibraryError, LibraryService};
 use reelix_music::{MusicError, MusicService};
 use reelix_providers::ProviderService;
+use reelix_radio::{RadioError, RadioService};
 
 pub use context::{Eval, Evaluator, IndexerInfo, Shared, Target};
 pub use grab::GrabTarget;
@@ -66,6 +68,17 @@ impl From<BooksError> for SearchError {
             BooksError::NotFound(m) => Self::NotFound(m),
             BooksError::Validation(m) | BooksError::Conflict(m) => Self::Validation(m),
             BooksError::Db(d) => Self::Db(d),
+            other => Self::Internal(other.to_string()),
+        }
+    }
+}
+
+impl From<RadioError> for SearchError {
+    fn from(e: RadioError) -> Self {
+        match e {
+            RadioError::NotFound(m) => Self::NotFound(m),
+            RadioError::Validation(m) | RadioError::Conflict(m) => Self::Validation(m),
+            RadioError::Db(d) => Self::Db(d),
             other => Self::Internal(other.to_string()),
         }
     }
@@ -140,6 +153,8 @@ pub struct SearchService {
     /// Book and album searches (set by the server after construction).
     pub(crate) books: OnceLock<Arc<BooksService>>,
     pub(crate) music: OnceLock<Arc<MusicService>>,
+    /// Radio episode searches (set by the server after construction).
+    pub(crate) radio: OnceLock<Arc<RadioService>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -174,6 +189,7 @@ impl SearchService {
             rss_last: Mutex::new(None),
             books: OnceLock::new(),
             music: OnceLock::new(),
+            radio: OnceLock::new(),
         }
     }
 
@@ -181,6 +197,11 @@ impl SearchService {
     pub fn set_content(&self, books: Arc<BooksService>, music: Arc<MusicService>) {
         let _ = self.books.set(books);
         let _ = self.music.set(music);
+    }
+
+    /// Connects the radio service (server build phase). Later calls are ignored.
+    pub fn set_radio(&self, radio: Arc<RadioService>) {
+        let _ = self.radio.set(radio);
     }
 
     pub(crate) fn emit(&self, entity: &str, action: &str, id: i64) {
@@ -232,6 +253,18 @@ impl SearchService {
             .ok_or_else(|| SearchError::Unavailable("music is not available".into()))
     }
 
+    pub(crate) fn radio_svc(&self) -> Result<&Arc<RadioService>> {
+        self.radio
+            .get()
+            .ok_or_else(|| SearchError::Unavailable("radio is not available".into()))
+    }
+
+    /// One radio episode (any status without a file).
+    pub(crate) async fn radio_target(&self, episode_id: i64) -> Result<Target> {
+        let t = self.radio_svc()?.search_target(episode_id).await?;
+        Ok(Target::Radio(Box::new(t)))
+    }
+
     /// One format of a book (the author needs a profile for it).
     pub(crate) async fn book_target(&self, id: i64, format: BookFormat) -> Result<Target> {
         let t = self.books_svc()?.search_api().target(id, format).await?;
@@ -243,10 +276,13 @@ impl SearchService {
         Ok(Target::Album(Box::new(t)))
     }
 
-    /// The book / album target of a content reference.
+    /// The book / album / radio episode target of a content reference.
     pub(crate) async fn content_target(&self, c: &ContentRef) -> Result<Target> {
         if let Some((id, f)) = c.book_ref() {
             return self.book_target(id, f).await;
+        }
+        if let Some(id) = c.radio_episode_id {
+            return self.radio_target(id).await;
         }
         match c.album_id {
             Some(id) => self.album_target(id).await,
@@ -329,6 +365,7 @@ impl SearchService {
                 found
             }
             Target::Album(a) => self.query_all(&[query::album(a)], interactive).await,
+            Target::Radio(r) => self.query_all(&query::radio(r), interactive).await,
         }
     }
 
@@ -413,6 +450,19 @@ impl SearchService {
                         extra.push(context::rejection("mapping", reason));
                     }
                 }
+                Target::Radio(r) => {
+                    c.media_id = Some(r.episode_id());
+                    let parsed = reelix_parser::parse_radio(&info.title);
+                    if let Err(reason) = mapping::map_to_radio(&info, &parsed, r) {
+                        if !interactive {
+                            continue;
+                        }
+                        extra.push(context::rejection("mapping", reason));
+                    }
+                    if !interactive && !r.monitored {
+                        extra.push(context::rejection("monitored", "Episode is not monitored"));
+                    }
+                }
             }
             let decision = ev.evaluate(&c, info.info_hash.as_deref(), kind, extra);
             out.push(Eval {
@@ -473,6 +523,23 @@ impl SearchService {
                 "one of movie_id, series_id + season, episode_id, book_id or album_id is required".into(),
             ));
         };
+        self.interactive_target(target, season, episodes).await
+    }
+
+    /// Interactive search for one radio episode (`GET /radio/episodes/{id}/releases`): every
+    /// release from interactive-enabled indexers in the radio categories, with its decision,
+    /// cached for [`Self::grab_request`] like [`Self::interactive`].
+    pub async fn interactive_radio(&self, episode_id: i64) -> Result<Vec<ReleaseDto>> {
+        let target = self.radio_target(episode_id).await?;
+        self.interactive_target(target, None, Vec::new()).await
+    }
+
+    async fn interactive_target(
+        &self,
+        target: Target,
+        season: Option<u32>,
+        episodes: Vec<EpisodeDto>,
+    ) -> Result<Vec<ReleaseDto>> {
         let mut shared = self.shared().await?;
         if target.is_content() {
             shared.load_content(&self.db).await?;
@@ -879,6 +946,26 @@ impl SearchService {
             .collect();
         let sum = self.auto_targets(targets, throttle, stop).await?;
         tracing::info!(kind = ?req.kind, searched = sum.searched, grabbed = sum.grabbed, pending = sum.pending, "album search finished");
+        Ok(sum)
+    }
+
+    /// Executes a `radio_episode_search` job payload: episode ids (`item`), show ids (`parent`)
+    /// or every wanted episode (`missing` / `cutoff`), per [`RadioService::search_targets`].
+    pub async fn run_radio_search(
+        &self,
+        req: &reelix_api_types::radio::RadioSearchRequest,
+        stop: &(dyn Fn() -> bool + Sync),
+    ) -> Result<SearchSummary> {
+        let targets = self.radio_svc()?.search_targets(req).await?;
+        let throttle = matches!(req.kind, ContentSearchKind::Missing | ContentSearchKind::Cutoff);
+        let targets = targets
+            .into_iter()
+            // Shows and the wanted list only cover monitored episodes.
+            .filter(|t| req.kind == ContentSearchKind::Item || t.monitored)
+            .map(|t| Target::Radio(Box::new(t)))
+            .collect();
+        let sum = self.auto_targets(targets, throttle, stop).await?;
+        tracing::info!(kind = ?req.kind, searched = sum.searched, grabbed = sum.grabbed, pending = sum.pending, "radio search finished");
         Ok(sum)
     }
 

@@ -254,3 +254,37 @@ pub async fn show_ids(db: &Db, ids: &[i64]) -> Result<Vec<i64>> {
     }
     Ok(q.fetch_all(db.pool()).await?)
 }
+
+/// Records the file filed for an episode (`None` clears it).
+pub async fn set_filed(db: &Db, id: i64, path: Option<&str>) -> Result<()> {
+    sqlx::query("UPDATE radio_episodes SET filed_path = ?, filed_at = ? WHERE id = ?")
+        .bind(path)
+        .bind(path.map(|_| now_ms()))
+        .bind(id)
+        .execute(db.pool())
+        .await?;
+    Ok(())
+}
+
+/// `(episode id, filed path)` of episodes with a filed file, of `ids` (`None` = all).
+pub async fn filed(db: &Db, ids: Option<&[i64]>) -> Result<Vec<(i64, String)>> {
+    let sql = match ids {
+        Some(ids) => format!(
+            "SELECT id, filed_path FROM radio_episodes WHERE filed_path IS NOT NULL AND id IN ({})",
+            placeholders(ids.len())
+        ),
+        None => "SELECT id, filed_path FROM radio_episodes WHERE filed_path IS NOT NULL".to_owned(),
+    };
+    if ids.is_some_and(<[i64]>::is_empty) {
+        return Ok(Vec::new());
+    }
+    let mut q = sqlx::query(&sql);
+    for id in ids.unwrap_or_default() {
+        q = q.bind(id);
+    }
+    q.fetch_all(db.pool())
+        .await?
+        .iter()
+        .map(|r| Ok((r.try_get("id")?, r.try_get("filed_path")?)))
+        .collect()
+}

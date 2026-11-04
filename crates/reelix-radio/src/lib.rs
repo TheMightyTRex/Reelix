@@ -7,36 +7,45 @@
 //! and the first broadcast ([`status`]). Reading the podcast library and matching its files is
 //! behind [`RadioLibrarySync`] (a no-op until an Audiobookshelf implementation is attached).
 //! Radio root folders share `root_folders` with the library via
-//! [`reelix_library::content_roots`]. See `docs/radio.md`.
+//! [`reelix_library::content_roots`]. Indexer searches start from [`RadioService::search_targets`]
+//! ([`search`]); finished downloads are filed into the podcast library by
+//! [`RadioService::file_download`] ([`filing`]). See `docs/radio.md`.
 
 pub mod artwork;
 mod convert;
 mod error;
+pub mod filing;
 pub mod jobs;
 mod library;
 mod matching;
+pub mod naming;
 pub mod provider;
 pub mod providers;
 mod refresh;
 mod repo;
 mod root_folders;
+pub mod search;
 mod service;
 mod settings;
 mod shows;
 pub mod status;
 pub mod svg;
+pub mod tags;
 mod wanted;
 mod xml;
 
 pub use artwork::{ImageKind, StoredImage};
 pub use error::{RadioError, Result};
+pub use filing::{FiledEpisode, FilingOutcome};
 pub use library::{LibrarySyncSummary, NewEpisodeFile, NoopLibrarySync, RadioLibrarySync, clean_title};
 pub use matching::source_ids;
+pub use naming::EpisodeNaming;
 pub use provider::{
     EpisodeData, ProviderError, ProviderRegistry, RadioProvider, SearchPrefs, SeriesData, ShowData,
     ShowFetch, ShowHit, StationData,
 };
 pub use refresh::RefreshSummary;
+pub use search::{RadioTarget, match_release};
 pub use service::{RadioDeps, RadioService};
 pub use settings::check_folder as check_library_folder;
 pub use wanted::{WantedEpisode, episode_file_name};
@@ -49,11 +58,17 @@ pub mod kinds {
     pub const RADIO_FEED_SYNC: &str = "radio_feed_sync";
     /// Reads the Audiobookshelf podcast library and re-matches ([`crate::RadioLibrarySync`]).
     pub const RADIO_LIBRARY_SYNC: &str = "radio_library_sync";
+    /// Indexer search for episodes (payload `RadioSearchRequest`); handled by the pipeline.
+    pub const RADIO_EPISODE_SEARCH: &str = "radio_episode_search";
+    /// Indexer search for every wanted episode, every 6 hours; handled by the pipeline.
+    pub const RADIO_MISSING_SEARCH: &str = "radio_missing_search";
 }
 
 /// Settings keys.
 pub mod keys {
     pub const SETTINGS: &str = "radio.settings";
+    /// Naming of filed episodes (`RadioNamingDto`).
+    pub const NAMING: &str = "radio.naming";
     /// Unix ms of the last finished library sync (set by [`crate::RadioService::mark_library_synced`]).
     pub const LIBRARY_SYNCED_AT: &str = "radio.library_synced_at";
 }

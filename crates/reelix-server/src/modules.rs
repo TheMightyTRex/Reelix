@@ -240,9 +240,11 @@ impl Modules {
             library.clone(),
             providers.clone(),
         ));
-        // books / music hand-offs (search, import, music import lists)
+        // books / music / radio hand-offs (search, import and filing, music import lists)
         search.set_content(books.clone(), music.clone());
         activity.set_content(books.clone(), music.clone());
+        search.set_radio(radio.clone());
+        activity.set_radio(radio.clone());
         integrations.set_music(music.clone());
         // maintenance: backups, logs, update checks, server settings
         let maintenance =

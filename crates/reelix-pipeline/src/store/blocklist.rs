@@ -61,6 +61,7 @@ struct Row {
     book_id: Option<i64>,
     book_format: Option<String>,
     album_id: Option<i64>,
+    radio_episode_id: Option<i64>,
 }
 
 impl From<Row> for BlocklistEntry {
@@ -80,19 +81,25 @@ impl From<Row> for BlocklistEntry {
             torrent_info_hash: r.torrent_info_hash,
             message: r.message,
             date: from_ms(r.date),
-            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
+            content: ContentRef::from_columns(
+                r.book_id,
+                r.book_format.as_deref(),
+                r.album_id,
+                r.radio_episode_id,
+            ),
         }
     }
 }
 
 const COLS: &str = "id, movie_id, series_id, episode_ids, source_title, quality, languages, protocol, \
-    indexer, size, publish_date, torrent_info_hash, message, date, book_id, book_format, album_id";
+    indexer, size, publish_date, torrent_info_hash, message, date, book_id, book_format, album_id, \
+    radio_episode_id";
 
 pub async fn insert(db: &Db, b: &NewBlocklist) -> Result<i64> {
     let id = sqlx::query_scalar(
         "INSERT INTO blocklist (movie_id, series_id, episode_ids, source_title, quality, languages, protocol, \
-         indexer, size, publish_date, torrent_info_hash, message, date, book_id, book_format, album_id) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         indexer, size, publish_date, torrent_info_hash, message, date, book_id, book_format, album_id, \
+         radio_episode_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(b.movie_id)
     .bind(b.series_id)
@@ -110,6 +117,7 @@ pub async fn insert(db: &Db, b: &NewBlocklist) -> Result<i64> {
     .bind(b.content.book_id)
     .bind(b.content.format_str())
     .bind(b.content.album_id)
+    .bind(b.content.radio_episode_id)
     .fetch_one(db.pool())
     .await?;
     Ok(id)
@@ -146,19 +154,21 @@ pub async fn for_media(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-/// Entries for one book format (a book's entries without a format count for every format) or
-/// one album.
+/// Entries for one book format (a book's entries without a format count for every format), one
+/// album or one radio episode.
 pub async fn for_content(db: &Db, c: &ContentRef) -> Result<Vec<BlocklistEntry>> {
     if c.is_empty() {
         return Ok(Vec::new());
     }
     let rows: Vec<Row> = sqlx::query_as(&format!(
         "SELECT {COLS} FROM blocklist WHERE (?1 IS NOT NULL AND book_id = ?1 AND (book_format IS NULL OR ?2 IS NULL \
-         OR book_format = ?2)) OR (?3 IS NOT NULL AND album_id = ?3)"
+         OR book_format = ?2)) OR (?3 IS NOT NULL AND album_id = ?3) \
+         OR (?4 IS NOT NULL AND radio_episode_id = ?4)"
     ))
     .bind(c.book_id)
     .bind(c.format_str())
     .bind(c.album_id)
+    .bind(c.radio_episode_id)
     .fetch_all(db.pool())
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())

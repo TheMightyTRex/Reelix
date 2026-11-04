@@ -32,13 +32,13 @@ pub struct FormatRefDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MediaRefDto {
-    /// `movie`, `series`, `book` or `album`.
+    /// `movie`, `series`, `book`, `album` or `radio_episode`.
     pub kind: String,
     /// Movie / series / book / album id.
     pub id: i64,
     pub title: String,
     pub year: Option<i32>,
-    /// Author (book) or artist (album).
+    /// Author (book), artist (album) or show (radio episode).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
     /// Book format the row is about (`ebook` / `audiobook`).
@@ -242,6 +242,9 @@ pub struct HistoryQuery {
     pub author_id: Option<i64>,
     pub album_id: Option<i64>,
     pub artist_id: Option<i64>,
+    /// Rows of one radio episode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radio_episode_id: Option<i64>,
     /// grabbed, imported, download_failed, import_failed, file_deleted, renamed, ignored
     pub event_type: Option<String>,
 }

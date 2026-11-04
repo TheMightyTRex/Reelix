@@ -47,12 +47,15 @@ pub struct GrabbedRelease {
     pub seed_time_minutes: Option<u32>,
 }
 
-/// Book / album reference of a pipeline row (columns from `0010_media_shared.sql`).
+/// Book / album / radio episode reference of a pipeline row (columns from
+/// `0010_media_shared.sql` and `0015_radio_filing.sql`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ContentRef {
     pub book_id: Option<i64>,
     pub book_format: Option<BookFormat>,
     pub album_id: Option<i64>,
+    #[serde(default)]
+    pub radio_episode_id: Option<i64>,
 }
 
 impl ContentRef {
@@ -61,6 +64,7 @@ impl ContentRef {
             book_id: Some(id),
             book_format: Some(format),
             album_id: None,
+            radio_episode_id: None,
         }
     }
 
@@ -71,9 +75,16 @@ impl ContentRef {
         }
     }
 
-    /// Neither a book nor an album.
+    pub fn radio_episode(id: i64) -> Self {
+        Self {
+            radio_episode_id: Some(id),
+            ..Self::default()
+        }
+    }
+
+    /// Neither a book, an album nor a radio episode.
     pub fn is_empty(&self) -> bool {
-        self.book_id.is_none() && self.album_id.is_none()
+        self.book_id.is_none() && self.album_id.is_none() && self.radio_episode_id.is_none()
     }
 
     /// The book and its format (a missing format reads as ebook).
@@ -90,11 +101,13 @@ impl ContentRef {
         book_id: Option<i64>,
         book_format: Option<&str>,
         album_id: Option<i64>,
+        radio_episode_id: Option<i64>,
     ) -> Self {
         Self {
             book_id,
             book_format: book_format.and_then(BookFormat::parse),
             album_id,
+            radio_episode_id,
         }
     }
 }

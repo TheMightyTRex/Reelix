@@ -11,7 +11,7 @@ use reelix_downloaders::DownloadState;
 use reelix_library::import_api::TitleMap;
 
 use super::{ActivityError, ActivityService, Result};
-use crate::search::dto::{album_ref, book_ref, content_ids};
+use crate::search::dto::{album_ref, book_ref, content_ids, radio_ref};
 use crate::store::ContentRef;
 use crate::store::history::{self, HistoryEvent, HistoryFilter};
 use crate::store::tracked::{self, TrackedState};
@@ -37,6 +37,7 @@ pub(crate) struct Refs {
     episodes: HashMap<i64, EpisodeDto>,
     books: HashMap<i64, MediaRefDto>,
     albums: HashMap<i64, MediaRefDto>,
+    radio: HashMap<i64, MediaRefDto>,
 }
 
 impl Refs {
@@ -66,6 +67,7 @@ impl Refs {
             episodes,
             books: HashMap::new(),
             albums: HashMap::new(),
+            radio: HashMap::new(),
         })
     }
 
@@ -75,7 +77,14 @@ impl Refs {
         svc: &ActivityService,
         items: impl Iterator<Item = ContentRef>,
     ) {
-        let (books, albums) = content_ids(items);
+        let (books, albums, radio) = content_ids(items);
+        if let Some(r) = svc.radio.get() {
+            for id in radio {
+                if let Some(x) = radio_ref(r, id).await {
+                    self.radio.insert(id, x);
+                }
+            }
+        }
         if let Some(b) = svc.books.get() {
             for id in books {
                 if let Ok(x) = b.get_book(id).await {
@@ -101,6 +110,9 @@ impl Refs {
     ) -> Option<MediaRefDto> {
         if movie_id.is_some() || series_id.is_some() {
             return self.media(movie_id, series_id);
+        }
+        if let Some(id) = c.radio_episode_id {
+            return self.radio.get(&id).cloned();
         }
         if let Some(id) = c.book_id {
             return self.books.get(&id).cloned().map(|mut m| {
@@ -270,6 +282,7 @@ impl ActivityService {
             author_id: q.author_id,
             album_id: q.album_id,
             artist_id: q.artist_id,
+            radio_episode_id: q.radio_episode_id,
         };
         let (rows, total) = history::list(
             &self.db,

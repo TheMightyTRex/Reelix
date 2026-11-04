@@ -429,6 +429,47 @@ impl Default for RadioSettingsDto {
     }
 }
 
+/// The `radio_episode_search` job payload (queued by `POST /radio/episodes/{id}/search` and
+/// `POST /radio/shows/{id}/search`): episodes (`item`), shows (`parent`) or every wanted
+/// episode (`missing`; `cutoff` is the same for radio, which has no upgrades).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioSearchRequest {
+    pub kind: crate::content::ContentSearchKind,
+    /// Episode ids (`item`) or show ids (`parent`); ignored for `missing`.
+    #[serde(default)]
+    pub ids: Vec<i64>,
+}
+
+/// Naming of filed episodes (`radio.naming`), rendered relative to the podcast library folder.
+///
+/// Tokens: `{Show Title}`, `{Show CleanTitle}`, `{Station Name}`, `{Series:00}`,
+/// `{Episode:00}`, `{Episode Title}`, `{Air Date}` (`2026-11-04`), `{Air Year}`,
+/// `{Quality Title}`. Specials are series 0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct RadioNamingDto {
+    /// Folder of a show, e.g. `{Show Title}`.
+    pub show_folder: String,
+    /// File name of an episode without the extension.
+    pub episode_file: String,
+    /// Write tags (album = show, title, disc = series, track = episode, date, genre `Radio`,
+    /// artist = station, comment = source id) into the filed copy. Tagging needs a copy of its
+    /// own, so the file is copied rather than hard linked; turn it off to hard link.
+    pub write_tags: bool,
+}
+
+impl Default for RadioNamingDto {
+    fn default() -> Self {
+        Self {
+            show_folder: "{Show Title}".into(),
+            episode_file: "{Show Title} - S{Series:00}E{Episode:00} - {Episode Title}".into(),
+            write_tags: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

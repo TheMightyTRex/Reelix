@@ -84,6 +84,12 @@ impl RadioService {
         sync.sync(self).await
     }
 
+    /// Asks the attached [`RadioLibrarySync`] to scan the podcast library (after filing).
+    pub async fn request_library_scan(&self) -> anyhow::Result<()> {
+        let sync = self.library_sync();
+        sync.request_scan().await
+    }
+
     /// One whole sync from what the library holds now: saves `files` (episodes with an audio
     /// file), removes the files no longer there (their episodes return to Wanted or Not
     /// requested), matches files to episodes ([`RadioService::match_library`]) and records

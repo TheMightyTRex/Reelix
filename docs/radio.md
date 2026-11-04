@@ -2,8 +2,8 @@
 
 Radio is its own media type (`ContentKind::Radio`): radio programmes and podcasts that Reelix
 follows, with their series and episodes, matched against an Audiobookshelf podcast library.
-Audiobookshelf is the player; Reelix keeps the list, the statuses and (later) files new
-episodes. The design follows GitHub issue #21.
+Audiobookshelf is the player; Reelix keeps the list and the statuses, and files new
+episodes found on indexers. The design follows GitHub issue #21.
 
 This page describes what exists and where the remaining parts plug in.
 
@@ -31,6 +31,10 @@ This page describes what exists and where the remaining parts plug in.
 | `src/library.rs` | `RadioLibrarySync` trait, `NoopLibrarySync`, `NewEpisodeFile`, file rows, automatic links, review |
 | `src/artwork.rs` | Downloading, storing and reading show artwork and station logos |
 | `src/wanted.rs` | `wanted_episodes`, `episode_file_name` (indexer search / filing hand-off) |
+| `src/search.rs` | `RadioTarget`, `search_targets`, `request_search`, release checks (`match_release`) |
+| `src/filing.rs` | `file_download`: filing finished downloads into the podcast library |
+| `src/naming.rs` | `radio.naming` tokens and templates |
+| `src/tags.rs` | Tags written into filed episodes (lofty) |
 | `src/settings.rs` | `radio.settings` and folder checks (`check_library_folder`) |
 | `src/root_folders.rs` | Root folders of kind `radio` |
 | `src/jobs.rs` | Job handlers and scheduled tasks |
@@ -130,6 +134,7 @@ Registered in `jobs.rs` and listed under System → Tasks.
 | `refresh_radio_shows` | 12 h | `refresh_shows`; scheduled runs skip feed shows (they are read hourly); a payload `{show_ids, manual}` refreshes those shows |
 | `radio_feed_sync` | 1 h | Refreshes shows whose provider `is_feed()` |
 | `radio_library_sync` | 15 min | Calls the attached `RadioLibrarySync` (the Audiobookshelf reader, see (a)) |
+| `radio_episode_search`, `radio_missing_search` | queued, 6 h | Indexer searches, handled by the pipeline (see (d)) |
 
 ## API
 
@@ -328,22 +333,97 @@ reused). Tests: `crates/reelix-api/tests/radio_artwork.rs`, `tests/providers.rs`
 
 ### (d) Indexer search, release parsing and filing
 
-- Categories: `ContentKind::Radio` searches Audio/Other (`reelix_indexers::categories::DEFAULT_RADIO`)
-  and excludes Audio/Video. `content_kind_of` still maps Audio/* to music; adjust it if radio
-  releases must be told apart by category.
-- Quality: radio uses the audiobook family (`QualityFamily::of_content(ContentKind::Radio)` →
-  `Audiobook`); `radio_shows.quality_profile_id` must be an audiobook profile. Download
-  clients put radio in the book category.
-- What to search for: `RadioService::wanted_episodes(Option<&[i64]>)` → `WantedEpisode`
-  (show title, station, filing series number, episode number, title, date, profile, root
-  folder). Add a job kind (e.g. `radio_episode_search`) handled by the pipeline, as
-  `album_search` is for music (`crates/reelix-pipeline/src/search/`), and a
-  `RadioService::request_search` that enqueues it.
-- Release parsing (`Show S20E03`, `Show - Episode title`) belongs in `crates/reelix-parser`.
-- Filing: `episode_file_name(show, series, episode, title, ext)` gives
-  `{Show}/{Show} - S{series:00}E{episode:00} - {Title}.{ext}`; put it under the radio root
-  folder (`root_folder_id`, or `settings().library_folder`), copy with `ffmpeg -c copy` or
-  hard link (never overwrite, never touch a seeding file), tag it, ask Audiobookshelf to scan,
-  then let the next library sync match it (or call `link_file_auto`). The pipeline hand-off
-  for finished downloads follows `MusicService::import_api` in
-  `crates/reelix-music/src/import_api.rs`.
+Built. Radio episodes without a podcast feed can be found on Torznab/Newznab indexers and
+filed into the podcast library.
+
+**Release parsing** (`reelix_parser::parse_radio` → `ParsedRadio`, `crates/reelix-parser/src/radio.rs`):
+`Show S20E03`, `Show - S20E03 - Episode title`, `Show 20x03`, `Show Series 20, Episode 3`,
+`Show - Episode title`, date-based `Show 2026-11-04` / `2026.11.04` / `20261104` /
+`04 Nov 2026`, dotted scene names with a `-GROUP`, a station in front (`BBC.Radio.4.The.Archers…`)
+or in a leading bracket (`[BBC R4]` → `BBC Radio 4`), and audio tags anywhere (`(128kbps)`,
+`[64kbps opus]`, `.mp3`, `AAC`, `WEB`). Quality is of the audiobook family: MP3 →
+`AudiobookMp3`, AAC/M4A/M4B → `AudiobookM4b`, FLAC → `AudiobookFlac`, Opus/Ogg/unknown →
+`UnknownAudiobook`; the codec and bitrate are kept. `ReleaseCandidate::for_radio`
+(`reelix-decision`) builds decision candidates from it.
+
+**What is searched** (`crates/reelix-radio/src/search.rs`): `RadioService::search_targets(&RadioSearchRequest)`
+→ `RadioTarget` (the `WantedEpisode`, the show's quality profile or else the first audiobook
+profile, tags, monitored, length). `item` = the given episodes whatever their status unless they
+have a file (a search by hand); `parent` = wanted episodes of the given shows; `missing`/`cutoff`
+= every wanted episode (`wanted_episodes()`: monitored, broadcast, no file). Episodes Reelix has
+filed whose file still exists (`radio_episodes.filed_path`) are left out until the library sync
+matches them. `RadioTarget::search_terms()`: `Show S20E03`, `Show 2026 11 04`, `Show Episode
+title` (titles like "Episode 3" are skipped). `RadioTarget::check_release(&ParsedRadio)`: the
+show must match (case, punctuation and articles ignored; a station prefix tolerated), then the
+numbers, else the broadcast date (one day either way), else the episode title.
+
+**Pipeline** (`crates/reelix-pipeline`): `Target::Radio`, `ContentRef::radio_episode(id)`
+(column `radio_episode_id` on `history`, `blocklist`, `tracked_downloads`,
+`pending_releases`, migration `0015_radio_filing.sql`). Queries are basic searches in
+`DEFAULT_RADIO` (Audio/Other); releases in movie or book categories are rejected. Scoring uses
+the decision engine with the target's audiobook profile, the audiobook quality definitions
+(size per minute of the episode's length), delay profiles, release profiles, the blocklist and
+the queue, exactly like books and albums. Grabs go to the download client's book category.
+RSS sync first matches releases in Audio/Other, Audio/Audiobook or without categories against
+every wanted, monitored episode (`reelix_radio::match_release`). A failed download is
+blocklisted for the episode and searched again.
+
+| Job | Interval | What it does |
+|---|---|---|
+| `radio_episode_search` | queued | Payload `RadioSearchRequest {kind, ids}`; `RadioService::request_search` enqueues it |
+| `radio_missing_search` | 6 h | Every wanted episode |
+
+**Filing** (`crates/reelix-radio/src/filing.rs`, `RadioService::file_download`, called by the
+pipeline's completed download handling, retried from the queue like books and albums):
+
+1. The episode's audio file in the download (one file; of several, the one whose name is the
+   episode, else one with at least 80 % of the bytes; samples and hidden files skipped).
+2. Destination: the naming settings under the show's radio root folder, else the radio
+   settings' `library_folder` (checked: mounted and writable). An existing file is never
+   overwritten: the import fails with "… already exists; Reelix never overwrites …".
+3. Staged next to the destination (`.{name}.reelix-partial`), then hard linked into place
+   (no replace; a rename after an existence check on file systems without hard links).
+   With tag writing on (the default) the staged file is a copy, so a seeding source is never
+   changed; with it off the file is hard linked when possible (or copied, per the pipeline's
+   transfer mode). `Move` removes the source afterwards. Audio is never re-encoded; only
+   MPEG-TS captures (`.ts`, `.mts`, `.m2ts`) are remuxed with `ffmpeg -c copy` into `.mka`
+   (`REELIX_FFMPEG` or `ffmpeg` on the path).
+4. Tags (lofty, `src/tags.rs`), on the staged copy only: album = show, title, disc = series
+   (specials 0), track = episode, date (first broadcast, `YYYY-MM-DD`), genre `Radio`, artist =
+   station (else the show's author), comment = `provider:guid` (else the external id). A format
+   lofty cannot tag is filed without tags (logged).
+5. `radio_episodes.filed_path`/`filed_at` are set, `RadioLibrarySync::request_scan()` is called,
+   and the pipeline writes the `imported` history row (with `radio_episode_id`) and the import
+   notification. The episode becomes In library when the next library sync matches the file.
+
+```rust
+#[async_trait]
+pub trait RadioLibrarySync: Send + Sync + 'static {
+    async fn sync(&self, svc: &RadioService) -> anyhow::Result<LibrarySyncSummary>;
+    /// Asks the player to scan the podcast library (called after filing).
+    async fn request_scan(&self) -> anyhow::Result<()> { Ok(()) }
+}
+```
+
+**Naming** (`radio.naming`, `RadioNamingDto`, `src/naming.rs`): `show_folder` (default
+`{Show Title}`), `episode_file` (default `{Show Title} - S{Series:00}E{Episode:00} - {Episode Title}`),
+`write_tags` (default on). Tokens: `{Show Title}`, `{Show CleanTitle}`, `{Station Name}`,
+`{Series:00}`, `{Episode:00}`, `{Episode Title}`, `{Air Date}`, `{Air Year}`,
+`{Quality Title}`. The defaults give the same path as `episode_file_name`.
+
+**API** (`MANAGE_LIBRARY`; naming `ADMIN`):
+
+| Method and path | What |
+|---|---|
+| `POST /radio/episodes/{id}/search` | Queues `radio_episode_search` for the episode (202 `EnqueuedJob`) |
+| `POST /radio/shows/{id}/search` | Queues it for the show's wanted episodes |
+| `GET /radio/episodes/{id}/releases` | Interactive search: `Vec<ReleaseDto>` with decisions, best first; grab with `POST /releases/grab` |
+| `GET/PUT /radio/naming` | `RadioNamingDto` |
+
+Queue, history and blocklist rows of radio episodes carry `media.kind = "radio_episode"`
+(title `S20E03 - Title`, subtitle the show); `GET /history?radio_episode_id=` filters them.
+
+Not built yet: manual import of an arbitrary folder for a radio episode (retrying a queue item
+works), a profile check at filing time (the release was already scored), and telling radio
+apart from music by category in `content_kind_of` (radio releases are recognised by matching
+wanted episodes instead).

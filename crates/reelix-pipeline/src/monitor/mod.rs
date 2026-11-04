@@ -190,6 +190,8 @@ pub struct ActivityService {
     /// Book and album imports (set by the server after construction).
     pub(crate) books: OnceLock<Arc<BooksService>>,
     pub(crate) music: OnceLock<Arc<MusicService>>,
+    /// Radio episode filing (set by the server after construction).
+    pub(crate) radio: OnceLock<Arc<reelix_radio::RadioService>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -227,6 +229,7 @@ impl ActivityService {
             queue: OnceLock::new(),
             books: OnceLock::new(),
             music: OnceLock::new(),
+            radio: OnceLock::new(),
         }
     }
 
@@ -239,6 +242,11 @@ impl ActivityService {
     pub fn set_content(&self, books: Arc<BooksService>, music: Arc<MusicService>) {
         let _ = self.books.set(books);
         let _ = self.music.set(music);
+    }
+
+    /// Connects the radio service (server build phase). Later calls are ignored.
+    pub fn set_radio(&self, radio: Arc<reelix_radio::RadioService>) {
+        let _ = self.radio.set(radio);
     }
 
     pub fn db(&self) -> &Db {

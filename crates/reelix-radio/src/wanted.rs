@@ -1,12 +1,12 @@
 //! Hand-offs for getting episodes that have no podcast feed: the wanted list an indexer
 //! search starts from, and the file name filing uses.
 //!
-//! The indexer search (pipeline), release parsing (`Show S20E03`, `Show - Episode title`) and
-//! filing into the podcast library build on [`RadioService::wanted_episodes`] and
-//! [`episode_file_name`]; see `docs/radio.md`.
+//! The indexer search ([`crate::search`], run by the pipeline), release parsing
+//! (`reelix_parser::parse_radio`) and filing into the podcast library ([`crate::filing`]) build
+//! on [`RadioService::wanted_episodes`] and [`episode_file_name`]; see `docs/radio.md`.
 
 use chrono::{DateTime, Utc};
-use reelix_api_types::radio::RadioEpisodeStatus;
+use reelix_api_types::radio::{RadioEpisodeDto, RadioEpisodeStatus, RadioShowDto};
 use reelix_import::naming::{NamingConfig, sanitize};
 
 use crate::error::Result;
@@ -40,23 +40,30 @@ impl RadioService {
                 if e.status != RadioEpisodeStatus::Wanted {
                     continue;
                 }
-                out.push(WantedEpisode {
-                    episode_id: e.id,
-                    show_id: s.id,
-                    show_title: s.title.clone(),
-                    station_name: s.station_name.clone(),
-                    series_number: filing_series_number(e.series_kind, e.series_number),
-                    number: e.number,
-                    title: e.title,
-                    first_broadcast: e.first_broadcast,
-                    external_id: e.external_id,
-                    quality_profile_id: s.quality_profile_id,
-                    root_folder_id: s.root_folder_id,
-                });
+                out.push(WantedEpisode::of(&s, e));
             }
         }
         out.sort_by_key(|w| (w.first_broadcast.is_none(), w.first_broadcast, w.episode_id));
         Ok(out)
+    }
+}
+
+impl WantedEpisode {
+    /// The search / filing facts of an episode of `show` (whatever its status).
+    pub(crate) fn of(show: &RadioShowDto, e: RadioEpisodeDto) -> Self {
+        Self {
+            episode_id: e.id,
+            show_id: show.id,
+            show_title: show.title.clone(),
+            station_name: show.station_name.clone(),
+            series_number: filing_series_number(e.series_kind, e.series_number),
+            number: e.number,
+            title: e.title,
+            first_broadcast: e.first_broadcast,
+            external_id: e.external_id,
+            quality_profile_id: show.quality_profile_id,
+            root_folder_id: show.root_folder_id,
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 //! Radio: shows with their series and episodes, hand-set file matches, provider search and
-//! preview, stations, the podcast library review, radio root folders and radio settings.
+//! preview, indexer searches (automatic and interactive), stations, the podcast library
+//! review, radio root folders, radio settings and the naming of filed episodes.
 //!
 //! Reads and writes need `MANAGE_LIBRARY`, as for the other media types; radio settings and
 //! root-folder changes need `ADMIN`. DTOs: `reelix_api_types::radio`.
@@ -11,16 +12,19 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
+use reelix_api_types::content::ContentSearchKind;
 use reelix_api_types::content::{ContentRootFolderDto, CreateContentRootFolderRequest};
 use reelix_api_types::library::Paged;
+use reelix_api_types::pipeline::ReleaseDto;
 use reelix_api_types::radio::{
     AddRadioShowRequest, RadioClearFileQuery, RadioEpisodeDto, RadioEpisodeFileRequest,
-    RadioLibraryReviewDto, RadioPreviewQuery, RadioProviderDto, RadioSearchQuery, RadioSettingsDto,
-    RadioShowDto, RadioShowEdit, RadioShowEpisodesDto, RadioShowHitDto, RadioShowListQuery,
-    RadioShowPreviewDto, RadioStationDto,
+    RadioLibraryReviewDto, RadioNamingDto, RadioPreviewQuery, RadioProviderDto, RadioSearchQuery,
+    RadioSearchRequest, RadioSettingsDto, RadioShowDto, RadioShowEdit, RadioShowEpisodesDto, RadioShowHitDto,
+    RadioShowListQuery, RadioShowPreviewDto, RadioStationDto,
 };
 use reelix_api_types::{ApiErrorBody, EnqueuedJob};
 use reelix_core::Permissions;
+use reelix_pipeline::search::SearchService;
 use reelix_radio::{ProviderError, RadioError, RadioService, StoredImage};
 use utoipa::OpenApi;
 
@@ -39,7 +43,10 @@ pub fn routes() -> Router<AppState> {
         .route("/radio/shows/{id}/episodes", get(show_episodes))
         .route("/radio/shows/{id}/artwork", get(show_artwork))
         .route("/radio/shows/{id}/refresh", post(refresh_show))
+        .route("/radio/shows/{id}/search", post(search_show))
         .route("/radio/episodes/{id}", get(get_episode))
+        .route("/radio/episodes/{id}/search", post(search_episode))
+        .route("/radio/episodes/{id}/releases", get(episode_releases))
         .route(
             "/radio/episodes/{id}/file",
             put(set_episode_file).delete(clear_episode_file),
@@ -53,6 +60,7 @@ pub fn routes() -> Router<AppState> {
         .route("/radio/rootfolders", get(list_root_folders).post(add_root_folder))
         .route("/radio/rootfolders/{id}", delete(delete_root_folder))
         .route("/radio/settings", get(get_settings).put(put_settings))
+        .route("/radio/naming", get(get_naming).put(put_naming))
 }
 
 #[derive(OpenApi)]
@@ -61,6 +69,7 @@ pub fn routes() -> Router<AppState> {
         list_shows, add_show, get_show, edit_show, delete_show, show_episodes, show_artwork, refresh_show,
         get_episode, set_episode_file, clear_episode_file, search, preview, stations, station_logo, providers,
         library_review, list_root_folders, add_root_folder, delete_root_folder, get_settings, put_settings,
+        search_show, search_episode, episode_releases, get_naming, put_naming,
     ),
     components(schemas(
         reelix_api_types::radio::RadioFollow,
@@ -84,6 +93,8 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::radio::RadioLibraryReviewDto,
         reelix_api_types::radio::RadioLibraryShowDto,
         reelix_api_types::radio::RadioSettingsDto,
+        reelix_api_types::radio::RadioSearchRequest,
+        reelix_api_types::radio::RadioNamingDto,
         reelix_api_types::content::ContentRootFolderDto,
         reelix_api_types::content::CreateContentRootFolderRequest,
     )),
@@ -296,7 +307,77 @@ pub async fn refresh_show(
     Ok(accepted(s.queue_refresh(vec![id]).await?))
 }
 
+/// Queues an indexer search for the show's wanted episodes (job `radio_episode_search`).
+#[utoipa::path(post, path = "/api/v1/radio/shows/{id}/search", tag = "radio",
+    params(("id" = i64, Path, description = "Show id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 202, description = "Queued", body = EnqueuedJob),
+        (status = 403, description = "Requires MANAGE_LIBRARY", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn search_show(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Response> {
+    require_lib(&user)?;
+    let job = svc(&state)?
+        .request_search(RadioSearchRequest {
+            kind: ContentSearchKind::Parent,
+            ids: vec![id],
+        })
+        .await?;
+    Ok(accepted(job))
+}
+
 // ---------------- episodes ----------------
+
+/// Queues an indexer search for one episode (job `radio_episode_search`); unmonitored episodes
+/// can be searched by hand, episodes with a file are skipped.
+#[utoipa::path(post, path = "/api/v1/radio/episodes/{id}/search", tag = "radio",
+    params(("id" = i64, Path, description = "Episode id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 202, description = "Queued", body = EnqueuedJob),
+        (status = 403, description = "Requires MANAGE_LIBRARY", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn search_episode(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Response> {
+    require_lib(&user)?;
+    let job = svc(&state)?
+        .request_search(RadioSearchRequest {
+            kind: ContentSearchKind::Item,
+            ids: vec![id],
+        })
+        .await?;
+    Ok(accepted(job))
+}
+
+/// Interactive search for one episode: every release from interactive-enabled indexers in the
+/// radio categories, with its decision, best first. Grab one with `POST /releases/grab`.
+#[utoipa::path(get, path = "/api/v1/radio/episodes/{id}/releases", tag = "radio",
+    params(("id" = i64, Path, description = "Episode id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Releases, best first", body = Vec<ReleaseDto>),
+        (status = 400, description = "The episode already has a file", body = ApiErrorBody),
+        (status = 403, description = "Requires MANAGE_LIBRARY", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn episode_releases(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<ApiJson<Vec<ReleaseDto>>> {
+    require_lib(&user)?;
+    let search = state.ext::<SearchService>()?;
+    Ok(ApiJson(search.interactive_radio(id).await?))
+}
 
 /// One episode with its matched library file.
 #[utoipa::path(get, path = "/api/v1/radio/episodes/{id}", tag = "radio",
@@ -518,4 +599,38 @@ pub async fn put_settings(
 ) -> ApiResult<ApiJson<RadioSettingsDto>> {
     require_admin(&user)?;
     Ok(ApiJson(svc(&state)?.set_settings(s).await?))
+}
+
+// ---------------- naming ----------------
+
+/// Naming of filed episodes (show folder, episode file, tag writing).
+#[utoipa::path(get, path = "/api/v1/radio/naming", tag = "radio",
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Naming", body = RadioNamingDto),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn get_naming(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> ApiResult<ApiJson<RadioNamingDto>> {
+    require_admin(&user)?;
+    Ok(ApiJson(svc(&state)?.naming().await?))
+}
+
+/// Validates (non-empty, known tokens) and stores the naming of filed episodes.
+#[utoipa::path(put, path = "/api/v1/radio/naming", tag = "radio", request_body = RadioNamingDto,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Saved", body = RadioNamingDto),
+        (status = 400, description = "Empty template or unknown token", body = ApiErrorBody),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn put_naming(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(n): ApiJson<RadioNamingDto>,
+) -> ApiResult<ApiJson<RadioNamingDto>> {
+    require_admin(&user)?;
+    Ok(ApiJson(svc(&state)?.set_naming(n).await?))
 }
