@@ -265,9 +265,12 @@ impl DownloadClient for Blackhole {
     }
 
     /// `books`/`music` when the matching watch folder is set; otherwise the main watch folder.
+    /// Radio episodes go with books (spoken-word audio, played in Audiobookshelf).
     fn category_for_kind(&self, kind: ContentKind) -> Option<String> {
         let (folder, cat) = match kind {
-            ContentKind::Ebook | ContentKind::Audiobook => (&self.settings.book_folder, BOOK_CATEGORY),
+            ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Radio => {
+                (&self.settings.book_folder, BOOK_CATEGORY)
+            }
             ContentKind::Music => (&self.settings.music_folder, MUSIC_CATEGORY),
             ContentKind::Movie | ContentKind::Series => return None,
         };

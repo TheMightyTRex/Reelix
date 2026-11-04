@@ -172,12 +172,14 @@ impl MediaSummary {
         s
     }
 
-    /// `Ebook`, `Audiobook` or `Album` for books and music (`None` for movies and series).
+    /// `Ebook`, `Audiobook`, `Album` or `Radio episode` for books, music and radio (`None` for
+    /// movies and series).
     pub fn content_label(&self) -> Option<&'static str> {
         Some(match self.content? {
             ContentKind::Ebook => "Ebook",
             ContentKind::Audiobook => "Audiobook",
             ContentKind::Music => "Album",
+            ContentKind::Radio => "Radio episode",
             ContentKind::Movie | ContentKind::Series => return None,
         })
     }

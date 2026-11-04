@@ -37,6 +37,7 @@ reelix-mediaserver.workspace = true
 reelix-metadata.workspace = true
 reelix-migrate.workspace = true
 reelix-music.workspace = true
+reelix-radio.workspace = true
 reelix-notify.workspace = true
 reelix-parser.workspace = true
 reelix-providers.workspace = true

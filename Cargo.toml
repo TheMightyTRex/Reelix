@@ -27,6 +27,7 @@ default-members = [
     "crates/reelix-migrate",
     "crates/reelix-books",
     "crates/reelix-music",
+    "crates/reelix-radio",
 ]
 
 [workspace.package]
@@ -59,6 +60,7 @@ reelix-requests = { path = "crates/reelix-requests" }
 reelix-pipeline = { path = "crates/reelix-pipeline" }
 reelix-books = { path = "crates/reelix-books" }
 reelix-music = { path = "crates/reelix-music" }
+reelix-radio = { path = "crates/reelix-radio" }
 
 anyhow = "1"
 argon2 = "0.5"

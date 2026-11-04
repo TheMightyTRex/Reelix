@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>The News &amp; Quiz</title>
+    <link>https://example.com/newsquiz</link>
+    <description><![CDATA[<p>Topical comedy&nbsp;panel show.</p><p>Every Friday.</p>]]></description>
+    <itunes:author>Example Radio</itunes:author>
+    <image><url>https://example.com/small.jpg</url></image>
+    <itunes:image href="https://example.com/art.jpg"/>
+    <item>
+      <title>Series 2, Episode 2</title>
+      <guid isPermaLink="false">nq-s2e2</guid>
+      <pubDate>Fri, 12 Jan 2024 18:30:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/nq-s2e2.mp3" length="27000000" type="audio/mpeg"/>
+      <itunes:duration>00:28:05</itunes:duration>
+      <itunes:season>2</itunes:season>
+      <itunes:episode>2</itunes:episode>
+      <itunes:episodeType>full</itunes:episodeType>
+      <description>Guests &amp; jokes&nbsp;&mdash; the week&#8217;s news.</description>
+    </item>
+    <item>
+      <title>Series 2, Episode 1</title>
+      <guid>nq-s2e1</guid>
+      <pubDate>Fri, 05 Jan 2024 18:30:00 GMT</pubDate>
+      <enclosure url="https://cdn.example.com/nq-s2e1.mp3" length="27000000" type="audio/mpeg"/>
+      <itunes:duration>1685</itunes:duration>
+      <itunes:season>2</itunes:season>
+      <itunes:episode>1</itunes:episode>
+    </item>
+    <item>
+      <title>Christmas Special</title>
+      <guid>nq-xmas</guid>
+      <pubDate>Mon, 25 Dec 2023 12:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/nq-xmas.mp3" length="1" type="audio/mpeg"/>
+      <itunes:duration>45:00</itunes:duration>
+      <itunes:episodeType>bonus</itunes:episodeType>
+      <itunes:season>1</itunes:season>
+    </item>
+    <item>
+      <title>Series 1, Episode 2</title>
+      <pubDate>Fri, 08 Dec 2023 18:30:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/nq-s1e2.mp3" length="1" type="audio/mpeg"/>
+      <itunes:duration>28:00</itunes:duration>
+      <itunes:season>1</itunes:season>
+    </item>
+    <item>
+      <title>Series 1, Episode 1</title>
+      <guid>nq-s1e1</guid>
+      <pubDate>Fri, 01 Dec 2023 18:30:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/nq-s1e1.mp3" length="1" type="audio/mpeg"/>
+      <itunes:duration>28:00</itunes:duration>
+      <itunes:season>1</itunes:season>
+    </item>
+    <item>
+      <title>Trailer</title>
+      <guid>nq-trailer</guid>
+      <pubDate>Mon, 20 Nov 2023 09:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/nq-trailer.mp3" length="1" type="audio/mpeg"/>
+      <itunes:episodeType>trailer</itunes:episodeType>
+    </item>
+  </channel>
+</rss>

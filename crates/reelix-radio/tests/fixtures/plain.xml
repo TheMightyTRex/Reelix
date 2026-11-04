@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Morning Walk</title>
+    <description>A short walk every morning.</description>
+    <item>
+      <title>Walk three</title>
+      <guid>walk-3</guid>
+      <pubDate>Wed, 03 Jan 2024 07:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/walk-3.mp3" length="1" type="audio/mpeg"/>
+    </item>
+    <item>
+      <title>Walk one</title>
+      <guid>walk-1</guid>
+      <pubDate>Mon, 01 Jan 2024 07:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/walk-1.mp3" length="1" type="audio/mpeg"/>
+    </item>
+    <item>
+      <title>Walk two</title>
+      <guid>walk-2</guid>
+      <pubDate>Tue, 02 Jan 2024 07:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/walk-2.mp3" length="1" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

@@ -35,6 +35,7 @@ pub struct Modules {
     pub library: std::sync::Arc<reelix_library::LibraryService>,
     pub books: std::sync::Arc<reelix_books::BooksService>,
     pub music: std::sync::Arc<reelix_music::MusicService>,
+    pub radio: std::sync::Arc<reelix_radio::RadioService>,
     pub requests: std::sync::Arc<reelix_requests::RequestService>,
     pub integrations: std::sync::Arc<crate::integrations::IntegrationsService>,
     pub search: std::sync::Arc<reelix_pipeline::search::SearchService>,
@@ -93,6 +94,18 @@ impl Modules {
                 deps.http.clone(),
                 Default::default(),
             )),
+        }));
+        // radio: providers in link-recognition order (specific broadcasters and directories
+        // first, the generic podcast feed last); the Audiobookshelf library reader is attached
+        // with `RadioService::set_library_sync`
+        let radio = std::sync::Arc::new(reelix_radio::RadioService::new(reelix_radio::RadioDeps {
+            db: deps.db.clone(),
+            events: deps.events.clone(),
+            http: deps.http.clone(),
+            providers: reelix_radio::ProviderRegistry::default().with(std::sync::Arc::new(
+                reelix_radio::providers::RssProvider::new(deps.http.clone()),
+            )),
+            library_sync: None,
         }));
         // requests (metadata, media servers and notifications via providers; library via LibraryAdapter)
         let requests = {
@@ -227,6 +240,7 @@ impl Modules {
             library,
             books,
             music,
+            radio,
             requests,
             integrations,
             search,
@@ -251,6 +265,8 @@ impl Modules {
         // books / music
         builder = reelix_books::jobs::register(builder, &self.books);
         builder = reelix_music::jobs::register(builder, &self.music);
+        // radio (refresh_radio_shows, radio_feed_sync, radio_library_sync)
+        builder = reelix_radio::jobs::register(builder, &self.radio);
         // requests
         builder = builder
             .handler(reelix_requests::RequestStatusSyncJob(self.requests.clone()))
@@ -281,6 +297,9 @@ impl Modules {
         state = state.with_extension(self.books.clone());
         self.music.set_queue(_queue.clone());
         state = state.with_extension(self.music.clone());
+        // radio
+        self.radio.set_queue(_queue.clone());
+        state = state.with_extension(self.radio.clone());
         // requests
         self.requests.set_queue(_queue.clone());
         state = state.with_extension(self.requests.clone());

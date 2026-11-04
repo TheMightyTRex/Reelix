@@ -536,6 +536,8 @@ impl<'a> Engine<'a> {
                         .map_err(err),
                     None => Err("music isn't available".into()),
                 },
+                // No *arr app has radio root folders.
+                ContentKind::Radio => Err("radio root folders aren't migrated".into()),
             };
             match created {
                 Ok(id) => {

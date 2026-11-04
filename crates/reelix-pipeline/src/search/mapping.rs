@@ -324,6 +324,7 @@ fn kind_label(k: ContentKind) -> &'static str {
         ContentKind::Ebook => "an ebook",
         ContentKind::Audiobook => "an audiobook",
         ContentKind::Music => "a music",
+        ContentKind::Radio => "a radio",
     }
 }
 

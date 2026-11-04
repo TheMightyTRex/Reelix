@@ -61,9 +61,11 @@ enum RootKind {
     Ebook,
     Audiobook,
     Music,
+    /// The Audiobookshelf podcast library folder, as Reelix sees it.
+    Radio,
 }
 
-const ROOT_KINDS: [(RootKind, &str, &str, &str); 5] = [
+const ROOT_KINDS: [(RootKind, &str, &str, &str); 6] = [
     (RootKind::Movie, "movie", "Movies", "/media/movies"),
     (RootKind::Series, "series", "Series", "/media/tv"),
     (RootKind::Ebook, "ebook", "Ebooks", "/media/books"),
@@ -74,6 +76,7 @@ const ROOT_KINDS: [(RootKind, &str, &str, &str); 5] = [
         "/media/audiobooks",
     ),
     (RootKind::Music, "music", "Music", "/media/music"),
+    (RootKind::Radio, "radio", "Radio", "/media/podcasts"),
 ];
 
 impl RootKind {
@@ -91,6 +94,7 @@ impl RootKind {
             Self::Movie | Self::Series => "/rootfolders",
             Self::Ebook | Self::Audiobook => "/bookrootfolders",
             Self::Music => "/musicrootfolders",
+            Self::Radio => "/radio/rootfolders",
         }
     }
 
@@ -101,6 +105,7 @@ impl RootKind {
             Self::Series => "series",
             Self::Ebook | Self::Audiobook => "books",
             Self::Music => "music",
+            Self::Radio => "radio",
         }
     }
 
@@ -111,6 +116,7 @@ impl RootKind {
             ContentKind::Music => Self::Music,
             ContentKind::Movie => Self::Movie,
             ContentKind::Series => Self::Series,
+            ContentKind::Radio => Self::Radio,
         }
     }
 }
@@ -159,16 +165,18 @@ impl From<ContentRootFolderDto> for Root {
     }
 }
 
-/// Every root folder: movies and series, then books, then music.
+/// Every root folder: movies and series, then books, then music, then radio.
 async fn load_roots() -> Result<Vec<Root>, api::ApiError> {
-    let (media, books, music) = futures::join!(
+    let (media, books, music, radio) = futures::join!(
         api::get::<Vec<RootFolderDto>>("/rootfolders"),
         api::get::<Vec<ContentRootFolderDto>>("/bookrootfolders"),
         api::get::<Vec<ContentRootFolderDto>>("/musicrootfolders"),
+        api::get::<Vec<ContentRootFolderDto>>("/radio/rootfolders"),
     );
     let mut roots: Vec<Root> = media?.into_iter().map(Root::from).collect();
     roots.extend(books?.into_iter().map(Root::from));
     roots.extend(music?.into_iter().map(Root::from));
+    roots.extend(radio?.into_iter().map(Root::from));
     Ok(roots)
 }
 
@@ -206,12 +214,13 @@ pub fn RootFoldersCard() -> impl IntoView {
                         .await
                         .map(|r| r.path)
                 }
-                RootKind::Ebook | RootKind::Audiobook | RootKind::Music => {
+                RootKind::Ebook | RootKind::Audiobook | RootKind::Music | RootKind::Radio => {
                     let req = CreateContentRootFolderRequest {
                         path: p,
                         kind: match k {
                             RootKind::Ebook => ContentKind::Ebook,
                             RootKind::Audiobook => ContentKind::Audiobook,
+                            RootKind::Radio => ContentKind::Radio,
                             _ => ContentKind::Music,
                         },
                     };

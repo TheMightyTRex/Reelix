@@ -177,8 +177,8 @@ pub fn configured_categories_all(categories: &[&str]) -> Vec<String> {
     v
 }
 
-/// Category for a content kind: books (ebook and audiobook) use `book`, music uses `music`;
-/// either falls back to the movie category when empty. `None` when the result is empty.
+/// Category for a content kind: books (ebook and audiobook) and radio use `book`, music uses
+/// `music`; either falls back to the movie category when empty. `None` when the result is empty.
 pub fn category_for_kind(
     kind: ContentKind,
     movie: &str,
@@ -192,7 +192,7 @@ pub fn category_for_kind(
     let c = match kind {
         ContentKind::Movie => movie,
         ContentKind::Series => tv,
-        ContentKind::Ebook | ContentKind::Audiobook => pick(book, movie),
+        ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Radio => pick(book, movie),
         ContentKind::Music => pick(music, movie),
     };
     let c = c.trim();

@@ -12,6 +12,7 @@ pub mod music;
 pub mod pipeline;
 pub mod profiles;
 pub mod providers;
+pub mod radio;
 pub mod requests;
 pub mod system;
 
@@ -198,3 +199,15 @@ pub struct EnqueuedJob {
 }
 
 pub mod direct;
+
+// ---------- Commands ----------
+
+/// `POST /command`: a named command that queues a job.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CommandRequest {
+    /// `RefreshRadioShow` (`show_ids`, empty = every show) or `RescanRadioLibrary`.
+    pub name: String,
+    #[serde(default)]
+    pub show_ids: Vec<i64>,
+}

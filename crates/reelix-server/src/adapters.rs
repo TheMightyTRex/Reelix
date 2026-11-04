@@ -187,7 +187,7 @@ impl LibraryAdapter {
 fn family(kind: ContentKind) -> QualityFamily {
     match kind {
         ContentKind::Ebook => QualityFamily::Ebook,
-        ContentKind::Audiobook => QualityFamily::Audiobook,
+        ContentKind::Audiobook | ContentKind::Radio => QualityFamily::Audiobook,
         ContentKind::Music => QualityFamily::Music,
         ContentKind::Movie | ContentKind::Series => QualityFamily::Video,
     }
