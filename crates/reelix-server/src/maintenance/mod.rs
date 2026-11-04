@@ -945,6 +945,10 @@ mod self_update_tests {
 
     #[tokio::test]
     async fn installs_a_verified_release_and_requests_a_restart() {
+        // No release builds exist for this OS (e.g. macOS), so self-update is unsupported here.
+        if self_update::platform().is_none() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("install");
         std::fs::create_dir_all(dir.join("web")).unwrap();

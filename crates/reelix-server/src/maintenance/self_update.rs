@@ -113,7 +113,7 @@ pub fn in_docker() -> bool {
 }
 
 /// The release archive OS name for this build.
-fn platform() -> Option<&'static str> {
+pub(crate) fn platform() -> Option<&'static str> {
     if cfg!(windows) {
         Some("windows")
     } else if cfg!(target_os = "linux") {
@@ -754,7 +754,8 @@ pub(crate) mod tests {
         fs::write(dir.join("web/index.html"), "").unwrap();
         let portable = detect(dir, false);
         assert_eq!(portable.kind, Kind::Portable);
-        assert!(portable.supported(), "{portable:?}");
+        // Only OSes with release builds (Windows, Linux) can update themselves.
+        assert_eq!(portable.supported(), platform().is_some(), "{portable:?}");
         assert_eq!(portable.binary(), dir.join(BINARY));
 
         fs::write(dir.join(INSTALL_MARKER), r#"{"kind": "linux-systemd"}"#).unwrap();
