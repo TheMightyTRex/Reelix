@@ -117,6 +117,19 @@ pub const NAV: &[&[NavItem]] = &[
             ],
         },
         NavItem {
+            label: "Radio",
+            icon: "radio",
+            href: "/radio",
+            prefix: "/radio",
+            perm: LIB,
+            children: &[
+                ("Shows", "/radio"),
+                ("Add New", "/radio/add"),
+                ("Stations", "/radio/stations"),
+                ("Review", "/radio/review"),
+            ],
+        },
+        NavItem {
             label: "Downloads",
             icon: "download",
             href: "/downloads",
@@ -194,6 +207,7 @@ pub const NAV: &[&[NavItem]] = &[
                 ("Users", "/settings/users"),
                 ("Tags", "/settings/tags"),
                 ("Metadata", "/settings/metadata"),
+                ("Radio", "/settings/radio"),
                 ("Security", "/settings/security"),
             ],
         },
