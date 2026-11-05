@@ -102,6 +102,8 @@ windows-service = "0.8"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 thiserror = "2"
 rpassword = "7"
+# Keys one at a time for the terminal wizard's list with marks (already used by terminal_size).
+rustix = { version = "1", features = ["termios"] }
 terminal_size = "0.4"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"

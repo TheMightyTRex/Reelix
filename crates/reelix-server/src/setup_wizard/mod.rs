@@ -15,7 +15,7 @@ pub mod term;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reelix_api_types::install::{
     self, Answers, Context, FEEDBACK_KINDS, Help, PLACEHOLDER_NOTE, Question, Start, StepId,
@@ -38,7 +38,7 @@ use serde_json::{Map, Value};
 
 use self::api::Api;
 use self::feedback::Report;
-use self::term::{Head, Ui};
+use self::term::{Head, Key, Pick, Screen, Ui};
 use crate::config::Config;
 
 /// Options from the command line.
@@ -82,7 +82,8 @@ struct Wizard {
     answers: Answers,
     ctx: Context,
     step: StepId,
-    /// The step's lines so far (boxed mode redraws them under each new question).
+    /// The step's paragraphs so far (boxed mode redraws them under each new question, wrapped to
+    /// the column at that moment).
     body: Vec<String>,
     last_error: Option<String>,
     /// The set-up code and the passwords typed before, kept after Back without showing them.
@@ -222,10 +223,12 @@ impl Wizard {
                 }
                 Flow::Stop => {
                     self.ui.release();
-                    println!(
-                        "Stopped. Nothing else was changed. To carry on later, run reelix setup again \
-                         (with Docker: docker exec -it reelix /app/reelix setup)."
-                    );
+                    self.ui.refresh();
+                    let words = "Stopped. Nothing else was changed. To carry on later, run reelix setup again \
+                                 (with Docker: docker exec -it reelix /app/reelix setup).";
+                    for l in term::wrap(words, self.ui.width()) {
+                        println!("{}{l}", " ".repeat(self.ui.left()));
+                    }
                     return ExitCode::SUCCESS;
                 }
             }
@@ -250,9 +253,9 @@ impl Wizard {
         if self.ui.plain {
             println!();
             for l in self.ui.heading(&self.head()) {
-                println!("{l}");
+                self.print_plain(&l);
             }
-            println!("Type b to go back, ? for help, f to send feedback or q to stop.");
+            self.print_plain("Type b to go back, ? for help, f to send feedback or q to stop.");
         }
         self.say(&self.ui.bold(s.question));
         if self.came_back {
@@ -265,20 +268,37 @@ impl Wizard {
         }
     }
 
-    /// Adds a line to the step (and prints it in plain mode).
+    /// Adds a paragraph to the step (and prints it in plain mode). It is kept whole, and wrapped
+    /// to the column each time it is drawn.
     fn say(&mut self, text: &str) {
-        let lines = term::wrap(text, self.ui.width());
         if self.ui.plain {
-            for l in &lines {
-                println!("{l}");
-            }
+            self.print_plain(text);
         }
         self.body.push(String::new());
-        self.body.extend(lines);
+        self.body.push(text.to_owned());
     }
 
-    fn menu(&self, enter: &str) -> String {
-        self.ui.menu_line("b Back   ? Help   f Feedback   q Stop", enter)
+    /// Prints text in plain mode, wrapped between words at the window's width.
+    fn print_plain(&self, text: &str) {
+        for l in term::wrap(&term::strip_ansi(text), self.ui.width()) {
+            println!("{l}");
+        }
+    }
+
+    /// The step as it is now, with `question` and `prompt` last.
+    fn screen(&self, question: &[String], prompt: &str, enter: &str) -> Screen {
+        let mut body = self.body.clone();
+        body.push(String::new());
+        body.extend(question.iter().cloned());
+        Screen {
+            head: self.head(),
+            body,
+            pick: None,
+            prompt: prompt.to_owned(),
+            cut: false,
+            keys: term::STEP_KEYS.to_owned(),
+            enter: enter.to_owned(),
+        }
     }
 
     /// Shows `question` (lines) and reads an answer; handles ?, f, b and q itself.
@@ -288,18 +308,15 @@ impl Wizard {
             if self.ui.plain {
                 if !printed {
                     for l in question {
-                        println!("{l}");
+                        self.print_plain(l);
                     }
                     printed = true;
                 }
                 print!("{prompt}");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
             } else {
-                let mut body = self.body.clone();
-                body.push(String::new());
-                body.extend(question.iter().cloned());
-                let top = self.ui.heading(&self.head());
-                self.ui.draw(&top, &body, prompt, &self.menu(enter));
+                self.ui.refresh();
+                self.ui.show(self.screen(question, prompt, enter));
             }
             let line = if secret {
                 term::read_secret()
@@ -347,9 +364,7 @@ impl Wizard {
             let mark = if c.recommended { "●" } else { " " };
             let rec = if c.recommended { " (recommended)" } else { "" };
             lines.push(format!(" {:>2}. {mark} {}{rec}", i + 1, c.label));
-            for l in term::wrap(&format!("       {}", c.hint), self.ui.width()) {
-                lines.push(self.ui.dim(&l));
-            }
+            lines.push(self.ui.dim(&format!("       {}", c.hint)));
         }
         let prompt = if q.multi {
             format!("› Your choices, as numbers with commas [{default_text}]: ")
@@ -357,16 +372,48 @@ impl Wizard {
             format!("› Your choice [{default_text}]: ")
         };
         let enter = if self.came_back { "keep" } else { "recommended" };
-        loop {
-            let line = match self.ask(&lines, &prompt, enter, false) {
-                Input::Got(l) => l,
-                Input::Back => return Input::Back,
-                Input::Stop => return Input::Stop,
+        // Several answers: a list with marks in a real terminal with the boxed look; typed
+        // numbers in plain mode, or when the list does not fit the window.
+        let mut ticked = None;
+        if q.multi && self.ui.keys_work() {
+            self.ui.refresh();
+            let pick = Pick {
+                items: choices
+                    .iter()
+                    .map(|c| {
+                        let rec = if c.recommended { " (recommended)" } else { "" };
+                        (format!("{}{rec}", c.label), c.hint.to_owned())
+                    })
+                    .collect(),
+                ticked: (1..=choices.len()).map(|n| default.contains(&n)).collect(),
+                at: 0,
+                note: term::PICK_NOTE.to_owned(),
             };
-            let picked = if line.trim().is_empty() {
-                Some(default.clone())
-            } else {
-                parse_numbers(&line, choices.len())
+            let room = self
+                .ui
+                .rows
+                .saturating_sub(self.ui.heading(&self.head()).len() + 3);
+            if self.ui.pick_lines(&pick).len() + 2 <= room {
+                ticked = self.pick_many(q, pick, enter);
+            }
+        }
+        loop {
+            let picked = match ticked.take() {
+                Some(Input::Got(p)) => Some(p),
+                Some(Input::Back) => return Input::Back,
+                Some(Input::Stop) => return Input::Stop,
+                None => {
+                    let line = match self.ask(&lines, &prompt, enter, false) {
+                        Input::Got(l) => l,
+                        Input::Back => return Input::Back,
+                        Input::Stop => return Input::Stop,
+                    };
+                    if line.trim().is_empty() {
+                        Some(default.clone())
+                    } else {
+                        parse_numbers(&line, choices.len())
+                    }
+                }
             };
             match picked {
                 Some(p) if !p.is_empty() && (q.multi || p.len() == 1) => {
@@ -387,9 +434,62 @@ impl Wizard {
                     };
                     lines.push(self.ui.danger(&msg));
                     if self.ui.plain {
-                        println!("{msg}");
+                        self.print_plain(&msg);
                     }
                 }
+            }
+        }
+    }
+
+    /// Several answers in a list with marks: Up and Down move, Space ticks or unticks, Enter
+    /// carries on, and a typed number ticks that line. ? opens help, f feedback, b goes back and
+    /// q (or Ctrl+C) stops. The list is drawn in place, so it never repeats down the window.
+    /// The numbers ticked, from 1, or `None` when keys cannot be read one at a time here.
+    fn pick_many(&mut self, q: &Question, mut pick: Pick, enter: &str) -> Option<Input<Vec<usize>>> {
+        let n = pick.items.len();
+        let legend = vec![self.ui.bold(q.legend)];
+        loop {
+            let mut screen = self.screen(&legend, "", enter);
+            screen.pick = Some(pick.clone());
+            self.ui.show(screen);
+            // The terminal goes back to how it was when `keys` is dropped: on every return, and
+            // before help or feedback is drawn.
+            let keys = term::Keys::start().ok()?;
+            let help = 'keys: loop {
+                for key in keys.read() {
+                    pick.note = term::PICK_NOTE.to_owned();
+                    match key {
+                        Key::Up => pick.at = (pick.at + n - 1) % n,
+                        Key::Down => pick.at = (pick.at + 1) % n,
+                        Key::Space => pick.ticked[pick.at] ^= true,
+                        Key::Char(c @ '1'..='9') => {
+                            let i = c as usize - '1' as usize;
+                            if i < n {
+                                pick.at = i;
+                                pick.ticked[i] ^= true;
+                            }
+                        }
+                        Key::Enter => {
+                            let picked: Vec<usize> = (1..=n).filter(|i| pick.ticked[i - 1]).collect();
+                            if !picked.is_empty() {
+                                return Some(Input::Got(picked));
+                            }
+                            pick.note = "Tick at least one with Space, then press Enter.".to_owned();
+                        }
+                        Key::Char('b' | 'B') => return Some(Input::Back),
+                        Key::Char('q' | 'Q') | Key::Stop => return Some(Input::Stop),
+                        Key::Char('?') => break 'keys true,
+                        Key::Char('f' | 'F') => break 'keys false,
+                        _ => {}
+                    }
+                }
+                self.ui.update_pick(pick.clone());
+            };
+            drop(keys);
+            if help {
+                self.show_help(&legend);
+            } else {
+                self.send_feedback(None);
             }
         }
     }
@@ -404,9 +504,7 @@ impl Wizard {
     ) -> Input<String> {
         let mut lines = vec![self.ui.bold(label)];
         if !hint.is_empty() {
-            for l in term::wrap(hint, self.ui.width()) {
-                lines.push(self.ui.dim(&l));
-            }
+            lines.push(self.ui.dim(hint));
         }
         let kept = secret.and_then(|k| self.secrets.get(k)).cloned();
         let prompt = match (&kept, secret) {
@@ -435,6 +533,7 @@ impl Wizard {
     }
 
     fn show_help(&mut self, question: &[String]) {
+        self.ui.refresh();
         let s = install::step(self.step);
         let mut text: Vec<String> = Vec::new();
         // Every step says how to choose plain mode, unless its own help already does.
@@ -593,6 +692,7 @@ impl Wizard {
     /// Draws the QR code on a view of its own, sized to the window.
     fn show_qr(&mut self, report: &Report, saved: Option<&std::path::Path>, saved_line: &str) {
         self.ui.refresh();
+        self.ui.quiet();
         let fit = feedback::largest_version(self.ui.cols, self.ui.rows)
             .and_then(|v| report.short_link(feedback::capacity(v), saved).map(|l| (v, l)));
         let Some((version, (url, cut))) = fit else {
@@ -654,10 +754,11 @@ impl Wizard {
     fn feedback_prompt(&mut self, lines: &[String], prompt: &str) -> Option<String> {
         if self.ui.plain {
             for l in lines {
-                println!("{}", term::strip_ansi(l));
+                self.print_plain(l);
             }
             print!("{prompt}");
         } else {
+            self.ui.refresh();
             let mut behind = self.ui.heading(&self.head());
             behind.extend(self.body.iter().cloned());
             self.ui.overlay(
@@ -667,7 +768,7 @@ impl Wizard {
                 &self.ui.menu_line("q Cancel", "next"),
             );
             let row = self.ui.rows.saturating_sub(1);
-            print!("\x1b[{row};1H\x1b[2K{prompt}");
+            print!("\x1b[{row};1H\x1b[2K\x1b[{row};{}H{prompt}", self.ui.left() + 1);
         }
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let line = term::read_line()?;
@@ -956,51 +1057,130 @@ impl Wizard {
                 categories: Vec::new(),
                 search_missing: false,
             };
-            if self
-                .call(
-                    self.rt
-                        .block_on(self.api.post::<_, MigrateRunDto>("/system/migrate/run", &req)),
-                )
-                .is_none()
-            {
-                continue;
-            }
-            // Wait for the run, showing how far it is.
+            // One progress line, drawn in place. When the run does not finish, the line stays,
+            // marked, with the problem and the choices under it; trying again draws the step
+            // afresh with one new line, not a second one under the first.
+            let kept = self.body.len();
             loop {
-                std::thread::sleep(Duration::from_secs(1));
-                let Some(Some(run)) = self.call(
-                    self.rt
-                        .block_on(self.api.get::<Option<MigrateRunDto>>("/system/migrate")),
-                ) else {
-                    break;
-                };
-                if run.state != MigrateState::Running {
-                    let made = run
-                        .items
-                        .iter()
-                        .filter(|i| i.action == MigrateAction::Create)
-                        .count();
-                    let failed = run
-                        .items
-                        .iter()
-                        .filter(|i| i.action == MigrateAction::Failed)
-                        .count();
-                    self.say(&format!(
-                        "{} is brought over: {made} added, {failed} could not be added.",
-                        source.label()
-                    ));
-                    if let Some(e) = run.error.as_deref().map(term::clean) {
-                        self.last_error = Some(e.clone());
-                        let line = self.ui.danger(&e);
-                        self.say(&line);
-                    }
+                self.body.truncate(kept);
+                if self
+                    .call(
+                        self.rt
+                            .block_on(self.api.post::<_, MigrateRunDto>("/system/migrate/run", &req)),
+                    )
+                    .is_none()
+                {
                     break;
                 }
-                if self.ui.plain {
-                    println!("{} of {} done", run.done, run.total);
+                match self.follow_run(source.label()) {
+                    Ok(run) => {
+                        let made = run
+                            .items
+                            .iter()
+                            .filter(|i| i.action == MigrateAction::Create)
+                            .count();
+                        let failed = run
+                            .items
+                            .iter()
+                            .filter(|i| i.action == MigrateAction::Failed)
+                            .count();
+                        self.last_error = None;
+                        self.say(&format!(
+                            "✔ {} is brought over: {made} added, {failed} could not be added.",
+                            source.label()
+                        ));
+                        break;
+                    }
+                    Err(e) => {
+                        let mark = self
+                            .ui
+                            .danger(&format!("✘ Bringing over {} did not finish", source.label()));
+                        self.say(&mark);
+                        self.say(&e);
+                        self.last_error = Some(e);
+                        let lines = vec![
+                            self.ui.bold("What now?"),
+                            "  1. ● Try again (recommended)".to_owned(),
+                            "  2.   Choose another app, or carry on".to_owned(),
+                        ];
+                        let reply = got!(self.ask(&lines, "› Your choice [1]: ", "recommended", false));
+                        if reply.trim() == "2" {
+                            break;
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// Follows a run until it ends, on one line that turns while it waits: what is happening and
+    /// how far it is, cut to the column. Plain mode prints the count when it changes instead.
+    fn follow_run(&mut self, label: &str) -> Result<MigrateRunDto, String> {
+        let began = Instant::now();
+        let mut turn = 0;
+        let mut count = String::new();
+        let mut printed = String::new();
+        let mut drawn = false;
+        loop {
+            let words = format!("Bringing over {label}{count}. Please wait, this can take some time.");
+            if self.ui.plain {
+                if words != printed {
+                    self.print_plain(&words);
+                    printed = words;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            } else {
+                // A quarter turn at a time, asking Reelix how far it is once a second.
+                for _ in 0..4 {
+                    self.ui.refresh();
+                    let line = self.job_line(&words, began, turn);
+                    if drawn {
+                        self.ui.update_prompt(line);
+                    } else {
+                        let mut screen = self.screen(&[], &line, "");
+                        screen.cut = true;
+                        screen.keys = String::new();
+                        self.ui.show(screen);
+                        drawn = true;
+                    }
+                    turn += 1;
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+            let run = self
+                .rt
+                .block_on(self.api.get::<Option<MigrateRunDto>>("/system/migrate"));
+            match run {
+                Err(e) => return Err(format!("Reelix did not answer: {}", e.message)),
+                Ok(None) => return Err("Reelix has no record of the run.".to_owned()),
+                Ok(Some(run)) if run.state == MigrateState::Running => {
+                    count = format!(", {} of {} done", run.done, run.total);
+                }
+                Ok(Some(run)) if run.state == MigrateState::Failed || run.error.is_some() => {
+                    return Err(run
+                        .error
+                        .as_deref()
+                        .map(term::clean)
+                        .unwrap_or_else(|| "Reelix stopped before the end.".to_owned()));
+                }
+                Ok(Some(run)) => return Ok(run),
+            }
+        }
+    }
+
+    /// A job's progress line: a turning mark, the words, and the time taken. The words are cut so
+    /// the time stays in view and the line fits the column.
+    fn job_line(&self, words: &str, began: Instant, turn: usize) -> String {
+        let secs = began.elapsed().as_secs();
+        let timer = format!("{} min {:02} s", secs / 60, secs % 60);
+        let room = self.ui.width().saturating_sub(timer.len() + 5).max(10);
+        let mark = ["◐", "◓", "◑", "◒"][turn % 4];
+        format!(
+            "  {} {} {}",
+            self.ui.accent(mark),
+            term::clip(words, room),
+            self.ui.dim(&timer)
+        )
     }
 
     fn tmdb(&mut self) -> Flow {
@@ -1473,10 +1653,13 @@ impl Wizard {
             println!();
             println!("Reelix, done.");
             for l in &lines {
-                println!("{l}");
+                self.print_plain(l);
             }
             return;
         }
+        self.ui.refresh();
+        self.ui.quiet();
+        let pad = " ".repeat(self.ui.left());
         let mut out = String::from("\x1b[2J\x1b[H");
         let head = Head {
             title: "Done".into(),
@@ -1484,10 +1667,12 @@ impl Wizard {
             total: 1,
         };
         for l in self.ui.heading(&head).iter().take(3) {
+            out.push_str(&pad);
             out.push_str(l);
             out.push_str("\r\n");
         }
         for l in self.ui.card("Reelix is ready", &lines) {
+            out.push_str(&pad);
             out.push_str(&l);
             out.push_str("\r\n");
         }

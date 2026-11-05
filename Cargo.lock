@@ -4579,6 +4579,7 @@ dependencies = [
  "reelix-requests",
  "reqwest",
  "rpassword",
+ "rustix 1.1.6",
  "semver",
  "serde",
  "serde_json",
