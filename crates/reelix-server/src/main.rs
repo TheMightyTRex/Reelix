@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use reelix_server::cli::{Cli, Command};
+use reelix_server::commands::{self, Maintenance};
 use reelix_server::config::Config;
 use reelix_server::lifecycle;
 
@@ -39,6 +40,10 @@ fn main() -> ExitCode {
             }
         }
         Some(Command::Service { action }) => reelix_server::service::main(action, config, &cli),
+        Some(Command::Backup { action }) => commands::main(Maintenance::Backup(action), &config),
+        Some(Command::Restore { action }) => commands::main(Maintenance::Restore(action), &config),
+        Some(Command::Migrate { action }) => commands::main(Maintenance::Migrate(action), &config),
+        Some(Command::Config { action }) => commands::main(Maintenance::Config(action), &config),
         None => {
             let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,

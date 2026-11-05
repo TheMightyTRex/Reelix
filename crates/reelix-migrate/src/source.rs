@@ -33,6 +33,18 @@ async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u
     Ok(out)
 }
 
+/// `url` trimmed and without a trailing slash; an error unless it is an http(s) URL.
+pub fn normalize_url(url: &str) -> Result<String, MigrateError> {
+    let base = url.trim().trim_end_matches('/').to_owned();
+    let parsed = url::Url::parse(&base).map_err(|_| MigrateError::Input(format!("{url:?} is not a URL")))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(MigrateError::Input(
+            "the URL must start with http:// or https://".into(),
+        ));
+    }
+    Ok(base)
+}
+
 /// A connection to the app being migrated from.
 #[derive(Debug, Clone)]
 pub struct Source {
@@ -49,14 +61,7 @@ impl Source {
         api_key: &str,
         http: reqwest::Client,
     ) -> Result<Self, MigrateError> {
-        let base = url.trim().trim_end_matches('/').to_owned();
-        let parsed =
-            url::Url::parse(&base).map_err(|_| MigrateError::Input(format!("{url:?} is not a URL")))?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(MigrateError::Input(
-                "the URL must start with http:// or https://".into(),
-            ));
-        }
+        let base = normalize_url(url)?;
         if api_key.trim().is_empty() {
             return Err(MigrateError::Input("the API key is required".into()));
         }
