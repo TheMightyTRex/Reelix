@@ -8,7 +8,8 @@ use reelix_api_types::pipeline::{EpisodeRefDto, FormatRefDto, HistoryDto, MediaR
 use reelix_core::Protocol;
 use reelix_parser::{Language, QualityModel};
 
-use super::library_common::{Pager, on_entity_changed};
+use super::infinite::{InfiniteSentinel, PagedList};
+use super::library_common::on_entity_changed;
 use super::library_forms::with_query;
 use super::{ConfirmDialog, EmptyState, ErrorBox, Icon, Skeleton, StatusBadge, Tone};
 use crate::api;
@@ -225,7 +226,7 @@ fn data_rows(data: &serde_json::Value) -> Vec<(String, String)> {
 
 // ---------- history table ----------
 
-/// Paged history with an event-type filter. Scoped to one movie / series / episode when an id is
+/// History with an event-type filter, loading more rows as it scrolls. Scoped to one movie / series / episode when an id is
 /// given (the media column is then hidden for movies).
 #[component]
 pub fn HistoryTable(
@@ -240,35 +241,42 @@ pub fn HistoryTable(
     let toasts = Toasts::expect();
     let own_filter = event_type.is_none();
     let event_type = event_type.unwrap_or_else(|| RwSignal::new(String::new()));
-    let page = RwSignal::new(1u32);
     let expanded = RwSignal::new(Vec::<i64>::new());
     let fail_target = RwSignal::new(None::<HistoryDto>);
     let fail_open = RwSignal::new(false);
     let show_media = movie_id.is_none();
 
+    let history = PagedList::new(
+        page_size,
+        |h: &HistoryDto| h.id,
+        move |page, size| {
+            let url = with_query(
+                "/history",
+                &[
+                    ("page", page.to_string()),
+                    ("page_size", size.to_string()),
+                    ("movie_id", movie_id.map(|v| v.to_string()).unwrap_or_default()),
+                    ("series_id", series_id.map(|v| v.to_string()).unwrap_or_default()),
+                    (
+                        "episode_id",
+                        episode_id.map(|v| v.to_string()).unwrap_or_default(),
+                    ),
+                    ("event_type", event_type.get_untracked()),
+                ],
+            );
+            async move {
+                api::get::<Paged<HistoryDto>>(&url)
+                    .await
+                    .map(|p| (p.items, p.total))
+            }
+        },
+    );
+    // A new filter starts over from the newest entries.
     Effect::new(move |_| {
         event_type.track();
-        page.set(1);
+        history.reset();
     });
-
-    let history = LocalResource::new(move || {
-        let url = with_query(
-            "/history",
-            &[
-                ("page", page.get().to_string()),
-                ("page_size", page_size.to_string()),
-                ("movie_id", movie_id.map(|v| v.to_string()).unwrap_or_default()),
-                ("series_id", series_id.map(|v| v.to_string()).unwrap_or_default()),
-                (
-                    "episode_id",
-                    episode_id.map(|v| v.to_string()).unwrap_or_default(),
-                ),
-                ("event_type", event_type.get()),
-            ],
-        );
-        async move { api::get::<Paged<HistoryDto>>(&url).await }
-    });
-    on_entity_changed(&["history"], false, move || history.refetch());
+    on_entity_changed(&["history"], false, move || history.refresh());
 
     let mark_failed = Callback::new(move |()| {
         let Some(h) = fail_target.get_untracked() else {
@@ -279,26 +287,29 @@ pub fn HistoryTable(
                 Ok(_) => {
                     toasts
                         .success("Marked as failed. The release is blocklisted and a new search is queued.");
-                    history.refetch();
+                    history.refresh();
                 }
                 Err(e) => toasts.error(format!("Could not mark as failed: {e}")),
             }
         });
     });
 
-    let total = Signal::derive(move || history.get().and_then(Result::ok).map_or(0, |p| p.total));
-
-    let body = move || match history.get() {
-        None => view! { <Skeleton lines=4 /> }.into_any(),
-        Some(Err(e)) => {
-            view! { <ErrorBox error=e on_retry=Callback::new(move |()| history.refetch()) /> }.into_any()
+    let body = move || {
+        if !history.ready.get() {
+            return view! { <Skeleton lines=4 /> }.into_any();
         }
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="clock" title="No history yet" compact=true
-                description="Grabs, imports, upgrades and failures are recorded here as they happen." />
+        let items = history.items.get();
+        if items.is_empty() {
+            return match history.error.get() {
+                Some(e) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| history.reset()) /> }.into_any(),
+                None => view! {
+                    <EmptyState icon="clock" title="No history yet" compact=true
+                        description="Grabs, imports, upgrades and failures are recorded here as they happen." />
+                }
+                .into_any(),
+            };
         }
-        .into_any(),
-        Some(Ok(p)) => {
+        {
             let cols = if show_media { 8 } else { 7 };
             view! {
                 <div class="table-wrap">
@@ -317,7 +328,7 @@ pub fn HistoryTable(
                             </tr>
                         </thead>
                         <tbody>
-                            {p.items.into_iter().map(|h| {
+                            {items.into_iter().map(|h| {
                                 let hid = h.id;
                                 let open = move || expanded.with(|e| e.contains(&hid));
                                 let (tone, label, _) = event_label(&h.event_type);
@@ -370,7 +381,7 @@ pub fn HistoryTable(
                         </tbody>
                     </table>
                 </div>
-                <Pager page=page page_size=page_size total=total />
+                {move || history.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| history.retry()) /> })}
             }
             .into_any()
         }
@@ -383,6 +394,13 @@ pub fn HistoryTable(
             </div>
         })}
         {body}
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| history.load_more())
+            enabled=Signal::derive(move || history.can_load_more())
+            loading=history.loading
+            loaded=Signal::derive(move || history.loaded())
+            total=history.total
+        />
         <ConfirmDialog open=fail_open title="Mark as failed?"
             message=Signal::derive(move || fail_target.get().map(|h| format!(
                 "“{}” is removed, blocklisted, and a new search starts for the same media.", h.source_title

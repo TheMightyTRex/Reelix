@@ -11,13 +11,13 @@ use reelix_api_types::requests::{
 };
 
 use crate::api;
+use crate::components::infinite::{InfiniteSentinel, PagedList};
 use crate::components::media_card::tmdb_image;
 use crate::components::request_status::{
     ISSUE_TYPES, UserChip, issue_status_tone, issue_type_label, kind_label, media_href, refetch_on_change,
 };
 use crate::components::{ConfirmDialog, EmptyState, ErrorBox, Icon, PageHeader, Skeleton, StatusBadge};
 use crate::format;
-use crate::pages::requests::Pager;
 use crate::state::{AuthState, Toasts};
 
 const PAGE_SIZE: u32 = 25;
@@ -41,23 +41,30 @@ fn scope_label(i: &IssueDto) -> Option<String> {
 pub fn IssuesPage() -> impl IntoView {
     let status = RwSignal::new(String::from("open"));
     let issue_type = RwSignal::new(String::new());
-    let page = RwSignal::new(1u32);
 
-    let list = LocalResource::new(move || {
-        let mut q = format!(
-            "/issues?status={}&page={}&page_size={PAGE_SIZE}",
-            status.get(),
-            page.get()
-        );
-        let t = issue_type.get();
-        if !t.is_empty() {
-            q.push_str(&format!("&issue_type={t}"));
-        }
-        async move { api::get::<IssuePageDto>(&q).await }
+    let list = PagedList::new(
+        PAGE_SIZE,
+        |i: &IssueDto| i.id,
+        move |page, size| {
+            let mut q = format!(
+                "/issues?status={}&page={page}&page_size={size}",
+                status.get_untracked(),
+            );
+            let t = issue_type.get_untracked();
+            if !t.is_empty() {
+                q.push_str(&format!("&issue_type={t}"));
+            }
+            async move { api::get::<IssuePageDto>(&q).await.map(|p| (p.items, p.total)) }
+        },
+    );
+    // A new filter starts over from the first rows.
+    Effect::new(move |_| {
+        let _ = (status.get(), issue_type.get());
+        list.reset();
     });
     let counts = LocalResource::new(|| api::get::<IssueCountsDto>("/issues/count"));
     refetch_on_change(&["issue"], move || {
-        list.refetch();
+        list.refresh();
         counts.refetch();
     });
 
@@ -73,7 +80,7 @@ pub fn IssuesPage() -> impl IntoView {
             view! {
                 <button type="button" role="tab" class="tab" class:active=move || status.get() == v
                     aria-selected=move || (status.get() == v).to_string()
-                    on:click=move |_| { status.set(v.to_string()); page.set(1); }>
+                    on:click=move |_| status.set(v.to_string())>
                     {label}
                     <span class="tab-count">{n}</span>
                 </button>
@@ -83,17 +90,23 @@ pub fn IssuesPage() -> impl IntoView {
     };
 
     let body = move || {
-        match list.get() {
-        None => view! { <Skeleton lines=6 /> }.into_any(),
-        Some(Err(e)) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.refetch()) /> }.into_any(),
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="issues" title="No issues"
-                description="Problems with playback, audio or subtitles can be reported from a title's page." />
+        if !list.ready.get() {
+            return view! { <Skeleton lines=6 /> }.into_any();
         }
-        .into_any(),
-        Some(Ok(p)) => view! {
+        let items = list.items.get();
+        if items.is_empty() {
+            return match list.error.get() {
+                Some(e) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.reset()) /> }.into_any(),
+                None => view! {
+                    <EmptyState icon="issues" title="No issues"
+                        description="Problems with playback, audio or subtitles can be reported from a title's page." />
+                }
+                .into_any(),
+            };
+        }
+        view! {
             <ul class="issue-list">
-                {p.items.into_iter().map(|i| {
+                {items.into_iter().map(|i| {
                     let thumb = tmdb_image(i.poster.as_deref(), "w92");
                     let sub = [Some(kind_label(i.kind).to_string()), i.year.map(|y| y.to_string()), scope_label(&i)]
                         .into_iter().flatten().collect::<Vec<_>>().join(" · ");
@@ -121,10 +134,9 @@ pub fn IssuesPage() -> impl IntoView {
                     }
                 }).collect_view()}
             </ul>
-            <Pager total=p.total page=page />
+            {move || list.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.retry()) /> })}
         }
-        .into_any(),
-    }
+        .into_any()
     };
 
     view! {
@@ -132,12 +144,23 @@ pub fn IssuesPage() -> impl IntoView {
         <div class="tabs" role="tablist" aria-label="Filter by status">{tabs}</div>
         <div class="toolbar">
             <select class="input input-sm" aria-label="Issue type" prop:value=move || issue_type.get()
-                on:change=move |e| { issue_type.set(event_target_value(&e)); page.set(1); }>
+                on:change=move |e| issue_type.set(event_target_value(&e))>
                 <option value="">"All types"</option>
                 {ISSUE_TYPES.into_iter().map(|t| view! { <option value=t.as_str()>{issue_type_label(t)}</option> }).collect_view()}
             </select>
         </div>
-        <div class="card"><div class="card-body">{body}</div></div>
+        <div class="card">
+            <div class="card-body">
+                {body}
+                <InfiniteSentinel
+                    on_visible=Callback::new(move |()| list.load_more())
+                    enabled=Signal::derive(move || list.can_load_more())
+                    loading=list.loading
+                    loaded=Signal::derive(move || list.loaded())
+                    total=list.total
+                />
+            </div>
+        </div>
     }
 }
 

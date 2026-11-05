@@ -11,6 +11,7 @@ use reelix_api_types::library::{
 };
 
 use crate::api;
+use crate::components::infinite::{InfiniteSentinel, remember_window};
 use crate::components::library_bulk::BulkEditModal;
 use crate::components::library_common::{
     BulkBar, LibIcon, SortHeader, ViewMode, ViewSwitcher, bytes, on_entity_changed, pref_get, pref_set,
@@ -118,6 +119,39 @@ pub fn MoviesPage() -> impl IntoView {
         movies.refetch()
     });
 
+    // Infinite scroll over the fetched list: render a window that grows as the end nears.
+    let filters = move || {
+        [
+            q.get(),
+            quick.get(),
+            sort.get(),
+            desc.get().to_string(),
+            f_profile.get().to_string(),
+            f_quality.get(),
+            f_tag.get(),
+            f_genre.get(),
+            f_year.get(),
+            f_status.get(),
+        ]
+        .join("|")
+    };
+    let item_count = Memo::new(move |_| {
+        movies.with(|r| {
+            r.as_ref()
+                .and_then(|r| r.as_ref().ok())
+                .map_or(0, |p| p.items.len())
+        })
+    });
+    remember_window("movies", shown, filters, move || item_count.get() > 0);
+    // A new filter or sort starts from the top.
+    Effect::new(move |prev: Option<String>| {
+        let f = filters();
+        if prev.is_some_and(|p| p != f) {
+            shown.set(PAGE_CHUNK);
+        }
+        f
+    });
+
     // Selection
     let selecting = RwSignal::new(false);
     let selected = RwSignal::new(Vec::<i64>::new());
@@ -215,18 +249,8 @@ pub fn MoviesPage() -> impl IntoView {
                 .into_any()
             };
         }
-        let total = page.items.len();
         let items: Vec<MovieDto> = page.items.into_iter().take(shown.get()).collect();
-        let more = (total > items.len()).then(|| {
-            view! {
-                <div class="empty-actions">
-                    <button type="button" class="btn btn-secondary" on:click=move |_| shown.update(|s| *s += PAGE_CHUNK)>
-                        {format!("Show more ({} left)", total - shown.get_untracked().min(total))}
-                    </button>
-                </div>
-            }
-        });
-        let body = match mode.get() {
+        match mode.get() {
             ViewMode::Posters => view! {
                 <div class="poster-grid">
                     {items.into_iter().map(|m| {
@@ -338,8 +362,7 @@ pub fn MoviesPage() -> impl IntoView {
                 </div>
             }
             .into_any(),
-        };
-        view! { {body} {more} }.into_any()
+        }
     };
 
     view! {
@@ -358,7 +381,7 @@ pub fn MoviesPage() -> impl IntoView {
 
         <div class="lib-toolbar">
             <input class="input grow" type="search" placeholder="Filter by title…" aria-label="Filter by title"
-                prop:value=move || q.get() on:input=move |e| { q.set(event_target_value(&e)); shown.set(PAGE_CHUNK); } />
+                prop:value=move || q.get() on:input=move |e| q.set(event_target_value(&e)) />
             <select class="input" aria-label="Show" on:change=move |e| quick.set(event_target_value(&e))>
                 {[("all", "All movies"), ("monitored", "Monitored"), ("unmonitored", "Unmonitored"), ("missing", "Missing"), ("downloaded", "Downloaded")]
                     .into_iter()
@@ -440,6 +463,12 @@ pub fn MoviesPage() -> impl IntoView {
 
         <p class="lib-count" aria-live="polite">{count_label}</p>
         {content}
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| shown.update(|s| *s += PAGE_CHUNK))
+            enabled=Signal::derive(move || shown.get() < item_count.get())
+            loaded=Signal::derive(move || shown.get().min(item_count.get()))
+            total=Signal::derive(move || item_count.get() as u64)
+        />
 
         <Show when=move || selecting.get()>
             <BulkBar

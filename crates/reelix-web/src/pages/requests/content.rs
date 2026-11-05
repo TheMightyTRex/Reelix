@@ -12,8 +12,9 @@ use reelix_api_types::requests::{
 };
 use reelix_core::BookFormat;
 
-use super::{PAGE_SIZE, Pager};
+use super::PAGE_SIZE;
 use crate::api;
+use crate::components::infinite::{InfiniteSentinel, PagedList};
 use crate::components::media_card::tmdb_image;
 use crate::components::request_drawer::Drawer;
 use crate::components::request_status::{
@@ -59,7 +60,6 @@ pub fn ContentRequestTable(
     kind: RwSignal<String>,
     sort: RwSignal<String>,
     user_id: RwSignal<String>,
-    page: RwSignal<u32>,
     /// Called after any change (to refresh the status counts).
     on_change: Callback<()>,
 ) -> impl IntoView {
@@ -75,36 +75,49 @@ pub fn ContentRequestTable(
     let delete_open = RwSignal::new(false);
     let edit_open = RwSignal::new(false);
 
-    let list = LocalResource::new(move || {
-        let k = match kind.get().as_str() {
-            "book" => "book",
-            "music" => "music",
-            "radio" => "radio",
-            _ => "all",
-        };
-        let mut q = format!(
-            "/requests/media?kind={k}&status={}&sort={}&page={}&page_size={PAGE_SIZE}",
-            status.get(),
-            sort.get(),
-            page.get()
-        );
-        let u = user_id.get();
-        if !u.is_empty() {
-            q.push_str(&format!("&user_id={u}"));
-        }
-        async move { api::get::<ContentRequestPageDto>(&q).await }
+    let list = PagedList::new(
+        PAGE_SIZE,
+        |r: &ContentRequestDto| r.id,
+        move |page, size| {
+            let k = match kind.get_untracked().as_str() {
+                "book" => "book",
+                "music" => "music",
+                "radio" => "radio",
+                _ => "all",
+            };
+            let mut q = format!(
+                "/requests/media?kind={k}&status={}&sort={}&page={page}&page_size={size}",
+                status.get_untracked(),
+                sort.get_untracked(),
+            );
+            let u = user_id.get_untracked();
+            if !u.is_empty() {
+                q.push_str(&format!("&user_id={u}"));
+            }
+            async move {
+                api::get::<ContentRequestPageDto>(&q)
+                    .await
+                    .map(|p| (p.items, p.total))
+            }
+        },
+    );
+    // A new filter starts over from the first rows.
+    Effect::new(move |_| {
+        let _ = (status.get(), sort.get(), kind.get(), user_id.get());
+        list.reset();
     });
     let refresh = move || {
-        list.refetch();
+        list.refresh();
         on_change.run(());
     };
-    refetch_on_change(&["request"], move || list.refetch());
+    refetch_on_change(&["request"], move || list.refresh());
     Effect::new(move |_| {
-        if let Some(Ok(p)) = list.get()
-            && let Some(cur) = drawer_item.get_untracked()
-            && let Some(fresh) = p.items.iter().find(|r| r.id == cur.id)
-        {
-            drawer_item.set(Some(fresh.clone()));
+        let fresh = list.items.with(|items| {
+            let cur = drawer_item.get_untracked()?;
+            items.iter().find(|r| r.id == cur.id && **r != cur).cloned()
+        });
+        if let Some(fresh) = fresh {
+            drawer_item.set(Some(fresh));
         }
     });
 
@@ -168,17 +181,21 @@ pub fn ContentRequestTable(
     };
 
     let rows = move || {
-        match list.get() {
-        None => view! { <Skeleton lines=6 /> }.into_any(),
-        Some(Err(e)) => {
-            view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.refetch()) /> }.into_any()
+        if !list.ready.get() {
+            return view! { <Skeleton lines=6 /> }.into_any();
         }
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="requests" title="No book, album or radio requests"
-                description="Find books, albums and radio shows on Discover and press Request — they show up here." />
+        let items = list.items.get();
+        if items.is_empty() {
+            return match list.error.get() {
+                Some(e) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.reset()) /> }.into_any(),
+                None => view! {
+                    <EmptyState icon="requests" title="No book, album or radio requests"
+                        description="Find books, albums and radio shows on Discover and press Request — they show up here." />
+                }
+                .into_any(),
+            };
         }
-        .into_any(),
-        Some(Ok(p)) => {
+        {
             let manage = can_manage();
             let users = show_user();
             view! {
@@ -195,7 +212,7 @@ pub fn ContentRequestTable(
                             </tr>
                         </thead>
                         <tbody>
-                            {p.items.into_iter().map(|r| {
+                            {items.into_iter().map(|r| {
                                 let id = r.id;
                                 let row = StoredValue::new(r.clone());
                                 let thumb = tmdb_image(r.poster.as_deref(), "w92");
@@ -257,11 +274,10 @@ pub fn ContentRequestTable(
                         </tbody>
                     </table>
                 </div>
-                <Pager total=p.total page=page />
+                {move || list.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.retry()) /> })}
             }
             .into_any()
         }
-    }
     };
 
     let drawer_title =
@@ -323,7 +339,18 @@ pub fn ContentRequestTable(
     };
 
     view! {
-        <div class="card"><div class="card-body flush">{rows}</div></div>
+        <div class="card">
+            <div class="card-body flush">
+                {rows}
+                <InfiniteSentinel
+                    on_visible=Callback::new(move |()| list.load_more())
+                    enabled=Signal::derive(move || list.can_load_more())
+                    loading=list.loading
+                    loaded=Signal::derive(move || list.loaded())
+                    total=list.total
+                />
+            </div>
+        </div>
         <Drawer open=drawer_open title=drawer_title>
             {drawer_body}
         </Drawer>

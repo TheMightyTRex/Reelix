@@ -6,6 +6,7 @@ pub mod feedback;
 pub mod focus;
 pub mod history_table;
 pub mod icon;
+pub mod infinite;
 pub mod interactive_search;
 pub mod layout;
 pub mod library_add;

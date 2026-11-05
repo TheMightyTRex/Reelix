@@ -10,5 +10,6 @@ mod ws;
 
 fn main() {
     console_error_panic_hook::set_once();
+    components::infinite::track_history_traversal();
     leptos::mount::mount_to_body(app::App);
 }

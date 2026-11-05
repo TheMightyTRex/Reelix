@@ -8,6 +8,7 @@ use reelix_api_types::content::ContentSearchKind;
 use reelix_api_types::music::{AlbumDto, ArtistDto, ArtistJobRequest, Paged};
 
 use crate::api;
+use crate::components::infinite::{InfiniteSentinel, remember_window};
 use crate::components::library_common::{
     LibIcon, SortHeader, ViewMode, bytes, on_entity_changed, pref_get, pref_set,
 };
@@ -16,6 +17,8 @@ use crate::components::music::{MusicOptions, artist_state, start_album_search};
 use crate::components::poster::PosterCard;
 use crate::components::{EmptyState, ErrorBox, Icon, PageHeader, Skeleton, StatusBadge, Tone};
 use crate::state::Toasts;
+
+const PAGE_CHUNK: usize = 120;
 
 const SORTS: [(&str, &str); 5] = [
     ("sort_name", "Name"),
@@ -60,6 +63,26 @@ pub fn ArtistsPage() -> impl IntoView {
         async move { api::get::<Paged<ArtistDto>>(&url).await }
     });
     on_entity_changed(&["artist", "album", "trackfile"], true, move || artists.refetch());
+
+    // Infinite scroll over the fetched list: render a window that grows as the end nears.
+    let shown = RwSignal::new(PAGE_CHUNK);
+    let filters = move || [q.get(), quick.get(), sort.get(), desc.get().to_string()].join("|");
+    let item_count = Memo::new(move |_| {
+        artists.with(|r| {
+            r.as_ref()
+                .and_then(|r| r.as_ref().ok())
+                .map_or(0, |p| p.items.len())
+        })
+    });
+    remember_window("artists", shown, filters, move || item_count.get() > 0);
+    // A new filter or sort starts from the top.
+    Effect::new(move |prev: Option<String>| {
+        let f = filters();
+        if prev.is_some_and(|p| p != f) {
+            shown.set(PAGE_CHUNK);
+        }
+        f
+    });
 
     let update_all = move |_| {
         spawn_local(async move {
@@ -110,6 +133,7 @@ pub fn ArtistsPage() -> impl IntoView {
                 .into_any()
             };
         }
+        let items: Vec<ArtistDto> = items.into_iter().take(shown.get()).collect();
         match mode.get() {
             ViewMode::Table => view! {
                 <div class="card">
@@ -227,6 +251,12 @@ pub fn ArtistsPage() -> impl IntoView {
         </div>
         <p class="lib-count" aria-live="polite">{count_label}</p>
         {content}
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| shown.update(|s| *s += PAGE_CHUNK))
+            enabled=Signal::derive(move || shown.get() < item_count.get())
+            loaded=Signal::derive(move || shown.get().min(item_count.get()))
+            total=Signal::derive(move || item_count.get() as u64)
+        />
         <WantedSummary />
     }
 }
