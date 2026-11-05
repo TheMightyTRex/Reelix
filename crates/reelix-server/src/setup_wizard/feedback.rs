@@ -63,7 +63,7 @@ impl Report {
             let _ = write!(
                 body,
                 "\nThe whole report is also saved on the server: `{}`",
-                p.display()
+                redact(&p.display().to_string())
             );
         }
         format!(
@@ -88,7 +88,7 @@ impl Report {
                 std::env::consts::ARCH
             );
             if let Some(p) = saved {
-                let _ = write!(body, "\nSaved {}", p.display());
+                let _ = write!(body, "\nSaved {}", redact(&p.display().to_string()));
             }
             let title = format!("{} ({})", self.kind_label, self.step.key);
             format!(

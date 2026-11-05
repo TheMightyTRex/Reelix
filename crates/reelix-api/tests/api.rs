@@ -348,11 +348,15 @@ async fn setup_requires_the_token_unless_local() {
 async fn setup_restore_needs_the_token_and_no_accounts() {
     let mut app = app().await;
     reconfigure(&mut app, |s| s.with_setup_token("tok-123"));
+    // Reelix's wizards send the CSRF header; a page on another site cannot.
     let restore = |token: Option<&'static str>, peer: Option<&'static str>| Req {
         peer,
         headers: token
             .map(|t| vec![("x-reelix-setup-token", t)])
-            .unwrap_or_default(),
+            .unwrap_or_default()
+            .into_iter()
+            .chain([("x-reelix-request", "1")])
+            .collect(),
         ..Default::default()
     };
     for (token, peer) in [
@@ -362,6 +366,11 @@ async fn setup_restore_needs_the_token_and_no_accounts() {
         let r = call(&app, Method::POST, "/api/v1/setup/restore", restore(token, peer)).await;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
     }
+    // A cross-site post from a browser on the server itself: no code is needed there, but the CSRF
+    // header is, and a page on another site cannot send it without the browser asking first.
+    let cross_site = Req { peer: Some("127.0.0.1:5000"), ..Default::default() };
+    let r = call(&app, Method::POST, "/api/v1/setup/restore", cross_site).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
     // Past the checks, the upload reaches the backup service (not registered in these tests).
     for (token, peer) in [
         (Some("tok-123"), Some("192.0.2.1:5000")),

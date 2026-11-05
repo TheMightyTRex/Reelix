@@ -48,7 +48,7 @@ impl Api {
             });
         }
         let message = serde_json::from_str::<ApiErrorBody>(&text)
-            .map(|b| b.message)
+            .map(|b| super::term::clean(&b.message))
             .unwrap_or_else(|_| format!("HTTP {status}"));
         Err(ApiError {
             status: status.as_u16(),
@@ -93,6 +93,7 @@ impl Api {
             .http
             .post(format!("{}{path}", self.base))
             .header(reqwest::header::CONTENT_TYPE, "application/zip")
+            .header(reelix_api_types::CSRF_HEADER, "1")
             .body(bytes);
         if !setup_code.is_empty() {
             req = req.header("x-reelix-setup-token", setup_code);

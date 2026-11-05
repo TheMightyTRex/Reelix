@@ -143,7 +143,16 @@ pub async fn restore(
     headers: HeaderMap,
     body: Body,
 ) -> ApiResult<Response> {
-    // Both checks come before any of the body is read, so nobody can make the server take in
+    // Reelix's own wizards send the CSRF header. Another site cannot add a custom header without
+    // the browser asking first, so a page open in a browser on the server cannot post a backup
+    // here, even though requests from the server itself need no code.
+    if !headers.contains_key(reelix_api_types::CSRF_HEADER) {
+        return Err(ApiError::Validation {
+            status: StatusCode::FORBIDDEN,
+            message: format!("the {} header is required", reelix_api_types::CSRF_HEADER),
+        });
+    }
+    // These checks come before any of the body is read, so nobody can make the server take in
     // gigabytes without the code.
     if state.db().users().count().await? > 0 {
         return Err(ApiError::Conflict("setup has already been completed".into()));
@@ -155,6 +164,10 @@ pub async fn restore(
         }
     }
     let _guard = state.inner.setup_lock.lock().await;
+    // An admin may have been created while this request waited for the lock.
+    if state.db().users().count().await? > 0 {
+        return Err(ApiError::Conflict("setup has already been completed".into()));
+    }
     let pending = crate::routes::maintenance::stage_upload(&state, &headers, body).await?;
     tracing::warn!(ip = ?meta.ip, "restore staged from first-run setup; it is applied on the next restart");
     Ok((StatusCode::ACCEPTED, ApiJson(pending)).into_response())

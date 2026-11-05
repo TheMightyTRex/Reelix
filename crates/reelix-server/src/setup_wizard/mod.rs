@@ -98,6 +98,21 @@ struct Wizard {
     port: u16,
 }
 
+/// Whether `base` is plain http to a computer other than this one.
+fn plain_http_elsewhere(base: &str) -> bool {
+    let Some(rest) = base.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(h, _)| h),
+    };
+    !(host == "localhost"
+        || host.ends_with(".localhost")
+        || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()))
+}
+
 /// Runs the wizard; returns the process exit code.
 pub fn run(config: &Config, opts: Options) -> ExitCode {
     let env_plain = std::env::var("REELIX_PLAIN").is_ok_and(|v| !v.is_empty() && v != "0");
@@ -113,6 +128,12 @@ pub fn run(config: &Config, opts: Options) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if plain_http_elsewhere(&base) {
+        eprintln!(
+            "Note: {base} is another computer over plain http, so the password, the set-up code and API keys \
+             cross the network unencrypted. Use https, or run reelix setup on the server itself."
+        );
+    }
     let api = match Api::new(&base) {
         Ok(a) => a,
         Err(e) => {
@@ -913,13 +934,13 @@ impl Wizard {
             self.say(&format!(
                 "{} {}: {} to add, {} already in Reelix, {} left out.",
                 source.label(),
-                plan.version,
+                term::clean(&plan.version),
                 count(MigrateAction::Create),
                 count(MigrateAction::Existing),
                 count(MigrateAction::Skip)
             ));
             for note in &plan.notes {
-                self.say(&format!("  {note}"));
+                self.say(&format!("  {}", term::clean(note)));
             }
             let lines = vec![
                 self.ui.bold("Bring it over?"),
@@ -968,7 +989,7 @@ impl Wizard {
                         "{} is brought over: {made} added, {failed} could not be added.",
                         source.label()
                     ));
-                    if let Some(e) = run.error {
+                    if let Some(e) = run.error.as_deref().map(term::clean) {
                         self.last_error = Some(e.clone());
                         let line = self.ui.danger(&e);
                         self.say(&line);
@@ -1357,7 +1378,7 @@ impl Wizard {
         {
             return self.run_step(step);
         }
-        self.say(&format!("{} added and tested.", schema.name));
+        self.say(&format!("{} added and tested.", term::clean(&schema.name)));
         Flow::Next
     }
 
@@ -1523,6 +1544,16 @@ fn parse_numbers(s: &str, max: usize) -> Option<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_http_to_another_computer_is_noticed() {
+        assert!(super::plain_http_elsewhere("http://192.168.1.20:7700"));
+        assert!(super::plain_http_elsewhere("http://server.lan:7700/reelix"));
+        assert!(!super::plain_http_elsewhere("http://127.0.0.1:7700"));
+        assert!(!super::plain_http_elsewhere("http://localhost:7700"));
+        assert!(!super::plain_http_elsewhere("http://[::1]:7700"));
+        assert!(!super::plain_http_elsewhere("https://server.lan"));
+    }
+
     use super::*;
 
     #[test]
