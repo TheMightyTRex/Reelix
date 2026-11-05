@@ -129,7 +129,9 @@ services:
 docker compose up -d
 ```
 
-To build the image yourself, run `docker build -f docker/Dockerfile -t reelix .` from the repository root. The image includes the web UI and runs as `PUID:PGID`.
+To build the image yourself, run `docker build -f docker/Dockerfile -t reelix .` from the repository root. The image includes the web UI and runs as `PUID:PGID`. Add `--build-arg REELIX_WEB_FEATURES=classic-setup` to build it with the classic onboarding instead of the set-up wizard.
+
+On a server with no desktop, follow [Set up Reelix from a terminal only](docs/terminal-setup.md).
 
 ### Windows
 
@@ -201,7 +203,9 @@ Open <http://localhost:7700>. The setup wizard first asks how you want to start:
 
 Unless you are browsing from the server itself, the wizard asks for the one-time setup token that Reelix prints to its log (and stdout) when it starts without any users, e.g. `docker logs reelix` or `journalctl -u reelix`. For the Windows service it is in `C:\ProgramData\Reelix\logs` (readable from an Administrator PowerShell). A new token is made at every start until the admin account exists.
 
-**No desktop on the server?** Run the same wizard in a terminal: `docker exec -it reelix /app/reelix setup` (or `reelix setup`). It asks the same questions and saves them through Reelix's API on the server, so no setup token is needed. Add `--plain` (or set `REELIX_PLAIN=1`) for plain lines that a screen reader can follow, with nothing redrawn.
+**No desktop on the server?** Run the same wizard in a terminal: `docker exec -it reelix /app/reelix setup` (or `reelix setup`). Every command, from installing to the last question, is in [Set up Reelix from a terminal only](docs/terminal-setup.md). It asks the same questions and saves them through Reelix's API on the server, so no setup token is needed. Add `--plain` (or set `REELIX_PLAIN=1`) for plain lines that a screen reader can follow, with nothing redrawn.
+
+To ask the questions again later, open **Settings → Set-up Wizard** and choose **Launch wizard**.
 
 **Send feedback** is on every step of the wizard. A report names the step and opens a new GitHub issue; **Show as a QR code** sends it from a phone when the server is not online yet. Nothing typed into the wizard, and no password, key or setup token, is in a report.
 

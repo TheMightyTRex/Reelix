@@ -13,6 +13,9 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
   - **Migration** brings the *arr apps over with the System → Migrate preview, inside the wizard.
   - "What is…" help on each step, a progress line, and focus on each new step's heading.
 - **`reelix setup`:** the same wizard in a terminal, for a server with no desktop. Boxed (a screen per step, a progress bar and a menu on the bottom line, with help over the step) or plain (`--plain` or `REELIX_PLAIN=1`) for screen readers.
+- **Settings → Set-up Wizard** with **Launch wizard**: an admin can run the wizard again (without the account and restore steps), in the browser or with `reelix setup`.
+- **Classic onboarding as a build option:** build the web UI with `--features classic-setup` (or the Docker build argument `REELIX_WEB_FEATURES=classic-setup`) to keep the classic onboarding instead of the set-up wizard.
+- **Terminal-only instructions** in `docs/terminal-setup.md`: every command from installing Reelix to the last set-up question.
 - **Send feedback in the wizard,** with [Snaglist](https://github.com/TheMightyTRex/snaglist) (MIT). Reports name the step and open a GitHub issue. **Show as a QR code** sends a report from a phone when the server is not online yet; in the terminal the code is sized to the window, and the whole report is saved under the data directory's `feedback` folder.
 
 ## [0.8.3] - 2026-11-05

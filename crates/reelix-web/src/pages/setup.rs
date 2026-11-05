@@ -162,24 +162,23 @@ pub fn SetupPage() -> impl IntoView {
         help_open: RwSignal::new(false),
     };
 
-    // Set-up already happened (someone opened /setup by hand): leave. Runs once.
+    // Set-up already happened. An admin can run the wizard again (Settings, then Set-up wizard),
+    // without the code, the account or a restore; anyone else leaves. Runs once.
     Effect::new(move |_| {
         if auth.boot.get_untracked() == Boot::Ready {
-            let to = if auth.user.with_untracked(Option::is_some) {
-                "/"
+            if auth.is_admin() {
+                wizard.ctx.update(|c| c.signed_in = true);
             } else {
-                "/login"
-            };
-            navigate(to, Default::default());
+                let to = if auth.is_logged_in() { "/" } else { "/login" };
+                navigate(to, Default::default());
+            }
         }
     });
 
     // From another computer, the set-up code the server printed is needed once.
     spawn_local(async move {
         if let Ok(s) = api::get::<SetupStatus>("/setup").await {
-            wizard.ctx.set(Context {
-                code_required: s.setup_token_required,
-            });
+            wizard.ctx.update(|c| c.code_required = s.setup_token_required);
             if let Some(el) = document().document_element() {
                 let _ = el.set_attribute("data-reelix-version", &s.version);
             }
@@ -363,7 +362,7 @@ fn Choices(wizard: Wizard, question: &'static Question) -> impl IntoView {
         <fieldset class="wizard-choices">
             <legend>{question.legend}</legend>
             <div class="choice-cards">
-                {question.choices.iter().map(|c| {
+                {move || question.choices.iter().filter(|c| install::offered(question, c.value, wizard.ctx.get())).map(|c| {
                     let value = c.value;
                     let checked = move || wizard.answers.with(|a| a.has(question.key, value));
                     let on_change = move |e: ev::Event| {

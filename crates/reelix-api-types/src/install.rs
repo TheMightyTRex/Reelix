@@ -118,12 +118,18 @@ pub fn flow(start: Start) -> &'static [StepId] {
 pub struct Context {
     /// The browser is not on the server itself, so the set-up code is needed.
     pub code_required: bool,
+    /// An admin is signed in already: the wizard runs again (Settings, then Set-up wizard), so
+    /// there is no code, no account to make and no backup to restore over.
+    pub signed_in: bool,
 }
 
 /// Whether `step` is shown, given the answers so far.
 pub fn applies(step: StepId, answers: &Answers, ctx: Context) -> bool {
     let start = answers.start();
     if !flow(start).contains(&step) {
+        return false;
+    }
+    if ctx.signed_in && matches!(step, StepId::Code | StepId::Account | StepId::Restore) {
         return false;
     }
     match step {
@@ -133,6 +139,12 @@ pub fn applies(step: StepId, answers: &Answers, ctx: Context) -> bool {
         StepId::Monitor => answers.follows(Kind::Movies),
         _ => true,
     }
+}
+
+/// Whether an answer is offered. Running the wizard again offers no restore: a backup is
+/// restored in System, then Backup, once Reelix is set up.
+pub fn offered(question: &Question, value: &str, ctx: Context) -> bool {
+    !(ctx.signed_in && question.key == "start" && value == "restore")
 }
 
 /// The steps that will be shown, in order.
@@ -984,7 +996,16 @@ mod tests {
         let ctx = Context::default();
         let mut a = Answers::with_defaults();
         assert!(!steps_shown(&a, ctx).contains(&StepId::Code));
-        assert!(steps_shown(&a, Context { code_required: true }).contains(&StepId::Code));
+        assert!(
+            steps_shown(
+                &a,
+                Context {
+                    code_required: true,
+                    signed_in: false
+                }
+            )
+            .contains(&StepId::Code)
+        );
 
         a.set("follow", "books,music");
         let shown = steps_shown(&a, ctx);
@@ -1004,6 +1025,20 @@ mod tests {
         let shown = steps_shown(&a, ctx);
         assert!(shown.contains(&StepId::Migrate) && shown.contains(&StepId::Tmdb));
         assert!(!shown.contains(&StepId::Follow));
+    }
+
+    #[test]
+    fn running_again_leaves_out_the_account_and_restore() {
+        let again = Context {
+            code_required: true,
+            signed_in: true,
+        };
+        let shown = steps_shown(&Answers::with_defaults(), again);
+        assert_eq!(shown[0], StepId::Start);
+        assert!(!shown.contains(&StepId::Code) && !shown.contains(&StepId::Account));
+        let start = &step(StepId::Start).questions[0];
+        assert!(!offered(start, "restore", again));
+        assert!(offered(start, "restore", Context::default()));
     }
 
     #[test]

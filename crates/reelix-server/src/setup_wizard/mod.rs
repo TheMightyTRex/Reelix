@@ -137,6 +137,7 @@ pub fn run(config: &Config, opts: Options) -> ExitCode {
         answers: Answers::with_defaults(),
         ctx: Context {
             code_required: status.setup_token_required,
+            signed_in: false,
         },
         step: StepId::Start,
         body: Vec::new(),
@@ -161,10 +162,6 @@ pub fn run(config: &Config, opts: Options) -> ExitCode {
 impl Wizard {
     fn shown(&self) -> Vec<StepId> {
         install::steps_shown(&self.answers, self.ctx)
-            .into_iter()
-            // Signed in already: there is no account to make and no backup to restore over.
-            .filter(|s| !(self.signed_in && matches!(s, StepId::Account | StepId::Code)))
-            .collect()
     }
 
     fn run_steps(&mut self) -> ExitCode {
@@ -303,21 +300,29 @@ impl Wizard {
 
     /// One of a question's answers, or several with commas.
     fn choose(&mut self, q: &Question) -> Input<String> {
-        let current = self.answers.get(q.key).to_owned();
-        let default: Vec<usize> = q
+        // Only the answers on offer here, numbered in order.
+        let choices: Vec<&install::Choice> = q
             .choices
+            .iter()
+            .filter(|c| install::offered(q, c.value, self.ctx))
+            .collect();
+        let current = self.answers.get(q.key).to_owned();
+        let mut default: Vec<usize> = choices
             .iter()
             .enumerate()
             .filter(|(_, c)| current.split(',').any(|v| v == c.value))
             .map(|(i, _)| i + 1)
             .collect();
+        if default.is_empty() {
+            default.push(1);
+        }
         let default_text = default
             .iter()
             .map(|n| n.to_string())
             .collect::<Vec<_>>()
             .join(",");
         let mut lines = vec![self.ui.bold(q.legend)];
-        for (i, c) in q.choices.iter().enumerate() {
+        for (i, c) in choices.iter().enumerate() {
             let mark = if c.recommended { "●" } else { " " };
             let rec = if c.recommended { " (recommended)" } else { "" };
             lines.push(format!(" {:>2}. {mark} {}{rec}", i + 1, c.label));
@@ -340,12 +345,12 @@ impl Wizard {
             let picked = if line.trim().is_empty() {
                 Some(default.clone())
             } else {
-                parse_numbers(&line, q.choices.len())
+                parse_numbers(&line, choices.len())
             };
             match picked {
                 Some(p) if !p.is_empty() && (q.multi || p.len() == 1) => {
-                    let values: Vec<&str> = p.iter().map(|n| q.choices[n - 1].value).collect();
-                    let labels: Vec<&str> = p.iter().map(|n| q.choices[n - 1].label).collect();
+                    let values: Vec<&str> = p.iter().map(|n| choices[n - 1].value).collect();
+                    let labels: Vec<&str> = p.iter().map(|n| choices[n - 1].label).collect();
                     self.answers.set(q.key, values.join(","));
                     self.say(&format!("{}: {}", q.legend, labels.join(", ")));
                     return Input::Got(values.join(","));
@@ -354,10 +359,10 @@ impl Wizard {
                     let msg = if q.multi {
                         format!(
                             "Type numbers from 1 to {}, with commas, such as 1,2.",
-                            q.choices.len()
+                            choices.len()
                         )
                     } else {
-                        format!("Type one number from 1 to {}.", q.choices.len())
+                        format!("Type one number from 1 to {}.", choices.len())
                     };
                     lines.push(self.ui.danger(&msg));
                     if self.ui.plain {
@@ -760,6 +765,7 @@ impl Wizard {
             match self.rt.block_on(self.api.post::<_, UserDto>("/auth/login", &req)) {
                 Ok(_) => {
                     self.signed_in = true;
+                    self.ctx.signed_in = true;
                     return true;
                 }
                 Err(e) => println!("{}", e.message),
