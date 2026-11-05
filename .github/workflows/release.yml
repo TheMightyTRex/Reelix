@@ -231,7 +231,7 @@ jobs:
     name: windows installer
     needs: [prepare, archives]
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
