@@ -1,0 +1,23 @@
+{
+ "status": "true",
+ "query": {
+  "id": "7303624"
+ },
+ "feed": {
+  "id": 7303624,
+  "podcastGuid": "a3b6a5f8-2a5e-5b44-8f0f-9d5c1e8e2f20",
+  "title": "Just a Minute",
+  "url": "https://podcasts.files.bbci.co.uk/b006s5dp.rss",
+  "originalUrl": "https://podcasts.files.bbci.co.uk/b006s5dp.rss",
+  "link": "https://www.bbc.co.uk/programmes/b006s5dp",
+  "description": "Panel game in which players must speak for one minute on any subject asked of them",
+  "author": "BBC Radio 4",
+  "ownerName": "BBC",
+  "image": "https://ichef.bbci.co.uk/images/ic/3000x3000/p0m1qz0x.jpg",
+  "artwork": "https://ichef.bbci.co.uk/images/ic/3000x3000/p0m1qz0x.jpg",
+  "lastUpdateTime": 1773081000,
+  "language": "en-gb",
+  "episodeCount": 3
+ },
+ "description": "Found matching feed"
+}

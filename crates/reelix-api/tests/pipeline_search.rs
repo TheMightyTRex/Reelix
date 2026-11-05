@@ -478,6 +478,7 @@ async fn blocklist_and_pending_routes() {
         indexer_flags: vec![],
         seed_ratio: None,
         seed_time_minutes: None,
+        soulseek: None,
     };
     let far = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp_millis();
     let p1 = pending::insert(&app.db, Some(movie), None, &[], &release, "delay", far)

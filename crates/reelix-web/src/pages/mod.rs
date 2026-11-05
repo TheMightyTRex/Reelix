@@ -13,6 +13,7 @@ pub mod movies;
 pub mod music;
 pub mod not_found;
 pub mod profile;
+pub mod radio;
 pub mod requests;
 pub mod search;
 pub mod series;

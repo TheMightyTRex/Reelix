@@ -1,0 +1,36 @@
+{
+ "status": "true",
+ "feeds": [
+  {
+   "id": 6524027,
+   "podcastGuid": "8ff4b8b2-1c3a-5d77-9f6b-4b4f5e0e6a11",
+   "title": "Just a Minute (German fan dub)",
+   "url": "https://feeds.example.de/jam.xml",
+   "link": "https://example.de/jam",
+   "description": "<p>Eine Minute ohne Zögern.</p>",
+   "author": "Fans",
+   "ownerName": "Fans",
+   "image": "https://example.de/jam.jpg",
+   "artwork": "https://example.de/jam-art.jpg",
+   "language": "de",
+   "episodeCount": 12
+  },
+  {
+   "id": 7303624,
+   "podcastGuid": "a3b6a5f8-2a5e-5b44-8f0f-9d5c1e8e2f20",
+   "title": "Just a Minute",
+   "url": "https://podcasts.files.bbci.co.uk/b006s5dp.rss",
+   "link": "https://www.bbc.co.uk/programmes/b006s5dp",
+   "description": "Panel game in which players must speak for one minute on any subject asked of them",
+   "author": "BBC Radio 4",
+   "ownerName": "BBC",
+   "image": "https://ichef.bbci.co.uk/images/ic/3000x3000/p0m1qz0x.jpg",
+   "artwork": "https://ichef.bbci.co.uk/images/ic/3000x3000/p0m1qz0x.jpg",
+   "language": "en-gb",
+   "episodeCount": 55
+  }
+ ],
+ "count": 2,
+ "query": "just a minute",
+ "description": "Found matching feeds"
+}

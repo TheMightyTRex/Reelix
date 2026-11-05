@@ -1,0 +1,75 @@
+{
+ "$schema": "https://rms.api.bbc.co.uk/docs/swagger.json#/definitions/ContainerItems",
+ "data": [
+  {
+   "type": "container_item",
+   "id": "b006s5dp",
+   "urn": "urn:bbc:radio:brand:b006s5dp",
+   "tlec_urn": "urn:bbc:radio:brand:b006s5dp",
+   "network": {
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "short_title": "Radio 4",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Just a Minute",
+    "secondary": null,
+    "tertiary": null
+   },
+   "synopses": {
+    "short": "Panel game in which players must speak for one minute on any subject asked of them",
+    "medium": "Panel game in which the contestants are challenged to speak for one minute without hesitation, deviation or repetition on any subject that comes up on the cards",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0m1qz0x.jpg",
+   "activities": [],
+   "uris": [
+    {
+     "type": "latest",
+     "id": null,
+     "label": "Latest",
+     "uri": "/v2/programmes/playable?container=b006s5dp&sort=sequential&type=episode&experience=domestic"
+    }
+   ],
+   "playable_count": null,
+   "recommendation": null
+  },
+  {
+   "type": "container_item",
+   "id": "b0bdlgmj",
+   "urn": "urn:bbc:radio:series:b0bdlgmj",
+   "tlec_urn": "urn:bbc:radio:brand:b006qy2s",
+   "network": {
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "short_title": "Radio 4",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "15 Minute Drama",
+    "secondary": "Just a Girl: Series 4",
+    "tertiary": null
+   },
+   "synopses": {
+    "short": "Fourth series of the drama by Mark Davies Markham about a transgender teenager.",
+    "medium": "Fourth series of the drama by Mark Davies Markham about a transgender teenager.",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p06fhfq1.jpg",
+   "activities": [],
+   "uris": [
+    {
+     "type": "latest",
+     "id": null,
+     "label": "Latest",
+     "uri": "/v2/programmes/playable?container=b0bdlgmj&sort=sequential&type=episode&experience=domestic"
+    }
+   ],
+   "playable_count": null,
+   "recommendation": null
+  }
+ ]
+}

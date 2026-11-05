@@ -1,0 +1,99 @@
+{
+ "programme": {
+  "type": "episode",
+  "pid": "m002rd20",
+  "expected_child_count": null,
+  "position": 6,
+  "image": {
+   "pid": "p0m1qz0x"
+  },
+  "media_type": "audio",
+  "title": "6. The time I spent New Year's Eve with Sue Perkins",
+  "short_synopsis": "Paul Merton, Lucy Porter, Zoe Lyons and Chris Cantrill.",
+  "medium_synopsis": "What would you do if you were Doctor Who for a day? Our players try to talk about all of space and time in just one minute.",
+  "long_synopsis": "We're back in Bradford for the final episode of the series. Zoe tells us why she's not as cool as a cucumber, Chris explains who Bradford Jesus is and Lucy offers her thoughts on Taylor Swift.\n\nHost: Sue Perkins\nPlayers: Paul Merton, Zoe Lyons, Chris Cantrill, Lucy Porter\nProducer: Georgia Keating\nExecutive Producer: James Robinson\nProduction Coordinator: Sarah Nicholls\nSound Editor: Marc Willcox\nAdditional material by Ruth Husko\n\nAn EcoAudio certified production.\nA BBC Studios Production for Radio 4.",
+  "first_broadcast_date": "2026-03-09T18:30:00Z",
+  "ownership": {
+   "service": {
+    "type": "radio",
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "title": "BBC Radio 4"
+   }
+  },
+  "parent": {
+   "programme": {
+    "type": "series",
+    "pid": "m002qrx3",
+    "title": "Series 96",
+    "short_synopsis": "Sue Perkins hosts Radio 4's longest running panel show, Just a Minute.",
+    "media_type": null,
+    "position": 96,
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "expected_child_count": 6,
+    "first_broadcast_date": "2026-02-02T18:30:00Z",
+    "aggregated_episode_count": 6,
+    "ownership": {
+     "service": {
+      "type": "radio",
+      "id": "bbc_radio_four",
+      "key": "radio4",
+      "title": "BBC Radio 4"
+     }
+    },
+    "parent": {
+     "programme": {
+      "type": "brand",
+      "pid": "b006s5dp",
+      "title": "Just a Minute",
+      "short_synopsis": "Panel game in which players must speak for one minute on any subject asked of them",
+      "media_type": null,
+      "position": null,
+      "image": {
+       "pid": "p0m1qz0x"
+      },
+      "expected_child_count": null,
+      "first_broadcast_date": "2007-01-01T18:30:00Z",
+      "aggregated_episode_count": 451,
+      "ownership": {
+       "service": {
+        "type": "radio",
+        "id": "bbc_radio_four",
+        "key": "radio4",
+        "title": "BBC Radio 4"
+       }
+      }
+     }
+    }
+   }
+  },
+  "versions": [
+   {
+    "canonical": 1,
+    "pid": "m002rd21",
+    "duration": 1680,
+    "types": [
+     "Original version"
+    ]
+   },
+   {
+    "canonical": 0,
+    "pid": "p0my0ml3",
+    "duration": 1680,
+    "types": [
+     "Other"
+    ]
+   },
+   {
+    "canonical": 0,
+    "pid": "p0my0prn",
+    "duration": 1720,
+    "types": [
+     "Podcast version"
+    ]
+   }
+  ]
+ }
+}

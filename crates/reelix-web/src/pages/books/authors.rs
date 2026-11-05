@@ -9,11 +9,14 @@ use reelix_api_types::content::ContentSearchKind;
 
 use crate::api;
 use crate::components::books::{BookOptions, start_book_search};
+use crate::components::infinite::{InfiniteSentinel, remember_window};
 use crate::components::library_common::{SortHeader, ViewMode, bytes, on_entity_changed, pref_get, pref_set};
 use crate::components::library_forms::{require_library, with_query};
 use crate::components::poster::{MediaState, PosterCard};
 use crate::components::{EmptyState, ErrorBox, Icon, PageHeader, Skeleton, StatusBadge};
 use crate::state::Toasts;
+
+const PAGE_CHUNK: usize = 120;
 
 const SORTS: [(&str, &str); 4] = [
     ("name", "Name"),
@@ -94,6 +97,26 @@ pub fn AuthorsPage() -> impl IntoView {
         authors.refetch()
     });
 
+    // Infinite scroll over the fetched list: render a window that grows as the end nears.
+    let shown = RwSignal::new(PAGE_CHUNK);
+    let filters = move || [q.get(), quick.get(), sort.get(), desc.get().to_string()].join("|");
+    let item_count = Memo::new(move |_| {
+        authors.with(|r| {
+            r.as_ref()
+                .and_then(|r| r.as_ref().ok())
+                .map_or(0, |p| p.items.len())
+        })
+    });
+    remember_window("authors", shown, filters, move || item_count.get() > 0);
+    // A new filter or sort starts from the top.
+    Effect::new(move |prev: Option<String>| {
+        let f = filters();
+        if prev.is_some_and(|p| p != f) {
+            shown.set(PAGE_CHUNK);
+        }
+        f
+    });
+
     let update_all = move |_| {
         spawn_local(async move {
             match api::post_empty::<EnqueuedJob>("/system/tasks/refresh_authors/run").await {
@@ -142,6 +165,7 @@ pub fn AuthorsPage() -> impl IntoView {
             };
         }
         sort_authors(&mut items, &sort.get(), desc.get());
+        items.truncate(shown.get());
         match mode.get() {
             ViewMode::Table => view! {
                 <div class="card">
@@ -256,6 +280,12 @@ pub fn AuthorsPage() -> impl IntoView {
         </div>
         <p class="lib-count" aria-live="polite">{count_label}</p>
         {content}
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| shown.update(|s| *s += PAGE_CHUNK))
+            enabled=Signal::derive(move || shown.get() < item_count.get())
+            loaded=Signal::derive(move || shown.get().min(item_count.get()))
+            total=Signal::derive(move || item_count.get() as u64)
+        />
         <WantedSummary />
     }
 }

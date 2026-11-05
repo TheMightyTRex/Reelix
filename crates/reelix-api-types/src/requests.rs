@@ -19,6 +19,8 @@
 //!   `GET/PUT/DELETE /requests/media/{id}`, `POST /requests/media/{id}/approve|decline|retry`
 //! - book/music discovery: `GET /search/books?q=`, `GET /search/music?q=`,
 //!   `GET /media/book/{workId}`, `GET /media/album/{releaseGroupId}`
+//! - radio discovery: `GET /discover/genres/radio`, `GET /discover/content/radio/{row}`,
+//!   `GET /search/radio?q=`, `GET /media/radio/{provider}/{externalId}`
 
 use chrono::{DateTime, NaiveDate, Utc};
 use reelix_core::{BookFormat, MediaKind, Permissions};
@@ -480,6 +482,9 @@ pub struct RequestCountsDto {
     pub book: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub music: u64,
+    /// Radio show requests (omitted when zero).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub radio: u64,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -540,30 +545,35 @@ pub struct QuotaDto {
     /// Album requests.
     #[serde(default)]
     pub music: QuotaUsageDto,
+    /// Radio show requests.
+    #[serde(default)]
+    pub radio: QuotaUsageDto,
     /// Users with MANAGE_REQUESTS bypass quotas.
     pub exempt: bool,
 }
 
 // ---------------------------------------------------------------- book / music requests
 
-/// Kind of a book/music request (`book` = an Open Library work, `music` = a MusicBrainz
-/// release group, i.e. an album).
+/// Kind of a book/music/radio request (`book` = an Open Library work, `music` = a MusicBrainz
+/// release group, i.e. an album, `radio` = a radio programme or podcast to follow).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ContentRequestKind {
     Book,
     Music,
+    Radio,
 }
 
 impl ContentRequestKind {
-    pub const ALL: [ContentRequestKind; 2] = [Self::Book, Self::Music];
+    pub const ALL: [ContentRequestKind; 3] = [Self::Book, Self::Music, Self::Radio];
 
-    /// `book` | `music` (the `requests.media_kind` value).
+    /// `book` | `music` | `radio` (the `requests.media_kind` value).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Book => "book",
             Self::Music => "music",
+            Self::Radio => "radio",
         }
     }
 
@@ -571,9 +581,23 @@ impl ContentRequestKind {
         match s {
             "book" | "books" => Some(Self::Book),
             "music" | "album" | "albums" => Some(Self::Music),
+            "radio" | "podcast" | "podcasts" => Some(Self::Radio),
             _ => None,
         }
     }
+}
+
+/// The foreign id of a radio request or Discover item: `{provider}:{external_id}` (the
+/// external id may itself contain `:`, e.g. a feed URL).
+pub fn radio_foreign_id(provider: &str, external_id: &str) -> String {
+    format!("{provider}:{external_id}")
+}
+
+/// `(provider, external_id)` of a radio foreign id ([`radio_foreign_id`]).
+pub fn split_radio_foreign_id(id: &str) -> Option<(&str, &str)> {
+    let (p, e) = id.split_once(':')?;
+    let provider_ok = !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    (provider_ok && !e.trim().is_empty()).then_some((p, e))
 }
 
 /// A book or album request (`GET /requests/media`).
@@ -582,10 +606,11 @@ impl ContentRequestKind {
 pub struct ContentRequestDto {
     pub id: i64,
     pub kind: ContentRequestKind,
-    /// Open Library work id (book) or MusicBrainz release-group id (album).
+    /// Open Library work id (book), MusicBrainz release-group id (album) or
+    /// `{provider}:{external_id}` (radio).
     pub foreign_id: String,
     pub title: String,
-    /// Author (book) or artist (album) name.
+    /// Author (book), artist (album) or station / author (radio) name.
     pub subtitle: Option<String>,
     pub year: Option<i32>,
     /// Cover URL.
@@ -606,6 +631,9 @@ pub struct ContentRequestDto {
     pub author_id: Option<i64>,
     pub album_id: Option<i64>,
     pub artist_id: Option<i64>,
+    /// Radio: the followed show once approved.
+    #[serde(default)]
+    pub radio_show_id: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub approved_at: Option<DateTime<Utc>>,
@@ -617,14 +645,16 @@ pub struct ContentRequestDto {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateContentRequestDto {
     pub kind: ContentRequestKind,
-    /// Open Library work id (`OL…W`) or MusicBrainz release-group id.
+    /// Open Library work id (`OL…W`), MusicBrainz release-group id or, for radio,
+    /// `{provider}:{external_id}` of a Discover / search item.
     pub foreign_id: String,
     /// Books: formats to request; empty = the configured default formats (or both).
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub formats: Vec<BookFormat>,
     /// Advanced options (REQUEST_ADVANCED). For books they apply to the single requested
-    /// format (they are rejected when both formats are requested).
+    /// format (they are rejected when both formats are requested). Radio: an audiobook
+    /// quality profile and a radio root folder.
     #[serde(default)]
     pub profile_id: Option<i64>,
     #[serde(default)]
@@ -661,11 +691,11 @@ pub struct ContentRequestPageDto {
     pub page_size: u32,
 }
 
-/// `GET /requests/media/options?kind=ebook|audiobook|music`.
+/// `GET /requests/media/options?kind=ebook|audiobook|music|radio`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams, utoipa::ToSchema))]
 pub struct ContentRequestOptionsQuery {
-    /// `ebook` (default), `audiobook` or `music`.
+    /// `ebook` (default), `audiobook`, `music` or `radio`.
     #[serde(default)]
     pub kind: Option<String>,
 }
@@ -682,15 +712,16 @@ pub struct ContentRequestBriefDto {
     pub created_at: DateTime<Utc>,
 }
 
-/// One book or album in book/music search results.
+/// One book, album or radio show in search results and Discover rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ContentItemDto {
     pub kind: ContentRequestKind,
-    /// Open Library work id or MusicBrainz release-group id.
+    /// Open Library work id, MusicBrainz release-group id or `{provider}:{external_id}`
+    /// (radio).
     pub foreign_id: String,
     pub title: String,
-    /// Author / artist name.
+    /// Author / artist name; radio: the station, else the author.
     pub subtitle: Option<String>,
     /// Open Library author id / MusicBrainz artist id.
     pub subtitle_id: Option<String>,
@@ -698,8 +729,9 @@ pub struct ContentItemDto {
     pub cover: Option<String>,
     /// Albums: `Album`, `EP`, `Single`, … (`None` for books).
     pub album_type: Option<String>,
+    /// Radio: `available` = the show is followed (in the radio library).
     pub availability: AvailabilityStatus,
-    /// Library book / album id when in the library.
+    /// Library book / album id, or radio show id, when in the library.
     pub library_id: Option<i64>,
     /// The most relevant request visible to the caller (active first), if any.
     pub request: Option<ContentRequestBriefDto>,
@@ -733,6 +765,35 @@ pub struct MusicSearchPageDto {
     pub artists: Vec<ArtistItemDto>,
 }
 
+/// `GET /search/radio?q=`: radio shows from the enabled radio sources (a pasted link is
+/// previewed).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioSearchPageDto {
+    pub results: Vec<ContentItemDto>,
+}
+
+/// A radio Discover list: `id` is the row id of `GET /discover/content/radio/{row}`
+/// (`{provider}-{list}`, e.g. `apple-top`, `bbc-category-comedy`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioDiscoverListDto {
+    pub id: String,
+    pub name: String,
+    /// Radio source id (`apple`, `bbc`, `podcastindex`) and its display name.
+    pub provider: String,
+    pub provider_name: String,
+}
+
+/// `GET /discover/genres/radio`: the radio Discover lists of the enabled sources for the
+/// radio settings' country and language: rows (charts, trending) and categories.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioDiscoverDto {
+    pub rows: Vec<RadioDiscoverListDto>,
+    pub categories: Vec<RadioDiscoverListDto>,
+}
+
 /// Discover rows for books: `(row id, title)`. Subject rows use Open Library subject keys.
 pub const BOOK_DISCOVER_ROWS: &[(&str, &str)] = &[
     ("trending", "Trending this week"),
@@ -755,11 +816,13 @@ pub const MUSIC_DISCOVER_ROWS: &[(&str, &str)] = &[
 ];
 
 impl ContentRequestKind {
-    /// The Discover rows of this kind: `(row id, title)`.
+    /// The fixed Discover rows of this kind: `(row id, title)`. Radio rows depend on the
+    /// enabled sources and are listed by `GET /discover/genres/radio` instead (empty here).
     pub fn discover_rows(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Self::Book => BOOK_DISCOVER_ROWS,
             Self::Music => MUSIC_DISCOVER_ROWS,
+            Self::Radio => &[],
         }
     }
 }
@@ -775,7 +838,8 @@ pub struct ContentRowDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ContentRequestAbilityDto {
-    /// Has REQUEST_BOOK / REQUEST_MUSIC and there is something left to request.
+    /// Has REQUEST_BOOK / REQUEST_MUSIC / REQUEST_RADIO and there is something left to
+    /// request.
     pub can_request: bool,
     pub can_request_advanced: bool,
     /// Books: formats that can still be requested (not covered by an active request).
@@ -788,16 +852,20 @@ pub struct ContentRequestAbilityDto {
     pub reason: Option<String>,
 }
 
-/// `GET /media/book/{workId}` and `GET /media/album/{releaseGroupId}`.
+/// `GET /media/book/{workId}`, `GET /media/album/{releaseGroupId}` and
+/// `GET /media/radio/{provider}/{externalId}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ContentDetailDto {
     #[serde(flatten)]
     pub item: ContentItemDto,
     pub overview: Option<String>,
-    /// Every request for this book/album visible to the caller.
+    /// Every request for this book/album/show visible to the caller.
     pub requests: Vec<ContentRequestBriefDto>,
     pub request_ability: ContentRequestAbilityDto,
+    /// Radio: the show as its source sees it now (station, links, newest episodes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radio: Option<crate::radio::RadioShowPreviewDto>,
 }
 
 // ---------------------------------------------------------------- issues
@@ -1209,6 +1277,14 @@ pub struct RequestSettingsDto {
     pub book_quota_days: u32,
     pub music_quota_limit: Option<u32>,
     pub music_quota_days: u32,
+    /// Radio requests: audiobook quality profile, radio root folder (`None` = the radio
+    /// settings' library folder) and tags of shows followed by an approved request. The follow
+    /// choice is the radio settings' `default_follow`.
+    pub radio: RequestDefaultsDto,
+    pub auto_approve_radio: bool,
+    /// Global radio quota (`None` = unlimited).
+    pub radio_quota_limit: Option<u32>,
+    pub radio_quota_days: u32,
 }
 
 impl Default for RequestSettingsDto {
@@ -1246,6 +1322,10 @@ impl Default for RequestSettingsDto {
             book_quota_days: 7,
             music_quota_limit: None,
             music_quota_days: 7,
+            radio: RequestDefaultsDto::default(),
+            auto_approve_radio: false,
+            radio_quota_limit: None,
+            radio_quota_days: 7,
         }
     }
 }

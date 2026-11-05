@@ -1,0 +1,26 @@
+{
+ "programme": {
+  "type": "brand",
+  "pid": "b006s5dp",
+  "expected_child_count": null,
+  "position": null,
+  "image": {
+   "pid": "p0m1qz0x"
+  },
+  "media_type": null,
+  "title": "Just a Minute",
+  "short_synopsis": "Panel game in which players must speak for one minute on any subject asked of them",
+  "medium_synopsis": "Panel game in which the contestants are challenged to speak for one minute without hesitation, deviation or repetition on any subject that comes up on the cards",
+  "long_synopsis": null,
+  "first_broadcast_date": "2007-01-01T18:30:00Z",
+  "aggregated_episode_count": 451,
+  "ownership": {
+   "service": {
+    "type": "radio",
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "title": "BBC Radio 4"
+   }
+  }
+ }
+}

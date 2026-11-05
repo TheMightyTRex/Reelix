@@ -149,6 +149,9 @@ pub async fn resolve(
         ReleasePayload::NzbFile { .. } => Err(ClientError::InvalidPayload(
             "an NZB cannot be sent to a torrent client".into(),
         )),
+        ReleasePayload::Soulseek(_) => Err(ClientError::InvalidPayload(
+            "a Soulseek release cannot be sent to a torrent client".into(),
+        )),
     }
 }
 

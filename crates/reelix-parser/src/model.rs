@@ -96,13 +96,14 @@ impl QualityFamily {
         }
     }
 
-    /// Movie/Series → Video, Ebook → Ebook, Audiobook → Audiobook, Music → Music.
+    /// Movie/Series → Video, Ebook → Ebook, Audiobook → Audiobook, Music → Music. Radio
+    /// episodes are spoken-word audio, so they rank with the audiobook qualities.
     pub fn of_content(k: reelix_core::ContentKind) -> Self {
         use reelix_core::ContentKind as K;
         match k {
             K::Movie | K::Series => Self::Video,
             K::Ebook => Self::Ebook,
-            K::Audiobook => Self::Audiobook,
+            K::Audiobook | K::Radio => Self::Audiobook,
             K::Music => Self::Music,
         }
     }

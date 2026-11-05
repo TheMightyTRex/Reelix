@@ -594,6 +594,17 @@ async fn delay_and_release_profiles() {
     let mut bad = new;
     bad["enable_usenet"] = json!(false);
     bad["enable_torrent"] = json!(false);
+    // Soulseek alone is enough; all three off is not.
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/api/v1/delayprofiles",
+        &admin,
+        Some(bad.clone()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    bad["enable_soulseek"] = json!(false);
     let (s, _) = call(&app, Method::POST, "/api/v1/delayprofiles", &admin, Some(bad)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, _) = call(

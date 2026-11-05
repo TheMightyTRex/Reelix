@@ -1,0 +1,25 @@
+[
+  {"username":"vinylhoarder","directories":[
+    {"directory":"@@abcde\\Music\\Radiohead\\1997 - OK Computer","fileCount":2,"files":[
+      {"id":"0b6f7e1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b","username":"vinylhoarder","direction":"Download","filename":"@@abcde\\Music\\Radiohead\\1997 - OK Computer\\01 - Airbag.flac","size":31457280,"state":"Completed, Succeeded","requestedAt":"2026-11-05T14:03:01.1234567","enqueuedAt":"2026-11-05T14:03:01.9876543","startedAt":"2026-11-05T14:03:02.5000000Z","endedAt":"2026-11-05T14:03:32.5000000Z","bytesTransferred":31457280,"averageSpeed":1048576,"attempts":1,"removed":false,"bytesRemaining":0,"elapsedTime":"00:00:30","percentComplete":100,"remainingTime":"00:00:00"},
+      {"id":"9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d","username":"vinylhoarder","direction":"Download","filename":"@@abcde\\Music\\Radiohead\\1997 - OK Computer\\02 - Paranoid Android.flac","size":41943040,"state":"InProgress","requestedAt":"2026-11-05T14:03:01.2234567","enqueuedAt":"2026-11-05T14:03:02.0876543","startedAt":"2026-11-05T14:03:33.0000000Z","bytesTransferred":10485760,"averageSpeed":1048576,"attempts":1,"removed":false,"bytesRemaining":31457280,"elapsedTime":"00:00:10.0000000","percentComplete":25,"remainingTime":"00:00:30"}
+    ]}
+  ]},
+  {"username":"audiophile_99","directories":[
+    {"directory":"D:\\Shared\\Radiohead - OK Computer (1997) [24-96]","fileCount":2,"files":[
+      {"id":"1d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a","username":"audiophile_99","direction":"Download","filename":"D:\\Shared\\Radiohead - OK Computer (1997) [24-96]\\01 Airbag.flac","size":98566144,"state":"Completed, Succeeded","requestedAt":"2026-11-05T14:04:00.0000000","startedAt":"2026-11-05T14:04:01.0000000Z","endedAt":"2026-11-05T14:04:10.0000000Z","bytesTransferred":98566144,"averageSpeed":524288,"attempts":1,"removed":false,"bytesRemaining":0,"percentComplete":100},
+      {"id":"2e3f4a5b-6c7d-4e8f-9a0b-1c2d3e4f5a6b","username":"audiophile_99","direction":"Download","filename":"D:\\Shared\\Radiohead - OK Computer (1997) [24-96]\\02 Paranoid Android.flac","size":132120576,"state":"Completed, Errored","requestedAt":"2026-11-05T14:04:00.0000000","endedAt":"2026-11-05T14:04:20.0000000Z","bytesTransferred":0,"averageSpeed":0,"exception":"Transfer rejected: File not shared.","attempts":1,"removed":false,"bytesRemaining":132120576,"percentComplete":0}
+    ]}
+  ]},
+  {"username":"slowpoke","directories":[
+    {"directory":"books\\Frank Herbert\\Dune","fileCount":1,"files":[
+      {"id":"3f4a5b6c-7d8e-4f9a-8b1c-2d3e4f5a6b7c","username":"slowpoke","direction":"Download","filename":"books\\Frank Herbert\\Dune\\Dune.epub","size":1048576,"state":"Queued, Remotely","requestedAt":"2026-11-05T14:05:00.0000000","enqueuedAt":"2026-11-05T14:05:01.0000000","bytesTransferred":0,"averageSpeed":0,"placeInQueue":4,"attempts":0,"removed":false,"bytesRemaining":1048576,"percentComplete":0}
+    ]}
+  ]},
+  {"username":"flaky","directories":[
+    {"directory":"music/Artist/Album","fileCount":2,"files":[
+      {"id":"4a5b6c7d-8e9f-4a0b-9c2d-3e4f5a6b7c8d","username":"flaky","direction":"Download","filename":"music/Artist/Album/01.mp3","size":5000000,"state":"Completed, Succeeded","requestedAt":"2026-11-05T14:06:00.0000000","endedAt":"2026-11-05T14:06:30.0000000Z","bytesTransferred":5000000,"averageSpeed":100000,"attempts":1,"removed":false,"bytesRemaining":0,"percentComplete":100},
+      {"id":"5b6c7d8e-9f0a-4b1c-8d3e-4f5a6b7c8d9e","username":"flaky","direction":"Download","filename":"music/Artist/Album/02.mp3","size":5000000,"state":"Completed, TimedOut","requestedAt":"2026-11-05T14:06:00.0000000","endedAt":"2026-11-05T14:07:00.0000000Z","bytesTransferred":1000000,"averageSpeed":0,"exception":"Inactivity timeout","attempts":1,"nextAttemptAt":"2026-11-05T14:12:00.0000000Z","removed":false,"bytesRemaining":4000000,"percentComplete":20}
+    ]}
+  ]}
+]

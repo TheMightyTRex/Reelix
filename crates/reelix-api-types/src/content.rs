@@ -1,4 +1,4 @@
-//! Types shared by books and music: content kinds, their root folders and search kinds.
+//! Types shared by books, music and radio: content kinds, their root folders and search kinds.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,13 +6,13 @@ use crate::library::UnmappedFolderDto;
 
 pub use reelix_core::{BookFormat, ContentKind};
 
-/// A book or music root folder with free space and unmapped sub-folders.
+/// A book, music or radio root folder with free space and unmapped sub-folders.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ContentRootFolderDto {
     pub id: i64,
     pub path: String,
-    /// `ebook`, `audiobook` or `music`.
+    /// `ebook`, `audiobook`, `music` or `radio`.
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub kind: ContentKind,
     pub accessible: bool,

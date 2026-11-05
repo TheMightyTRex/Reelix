@@ -209,7 +209,8 @@ fn has_src_attr(attrs: &str) -> bool {
 /// Third-party artwork hosts: TMDB and TheTVDB posters, Open Library book covers / author photos and
 /// Cover Art Archive album art (both of which redirect to `*.archive.org`).
 const IMG_HOSTS: &str = "https://image.tmdb.org https://artworks.thetvdb.com https://covers.openlibrary.org \
-    https://coverartarchive.org https://archive.org https://*.archive.org";
+    https://coverartarchive.org https://archive.org https://*.archive.org \
+    https://ichef.bbci.co.uk https://*.mzstatic.com";
 
 /// Embedded trailers: YouTube's privacy-enhanced (no-cookie) player only.
 const FRAME_HOSTS: &str = "https://www.youtube-nocookie.com";

@@ -1,0 +1,55 @@
+{
+ "status": "true",
+ "liveItems": [],
+ "items": [
+  {
+   "id": 41785090001,
+   "title": "6. The time I spent New Year's Eve with Sue Perkins",
+   "link": "https://www.bbc.co.uk/programmes/m002rd20",
+   "description": "<p>Sue Perkins hosts.</p>",
+   "guid": "urn:bbc:podcast:m002rd20",
+   "datePublished": 1773081000,
+   "enclosureUrl": "https://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download/proto/https/vpid/p0my0prn.mp3",
+   "enclosureType": "audio/mpeg",
+   "enclosureLength": 27520000,
+   "duration": 1720,
+   "explicit": 0,
+   "episode": 6,
+   "episodeType": "full",
+   "season": 96,
+   "feedId": 7303624
+  },
+  {
+   "id": 41785090002,
+   "title": "5. That's a real headscratcher",
+   "link": "https://www.bbc.co.uk/programmes/m002rd1y",
+   "description": "Sue Perkins hosts.",
+   "guid": "urn:bbc:podcast:m002rd1y",
+   "datePublished": 1772476200,
+   "enclosureUrl": "https://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download/proto/https/vpid/p0mx1abc.mp3",
+   "enclosureType": "audio/mpeg",
+   "duration": 1700,
+   "episode": 5,
+   "episodeType": "full",
+   "season": 96,
+   "feedId": 7303624
+  },
+  {
+   "id": 41785090003,
+   "title": "Coming soon",
+   "link": "",
+   "description": "",
+   "guid": "",
+   "datePublished": 1772000000,
+   "enclosureUrl": "https://example.com/trailer.mp3",
+   "duration": 60,
+   "episode": null,
+   "episodeType": "trailer",
+   "season": 0,
+   "feedId": 7303624
+  }
+ ],
+ "count": 3,
+ "query": "7303624",
+ "description": "Found matching items"
+}

@@ -6,6 +6,81 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-06
+
+### Fixed
+- **Opening an Apple Podcasts show from Discover works again.** In 0.8.2 and 0.8.3 it failed with "Request failed (502)" or "this link cannot be read here", because the Apple source's feed reader was missing the public-only client that Discover uses.
+
+### Security
+- Feed links read for Discover and requests now also refuse private IP addresses written as numbers (such as `http://127.0.0.1/…`), not only host names that resolve to private addresses.
+
+## [0.8.3] - 2026-11-05
+
+### Added
+- **Soulseek support through [slskd](https://github.com/slskd/slskd)**, as an indexer and a download client, for music, books, audiobooks and radio. See `docs/soulseek.md`.
+  - **Search:** Reelix searches slskd and turns each peer's folder into one release (for example a whole album), named and tagged with its format, such as FLAC 24-96, MP3 320 or M4B. Releases are scored by your quality profiles and custom formats.
+  - **Peers:** you can skip peers with no free upload slot, a long queue or a slow connection. Among otherwise equal results, a free slot ranks first.
+  - **Download and import:** grabbing a release queues its files in slskd, and progress shows in the queue. Finished folders are imported from slskd's downloads folder, with remote path mappings for Docker.
+  - **Delay profiles and blocklist:** delay profiles gain a Soulseek switch and delay. A failed download blocklists that peer's folder only, so the same album from another peer can still be grabbed.
+  - **Setup:** adding the slskd download client also adds the matching indexer.
+
+### Changed
+- **Infinite scrolling.** These pages now load more as you scroll, instead of using page buttons or "Show more":
+  - library pages: Movies, Series, Music artists, Books authors and Radio shows
+  - logs and lists: History, Blocklist, Requests and Issues
+  - Discover "see all" grids and Search results
+
+  Every list keeps a **Load more** button for keyboard users, and shows "Showing N of M" where the total is known. Going **Back** to a library page returns you to where you were. Select all on Requests, History and Blocklist applies to the loaded rows and says so. The Queue and Wanted pages keep their page buttons.
+
+## [0.8.2] - 2026-11-05
+
+### Added
+- **Radio on Discover:** radio programmes and podcasts now have their own tab on Discover and Search, next to books and music.
+  - **Rows:** Apple Podcasts top charts and 19 categories for your country; on BBC Sounds, Popular and seven categories (UK only); and Podcast Index trending, once it's set up.
+  - **Show view:** synopsis, station and the newest episodes. Shows you already follow are marked.
+  - **Follow or Request:** library managers can follow a show straight away. Other users request it like a book or album, with radio permissions, auto-approve, default profile, root folder and tags, and a radio quota. Approving a request follows the show with your default follow choice.
+
+### Security
+- Podcast links read for Discover and requests can only reach public addresses. Private addresses are refused when connecting and on every redirect, so a public link can't lead the server into your network.
+
+## [0.8.1] - 2026-11-05
+
+### Fixed
+- **Importing a large library no longer times out.**
+  - **Before:** Import selected sent every folder in one request and only answered once all of them were added. With hundreds of folders that took longer than a reverse proxy allows (Cloudflare's 524).
+  - **Now:** folders are imported 25 at a time, with an "Importing… N of M" counter, and the errors from every batch are listed together.
+  - This applies to movies, series, music and books.
+- **Matching and importing movies and series is about five times faster.** Reelix still paced its TMDB lookups to 4 per second, TMDB's old limit, which it dropped in 2019. It now makes up to 20 per second and still backs off if TMDB asks it to. Up to 8 folders are now added at once, up from 4.
+
+## [0.8.0] - 2026-11-05
+
+### Added
+- **Radio**, a new media type for radio shows and podcasts, played through Audiobookshelf (#21).
+  - **Follow shows:** follow every episode, only new ones, or none. Reelix keeps each show's series and episodes, with numbers, titles, first broadcast and length; episodes without a number are numbered in broadcast order.
+  - **Sources:** podcast feeds, BBC programmes and BBC Sounds search, Apple Podcasts, Podcast Index (with your API key) and the Internet Archive. Search follows your country and language.
+    - The BBC endpoints are public but undocumented, so requests are spaced out and cached. If the data changes you get a clear message, and nothing saved is lost.
+  - **Audiobookshelf:** Reelix reads your Audiobookshelf podcast library and matches files to episodes:
+    - by the source's id,
+    - then by `S20E03` or the season and episode in Audiobookshelf,
+    - then by a title only one file and one episode share.
+    - You can set or clear a match by hand. A Review page lists podcasts and files that don't match anything.
+  - **Finding and filing episodes:** wanted episodes are searched on your indexers (Audio/Other) with the usual quality, delay and release profiles, and finished downloads are filed into the podcast library.
+    - Files are named `{Show}/{Show} - S20E03 - Title`, with radio naming settings.
+    - Tags are written on Reelix's copy only. Audio is never re-encoded, existing files are never overwritten, and torrents still seeding are left untouched.
+    - Then Audiobookshelf is asked to scan.
+  - **Artwork and station logos:** downloaded when a show is refreshed. SVG logos are cleaned before they're shown.
+  - **Pages:** Radio shows (with an A–Z list), show pages with a series picker and episode table, an episode panel for matching and searching, Add show (search or paste a link), Stations, Review, and Radio settings.
+  - **Activity and history:** radio episodes appear in the queue, history and blocklist.
+  - **Tasks:** refresh shows (12 h), sync feeds (1 h), read the Audiobookshelf library (15 min) and search for missing episodes (6 h).
+  - **API:** everything is under `/api/v1/radio`. `POST /api/v1/command` is new, with `RefreshRadioShow`, `RescanRadioLibrary` and `RadioMissingSearch`.
+- `THIRD_PARTY_NOTICES.md`, which ships with every download. The BBC provider is adapted from Storyarr (MIT).
+
+### Changed
+- Root folders can have the kind **Radio**.
+
+### Fixed
+- Restoring a backup on Windows waits up to ten seconds for a locked database file, instead of two.
+
 ## [0.7.1] - 2026-11-04
 
 ### Fixed

@@ -85,6 +85,8 @@ impl ReleaseCandidate {
             indexer_priority: 25,
             seeders: None,
             peers: None,
+            queue_length: None,
+            upload_speed: None,
             publish_date: None,
             indexer_flags: Vec::new(),
             download_url: String::new(),
@@ -106,6 +108,18 @@ impl ReleaseCandidate {
     pub fn for_album(title: &str, protocol: Protocol) -> Self {
         let parsed = reelix_parser::parse_music(title).to_release();
         Self::with_parsed(title, protocol, in_family(parsed, QualityFamily::Music))
+    }
+
+    /// A radio (programme / podcast episode) release, parsed with
+    /// [`reelix_parser::parse_radio`]; radio ranks with the audiobook qualities, so its quality
+    /// is always of the audiobook family.
+    pub fn for_radio(title: &str, protocol: Protocol) -> Self {
+        let parsed = reelix_parser::parse_radio(title).to_release();
+        Self::with_parsed(
+            title,
+            protocol,
+            in_family(parsed, QualityFamily::of_content(ContentKind::Radio)),
+        )
     }
 }
 
@@ -201,6 +215,45 @@ mod tests {
             specs(&evaluate(&book("A - T [EPUB]", BookFormat::Ebook, 2), &ctx)),
             ["upgrade"]
         );
+    }
+
+    #[test]
+    fn radio_releases_use_the_audiobook_profiles() {
+        let profiles = default_profiles_for(family_for(ContentKind::Radio));
+        let (any, m4b) = (&profiles[0], &profiles[1]);
+        let defs = default_definitions_for(QualityFamily::Audiobook);
+        let radio = |title: &str, mb: u64| {
+            let mut c = ReleaseCandidate::for_radio(title, Protocol::Torrent);
+            c.size = mb * MB;
+            c.media_id = Some(7);
+            c
+        };
+        let mp3 = radio("BBC.Radio.4.The.Archers.2026.11.04.mp3", 12);
+        assert_eq!(mp3.parsed.quality.quality, Quality::AudiobookMp3);
+        assert_eq!(mp3.parsed.title, "The Archers");
+        let aac = radio("Show.S03E05.Title.AAC", 12);
+        assert_eq!(aac.parsed.quality.quality, Quality::AudiobookM4b);
+        let unknown = radio("Show - Title", 12);
+        assert_eq!(unknown.parsed.quality.quality, Quality::UnknownAudiobook);
+
+        let mut ctx = DecisionContext::new(any, chrono::Utc::now());
+        ctx.definitions = &defs;
+        // A 13 minute episode: 12 MB of MP3 is fine, 200 MB is far too large.
+        ctx.runtime_minutes = size_runtime_minutes(QualityFamily::Audiobook, Some(13));
+        assert!(
+            evaluate(&mp3, &ctx).accepted,
+            "{:?}",
+            evaluate(&mp3, &ctx).rejections
+        );
+        assert!(evaluate(&unknown, &ctx).accepted);
+        assert_eq!(specs(&evaluate(&radio("Show S01E01 MP3", 200), &ctx)), ["size"]);
+        // AAC ranks above MP3 in "Audiobook: Any".
+        assert!(any.rank(aac.parsed.quality.quality) > any.rank(mp3.parsed.quality.quality));
+        // "Audiobook: M4B" only takes AAC/M4A/M4B.
+        let mut ctx = DecisionContext::new(m4b, chrono::Utc::now());
+        ctx.definitions = &defs;
+        assert!(evaluate(&aac, &ctx).accepted);
+        assert_eq!(specs(&evaluate(&mp3, &ctx)), ["quality"]);
     }
 
     #[test]

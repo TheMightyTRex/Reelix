@@ -1,6 +1,6 @@
 # Reelix
 
-**One self-hosted app for your whole media library: discover, request, search, download, import and organize movies, TV, books, audiobooks and music.**
+**One self-hosted app for your whole media library: discover, request, search, download, import and organize movies, TV, books, audiobooks, music, and radio shows and podcasts.**
 
 Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr in a single Rust service with a single web UI. You get one binary, one database, one login and one API, with no API keys to wire between apps and no state to keep in sync.
 
@@ -9,7 +9,8 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 | **Movies & TV** | Monitors movies and series, searches indexers, grabs releases, imports and renames files |
 | **Books & audiobooks** | Monitors authors and books, with ebooks and audiobooks as separate formats of one book |
 | **Music** | Monitors artists and albums, matches releases against MusicBrainz, tags and renames tracks |
-| **Indexers** | Torznab and Newznab indexers with health checks, statistics and a manual multi-indexer search |
+| **Radio & podcasts** | Follows radio shows and podcasts, keeps their series and episodes, and files new episodes into an Audiobookshelf podcast library |
+| **Indexers** | Torznab and Newznab indexers, Cardigann-style definitions and Soulseek (through slskd), with health checks, statistics and a manual multi-indexer search |
 | **Requests** | A discovery and request portal with users, approvals, quotas and media-server login |
 
 ---
@@ -19,9 +20,10 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 ### Library
 - Add movies, series, authors, books, artists and albums by search, by ID (TMDB, TVDB, IMDb, ISBN, MusicBrainz) or from import lists.
 - Flexible monitoring: minimum availability for movies; all, future, missing, first or latest season, or per season/episode for series; all, future or selected books and albums.
-- Standard, daily and anime series, with absolute numbering and scene (XEM) mappings.
+- Standard, daily and anime series, with absolute numbering (most accurate with a TheTVDB key).
 - Root folders for every library on one page, with free-space and accessibility checks.
-- Library scans that match existing folders and files, and an import page for unmapped folders.
+- Library scans that match existing folders and files, and an import page for unmapped folders: folders are listed right away, matched in the background with a progress counter, and imported in batches, so large libraries work behind a reverse proxy too.
+- Library, activity and request pages load more as you scroll, and going back returns you to where you were.
 - Tokenized naming templates for every media type, with a live preview for movies and TV.
 - Hardlink, copy or move imports. Hardlinks are preferred so torrents keep seeding, and every import is written to a temporary file first and then renamed into place.
 - Recycle bin instead of hard deletes.
@@ -42,18 +44,27 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 - HTTP and SOCKS5 proxies, and FlareSolverr for Cloudflare-protected sites.
 - **Torrent clients:** qBittorrent, Transmission, Deluge, rTorrent and a blackhole folder.
 - **Usenet clients:** SABnzbd, NZBGet and a blackhole folder.
+- **Soulseek** through [slskd](https://github.com/slskd/slskd), as both an indexer and a download client, for music, books, audiobooks and radio; see [Soulseek setup](docs/soulseek.md).
 - Automatic import of finished downloads, failed-download handling with blocklisting and a new search, and remote path mappings for clients on another host.
 - **Direct downloads:** native Rust Spotify tracks, albums and playlists, plus YouTube audio or video with format/resolution selection, playlist preview, a persistent queue, cancellation and retry. Set up tools and destinations on **Downloads**; see [direct download setup](docs/direct-downloads.md).
 
 ### Discover and requests
 - Discover page with trending, popular and upcoming movies and TV.
 - Books and music on Discover too: trending books and books by subject (fantasy, science fiction, mystery and more) from Open Library, and new releases and popular albums from ListenBrainz, plus search for both.
+- Radio and podcasts on Discover: Apple Podcasts top charts and categories for your country, BBC Sounds popular programmes, and Podcast Index trending.
 - Shows availability everywhere: available, partially available, requested, pending or processing.
-- Request movies, whole series or single seasons, books (ebook, audiobook or both) and albums.
+- Request movies, whole series or single seasons, books (ebook, audiobook or both), albums and radio shows.
 - Approval workflow with auto-approve per user or permission, per-user quotas, and decline reasons.
 - Sign in with local accounts, Jellyfin, Emby or Plex accounts, or OIDC.
 - Users can report issues (audio, video, subtitles, other) on available media.
-- Plex and Jellyfin watchlist sync.
+- Plex watchlist sync (each user's watchlist becomes requests), and Plex and Jellyfin watchlists as import lists.
+
+### Radio and podcasts
+- Follow shows from podcast feeds, BBC programmes, Apple Podcasts, Podcast Index and the Internet Archive, by search or by pasting a link.
+- Follow every episode, only new ones, or none. Reelix keeps each show's series and episodes, numbering episodes in broadcast order when the source doesn't.
+- Matches episodes to the files in your Audiobookshelf podcast library (by source id, `S01E02` or title), with manual matching and a review page for anything that doesn't match.
+- Searches your indexers (and Soulseek) for wanted episodes and files them into the podcast library with tags, without re-encoding, then asks Audiobookshelf to scan.
+- Show artwork and station logos are downloaded and served by Reelix.
 
 ### Metadata
 - Movies and TV from TMDB, optionally TheTVDB.
@@ -63,7 +74,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 - Optionally adds imported ebooks to a Calibre library.
 
 ### Integrations
-- **Media servers:** Jellyfin, Emby and Plex (library refresh and availability), plus Audiobookshelf, Kavita, Calibre-Web and Navidrome for books and music.
+- **Media servers:** Jellyfin, Emby and Plex (library refresh and availability), plus Audiobookshelf (books and podcast libraries), Kavita, Calibre-Web and Navidrome.
 - **Import lists:** TMDB, Trakt, IMDb, MDBList, Plex and Jellyfin watchlists, other Reelix instances, URL lists, and Last.fm, ListenBrainz and Spotify for music.
 - **Notifications:** Discord, Slack, Telegram, email (SMTP), Pushover, Gotify, ntfy, Apprise, Matrix, webhooks and custom scripts.
 
@@ -75,6 +86,12 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 - Bind address, port, URL base and logging can be edited in Settings → General; they are saved to `config.toml` and apply after a restart.
 - Per-user UI settings: date and time format, relative dates, first day of the week, and default calendar and library views.
 - REST API with API keys, and interactive API documentation at `/api/docs`.
+
+### Security
+- A one-time setup token for first-run setup from another machine, login rate limits, and trusted-proxy support.
+- Tracker cookies, passkeys and other credentials encrypted at rest; backups and keys readable only by Reelix.
+- Server-side requests to user-supplied addresses can't reach private networks unless you allow it.
+- Signed release builds, pinned build dependencies, and checksums verified by the installers and in-app updates.
 
 ### Migration and compatibility
 - **Migrate from the \*arr stack** (System → Migrate): connect to Radarr, Sonarr, Prowlarr, Readarr, Lidarr or Jellyseerr with its URL and API key, preview what will be added, reused or skipped, then import tags, root folders, quality profiles, indexers, download clients, remote path mappings, movies, series, authors, artists, users and requests. Path rewrites cover different volume mounts, hidden passwords can be entered in the preview, and running it again doesn't duplicate anything.
@@ -178,13 +195,15 @@ Run the binary from the repository root so it finds the web UI in `crates/reelix
 
 Open <http://localhost:7700>. The setup wizard walks you through:
 
-1. Creating the admin account. Unless you are browsing from the server itself, the wizard asks for the one-time setup token that Reelix prints to its log (and stdout) when it starts without any users, e.g. `docker logs reelix` or `journalctl -u reelix`.
+1. Creating the admin account. Unless you are browsing from the server itself, the wizard asks for the one-time setup token that Reelix prints to its log (and stdout) when it starts without any users, e.g. `docker logs reelix` or `journalctl -u reelix`. For the Windows service it is in `C:\ProgramData\Reelix\logs` (readable from an Administrator PowerShell). A new token is made at every start until the admin account exists.
 2. Connecting a media server (optional).
 3. Adding root folders for each library you want to manage.
 4. Adding a download client and indexers.
 5. Choosing defaults for requests.
 
-Then add your TMDB API key under **Settings → Metadata**. Movies and TV need it; books and music don't need any keys.
+Then add your TMDB API key under **Settings → Metadata**. Movies and TV need it; books, music and radio don't need any keys (a Podcast Index key is optional).
+
+For radio and podcasts, choose your Audiobookshelf podcast library and its folder under **Settings → Radio**, and add a Radio root folder under **Settings → Media management**.
 
 ### Recommended folder layout
 
@@ -270,7 +289,7 @@ Architecture, the domain model and design decisions are described in [docs/desig
 
 ## License
 
-Reelix is licensed under the [GNU General Public License v3.0 or later](https://www.gnu.org/licenses/gpl-3.0.html).
+Reelix is licensed under the [GNU General Public License v3.0 or later](https://www.gnu.org/licenses/gpl-3.0.html). Code adapted from other projects is listed with its license in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Reelix is a media management and automation tool. It doesn't host, index or distribute content. You are responsible for complying with the laws of your jurisdiction and the terms of the services you connect.
 

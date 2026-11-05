@@ -1,4 +1,5 @@
-//! Indexer adapters: Torznab, Newznab and YAML definitions, with rate limiting and health.
+//! Indexer adapters: Torznab, Newznab, slskd (Soulseek) and YAML definitions, with rate limiting
+//! and health.
 //!
 //! Adapters are built generically from a provider implementation id plus a validated JSON
 //! settings object ([`build`]); [`IndexerManager`] fans searches out across instances with
@@ -13,6 +14,7 @@ pub mod http;
 pub mod manager;
 pub mod model;
 pub mod newznab;
+pub mod slskd;
 pub mod util;
 mod xml;
 
@@ -32,6 +34,7 @@ pub use model::{
     Category, IndexerCapabilities, IndexerFlag, ReleaseInfo, SearchKind, SearchMode, SearchParam, SearchQuery,
 };
 pub use newznab::{Flavor, NewznabIndexer};
+pub use slskd::SlskdIndexer;
 
 /// A configured indexer instance.
 #[async_trait]
@@ -105,9 +108,13 @@ impl BuildContext {
     }
 }
 
-/// Schemas for the built-in protocol implementations (`torznab`, `newznab`).
+/// Schemas for the built-in protocol implementations (`torznab`, `newznab`, `slskd`).
 pub fn schemas() -> Vec<ProviderSchema> {
-    vec![newznab::schema(Flavor::Torznab), newznab::schema(Flavor::Newznab)]
+    vec![
+        newznab::schema(Flavor::Torznab),
+        newznab::schema(Flavor::Newznab),
+        slskd::schema(),
+    ]
 }
 
 /// Built-in schemas plus one per loaded definition (`definition:<id>`).
@@ -134,6 +141,7 @@ pub fn build(
             settings,
             ctx,
         )?)),
+        slskd::IMPLEMENTATION => Ok(Box::new(SlskdIndexer::from_settings(settings, ctx)?)),
         other => {
             let id = other
                 .strip_prefix(definition::IMPLEMENTATION_PREFIX)

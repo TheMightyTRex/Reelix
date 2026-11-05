@@ -340,8 +340,8 @@ pub async fn user_quota(
 
 // ---------------------------------------------------------------- book / album requests
 
-/// Book and album requests (own, or all with VIEW_REQUESTS), paged. `kind`: `book`,
-/// `music` or `all`; the other filters work like `GET /requests`.
+/// Book, album and radio requests (own, or all with VIEW_REQUESTS), paged. `kind`: `book`,
+/// `music`, `radio` or `all`; the other filters work like `GET /requests`.
 #[utoipa::path(get, path = "/api/v1/requests/media", tag = "requests", params(RequestListQuery),
     security(("session" = []), ("api_key" = [])),
     responses(
@@ -356,15 +356,16 @@ pub async fn list_media_requests(
     Ok(ApiJson(svc(&state)?.list_content_requests(&user.user, &q).await?))
 }
 
-/// Requests a book (REQUEST_BOOK; choose `formats`) or an album (REQUEST_MUSIC). Duplicate,
-/// availability and quota checks; auto-approved with AUTO_APPROVE_BOOK / AUTO_APPROVE_MUSIC
-/// or the auto-approve request settings.
+/// Requests a book (REQUEST_BOOK; choose `formats`), an album (REQUEST_MUSIC) or a radio show
+/// to follow (REQUEST_RADIO; `foreign_id` = `{provider}:{external_id}`). Duplicate,
+/// availability and quota checks; auto-approved with AUTO_APPROVE_BOOK / AUTO_APPROVE_MUSIC /
+/// AUTO_APPROVE_RADIO or the auto-approve request settings.
 #[utoipa::path(post, path = "/api/v1/requests/media", tag = "requests", request_body = CreateContentRequestDto,
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 201, description = "Created", body = ContentRequestDto),
         (status = 403, description = "Not permitted or quota exceeded", body = ApiErrorBody),
-        (status = 404, description = "Unknown work / release group", body = ApiErrorBody),
+        (status = 404, description = "Unknown work / release group / show", body = ApiErrorBody),
         (status = 409, description = "Already available or requested", body = ApiErrorBody),
         (status = 502, description = "Metadata / library unavailable", body = ApiErrorBody),
     ))]
@@ -378,7 +379,7 @@ pub async fn create_media_request(
     ))
 }
 
-/// Profiles and root folders for advanced book/album requests (REQUEST_ADVANCED).
+/// Profiles and root folders for advanced book/album/radio requests (REQUEST_ADVANCED).
 #[utoipa::path(get, path = "/api/v1/requests/media/options", tag = "requests",
     params(ContentRequestOptionsQuery),
     security(("session" = []), ("api_key" = [])),
@@ -395,6 +396,7 @@ pub async fn media_request_options(
         None | Some("ebook" | "book") => ContentKind::Ebook,
         Some("audiobook") => ContentKind::Audiobook,
         Some("music" | "album") => ContentKind::Music,
+        Some("radio") => ContentKind::Radio,
         Some(other) => return Err(ApiError::validation(format!("unknown kind {other:?}"))),
     };
     Ok(ApiJson(

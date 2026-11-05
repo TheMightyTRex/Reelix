@@ -2496,6 +2496,16 @@ select.input {
 }
 .pager-summary, .pager-page { color: var(--text-muted); font-size: var(--text-sm); }
 .pager-buttons { display: flex; align-items: center; gap: var(--space-2); }
+.infinite-sentinel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1px;
+  margin-top: var(--space-4);
+}
+.infinite-summary { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+.card-body.flush .infinite-sentinel { padding: 0 var(--space-4) var(--space-4); }
 
 .bulk-bar {
   position: sticky;
@@ -2893,7 +2903,6 @@ select.input {
   text-align: center;
 }
 .brand-tile:hover { text-decoration: none; border-color: var(--accent); }
-.load-more { display: flex; justify-content: center; margin: var(--space-5) 0; }
 
 /* Search */
 .search-page-form { display: flex; gap: var(--space-2); margin-bottom: var(--space-5); max-width: 640px; }
@@ -3165,6 +3174,7 @@ select.input {
 .release-title { max-width: 520px; word-break: break-word; }
 .proto-torrent { background: var(--accent-soft); }
 .proto-usenet { background: var(--surface-2); }
+.proto-soulseek { background: var(--success-soft); }
 .search-outcomes { margin: var(--space-3) 0; }
 .field.grow { flex: 1 1 auto; }
 /* ---- end Providers UI ---- */
@@ -3174,6 +3184,7 @@ select.input {
 .proto-badge { height: 20px; padding: 0 8px; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .02em; }
 .proto-badge.proto-torrent { color: var(--accent); }
 .proto-badge.proto-usenet { color: var(--info); background: var(--info-soft); }
+.proto-badge.proto-soulseek { color: var(--success); background: var(--success-soft); }
 .cf-score { font-family: var(--font-mono); font-size: var(--text-sm); cursor: help; }
 .cf-score.score-pos { color: var(--success); }
 .cf-score.score-neg { color: var(--danger); }
@@ -3362,3 +3373,39 @@ select.input {
 .link-btn:hover { text-decoration: underline; }
 .cell-sub .link-btn { color: var(--accent-strong); }
 .hero-pause { position: absolute; top: var(--space-3); right: var(--space-3); z-index: 2; background: rgba(0, 0, 0, 0.45); color: #fff; }
+
+/* Radio */
+.radio-art { position: relative; }
+.radio-art img { object-fit: contain; background: var(--surface-3); }
+.radio-art-fallback .icon { width: 40%; height: auto; }
+.radio-card-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.radio-card-badges .badge { font-size: var(--text-xs); }
+.az-jump { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: var(--space-3); }
+.az-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.az-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+.az-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.az-btn:disabled { opacity: 0.35; cursor: default; }
+.station-link { display: inline-flex; align-items: center; gap: var(--space-2); }
+.station-logo { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; background: var(--surface-2); }
+.station-logo-cell { width: 44px; }
+.station-logo-fallback { display: inline-grid; place-items: center; width: 28px; height: 28px; color: var(--text-faint); }
+.media-kind-icon { display: inline-flex; vertical-align: -2px; margin-right: var(--space-1); color: var(--text-muted); }
+.radio-episodes tr.muted td { color: var(--text-faint); }
+.radio-preview { display: grid; grid-template-columns: 120px 1fr; gap: var(--space-4); align-items: start; margin-bottom: var(--space-4); }
+.radio-preview .table-wrap { max-height: 320px; overflow-y: auto; }
+@media (max-width: 640px) {
+  .radio-preview { grid-template-columns: 72px 1fr; }
+  .az-btn { min-width: 32px; height: 32px; }
+}

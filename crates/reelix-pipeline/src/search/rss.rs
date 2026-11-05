@@ -1,5 +1,6 @@
 //! RSS sync: latest releases from RSS-enabled indexers, mapped to monitored library media and
-//! grabbed when they beat what's there (missing, or cutoff unmet).
+//! grabbed when they beat what's there (missing, or cutoff unmet). Releases in Audio/Other or
+//! Audio/Audiobook (or without categories) are first matched against wanted radio episodes.
 
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
@@ -10,7 +11,7 @@ use reelix_import::matching::ExpectedEpisode;
 use reelix_indexers::ReleaseInfo;
 
 use super::context::{Evaluator, Target};
-use super::mapping::{Mapped, MediaIndex, expected_episodes, release_kind};
+use super::mapping::{Mapped, MediaIndex, expected_episodes, may_be_radio, release_kind};
 use super::{Result, SearchService, SearchSummary, episode_wanted, lock};
 
 impl SearchService {
@@ -99,9 +100,33 @@ impl SearchService {
         let mut seen = std::collections::HashSet::new();
         let mut books_hit: BTreeMap<(i64, BookFormat), Vec<ReleaseInfo>> = BTreeMap::new();
         let mut albums_hit: BTreeMap<i64, Vec<ReleaseInfo>> = BTreeMap::new();
+        let mut radio_hit: BTreeMap<i64, Vec<ReleaseInfo>> = BTreeMap::new();
+        let radio_targets: Vec<reelix_radio::RadioTarget> = match self.radio.get() {
+            Some(radio) => match radio
+                .search_targets(&reelix_api_types::radio::RadioSearchRequest {
+                    kind: reelix_api_types::content::ContentSearchKind::Missing,
+                    ids: Vec::new(),
+                })
+                .await
+            {
+                Ok(t) => t.into_iter().filter(|t| t.monitored).collect(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "RSS: wanted radio episodes could not be read");
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
         for r in releases {
             if !seen.insert((r.indexer_id, r.guid.clone())) {
                 continue;
+            }
+            if !radio_targets.is_empty() && may_be_radio(&r) {
+                let parsed = reelix_parser::parse_radio(&r.title);
+                if let Some(t) = reelix_radio::match_release(&radio_targets, &parsed) {
+                    radio_hit.entry(t.episode_id()).or_default().push(r);
+                    continue;
+                }
             }
             // Book / music categories go to the books and music libraries only.
             match release_kind(&r) {
@@ -180,7 +205,7 @@ impl SearchService {
             self.grab_best(shared, &t, evals, &wanted, false, &mut sum)
                 .await?;
         }
-        if !books_hit.is_empty() || !albums_hit.is_empty() {
+        if !books_hit.is_empty() || !albums_hit.is_empty() || !radio_hit.is_empty() {
             shared.load_content(&self.db).await?;
         }
         for ((id, format), infos) in books_hit {
@@ -210,6 +235,13 @@ impl SearchService {
                 continue;
             };
             let t = Target::Album(Box::new(a));
+            self.rss_content(shared, &t, infos, &mut sum).await?;
+        }
+        for (id, infos) in radio_hit {
+            let Some(t) = radio_targets.iter().find(|t| t.episode_id() == id) else {
+                continue;
+            };
+            let t = Target::Radio(Box::new(t.clone()));
             self.rss_content(shared, &t, infos, &mut sum).await?;
         }
         Ok(sum)

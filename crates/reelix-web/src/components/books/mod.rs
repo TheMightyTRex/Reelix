@@ -113,6 +113,7 @@ pub fn kind_label(k: ContentKind) -> &'static str {
         ContentKind::Music => "Music",
         ContentKind::Movie => "Movie",
         ContentKind::Series => "Series",
+        ContentKind::Radio => "Radio",
     }
 }
 

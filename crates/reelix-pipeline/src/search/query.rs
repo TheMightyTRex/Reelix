@@ -109,3 +109,16 @@ pub fn album(t: &reelix_music::AlbumTarget) -> SearchQuery {
     q.year = t.album.release_date.and_then(|d| u16::try_from(d.year()).ok());
     q
 }
+
+/// Radio episode queries in the radio categories (Audio/Other): `Show S20E03`, the broadcast
+/// date and the episode title ([`reelix_radio::RadioTarget::search_terms`]).
+pub fn radio(t: &reelix_radio::RadioTarget) -> Vec<SearchQuery> {
+    t.search_terms()
+        .into_iter()
+        .map(|term| {
+            let mut q = SearchQuery::basic(term);
+            q.categories = reelix_indexers::categories::DEFAULT_RADIO.to_vec();
+            q
+        })
+        .collect()
+}

@@ -36,6 +36,7 @@ cp "$binary" "$dir/$exe"
 # Skip dotfiles such as trunk's .trunk-lock.
 (cd "$web" && find . -mindepth 1 -maxdepth 1 ! -name '.*' -exec cp -R {} "$dir/web/" \;)
 cp "$root/LICENSE" "$dir/LICENSE.txt"
+cp "$root/THIRD_PARTY_NOTICES.md" "$dir/THIRD_PARTY_NOTICES.md"
 mkdir -p "$dir/docs"
 cp "$root/docs/direct-downloads.md" "$root/docs/installers.md" "$dir/docs/"
 # Install marker read by the self-updater; installers replace it with their own kind.

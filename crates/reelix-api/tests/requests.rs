@@ -1200,3 +1200,223 @@ async fn book_and_music_discover_rows() {
     .await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn radio_discover_and_requests_for_requesters() {
+    let app = app().await;
+    {
+        let lib = app.lib.clone().with_radio(
+            Some("apple-top"),
+            fakes::radio_show("apple", "1234567", "The Archers"),
+        );
+        // A feed show: its id is a URL (percent-encoded in the path).
+        let mut feed = fakes::radio_show("rss", "https://1.2.3.4/pod.xml", "Feed Show");
+        feed.station_name = None;
+        feed.author = Some("Example".into());
+        lib.with_radio(None, feed);
+    }
+    let admin = login(&app, "admin").await;
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/users",
+        Some(&admin),
+        Some(json!({
+            "username": "rita",
+            "password": PW,
+            "permissions": (Permissions::ROLE_USER | Permissions::REQUEST_RADIO).bits(),
+        })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let rita = login(&app, "rita").await;
+    let alice = login(&app, "alice").await;
+
+    // Any signed-in user can browse; `/discover/genres/radio` is not the TMDB genre route.
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/genres/radio",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["rows"][0]["id"], "apple-top");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/radio/apple-top",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["results"][0]["kind"], "radio");
+    assert_eq!(r.body["results"][0]["foreign_id"], "apple:1234567");
+    assert_eq!(r.body["results"][0]["availability"], "unknown");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/radio/bbc-popular",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/search/radio?q=feed",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["results"][0]["foreign_id"], "rss:https://1.2.3.4/pod.xml");
+    assert_eq!(r.body["results"][0]["subtitle"], "Example");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/media/radio/rss/https%3A%2F%2F1.2.3.4%2Fpod.xml",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["title"], "Feed Show");
+    assert_eq!(r.body["radio"]["latest_episodes"][0]["title"], "Episode 1");
+
+    // Requesters cannot make the server read links to internal hosts.
+    for uri in [
+        "/api/v1/media/radio/rss/http%3A%2F%2F127.0.0.1%3A8080%2Ffeed",
+        "/api/v1/media/radio/apple/http%3A%2F%2F10.0.0.2%2Ffeed",
+        "/api/v1/search/radio?q=http%3A%2F%2Flocalhost%2Ffeed",
+    ] {
+        let r = call(&app, Method::GET, uri, Some(&rita), None).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{uri}");
+    }
+    // The show view: Rita may request, Alice (no REQUEST_RADIO) may not.
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/media/radio/apple/1234567",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["request_ability"]["can_request"], true);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/media/radio/apple/1234567",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["request_ability"]["can_request"], false);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/media/radio/apple/999",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    // Requesters cannot follow directly (MANAGE_LIBRARY), only request.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/radio/shows",
+        Some(&rita),
+        Some(json!({"provider": "apple", "external_id": "1234567"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let req = json!({"kind": "radio", "foreign_id": "apple:1234567"});
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&alice),
+        Some(req.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&rita),
+        Some(req.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["status"], "pending");
+    assert_eq!(r.body["kind"], "radio");
+    let id = r.body["id"].as_i64().unwrap();
+    assert!(app.lib.state().added_radio.is_empty());
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/requests/media",
+        Some(&rita),
+        Some(req),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/requests/media/{id}/approve"),
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // Approval follows the show; the row then marks it.
+    let r = call(
+        &app,
+        Method::POST,
+        &format!("/api/v1/requests/media/{id}/approve"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["status"], "available");
+    let show_id = r.body["radio_show_id"].as_i64().unwrap();
+    assert_eq!(app.lib.state().added_radio[0].external_id, "1234567");
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/radio/apple-top",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["results"][0]["availability"], "available");
+    assert_eq!(r.body["results"][0]["library_id"], show_id);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests/media?kind=radio",
+        Some(&rita),
+        None,
+    )
+    .await;
+    assert_eq!(r.body["total"], 1);
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/requests/media/options?kind=radio",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+}

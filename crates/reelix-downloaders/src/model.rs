@@ -1,6 +1,7 @@
 //! Protocol-neutral types exchanged between the pipeline and download clients.
 
 use reelix_core::MediaKind;
+use reelix_core::soulseek::SoulseekRelease;
 use serde::{Deserialize, Serialize};
 
 /// Identifier the client uses for a download (SABnzbd `nzo_id`, NZBGet `NZBID`, torrent info hash, …).
@@ -49,6 +50,8 @@ pub enum ReleasePayload {
     },
     /// A link the client (or the adapter) fetches itself.
     Url(String),
+    /// A Soulseek peer folder (slskd enqueues its files).
+    Soulseek(Box<SoulseekRelease>),
 }
 
 impl ReleasePayload {
@@ -59,6 +62,7 @@ impl ReleasePayload {
             Self::Magnet(_) => "magnet",
             Self::NzbFile { .. } => "nzb file",
             Self::Url(_) => "url",
+            Self::Soulseek(_) => "soulseek folder",
         }
     }
 }

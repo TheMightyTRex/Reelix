@@ -5,7 +5,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use reelix_api_types::requests::{AvailabilityStatus, ContentRequestKind, NamedIdDto, RootFolderOptionDto};
+use reelix_api_types::radio::{RadioShowHitDto, RadioShowPreviewDto};
+use reelix_api_types::requests::{
+    AvailabilityStatus, ContentRequestKind, NamedIdDto, RadioDiscoverDto, RootFolderOptionDto,
+};
 use reelix_core::{BookFormat, ContentKind, MediaKind};
 use reelix_mediaserver::plextv::PlexTv;
 use reelix_mediaserver::{MediaServer, MediaServerKind};
@@ -60,13 +63,14 @@ pub struct AddSeriesRequest {
     pub request_id: i64,
 }
 
-/// A book (Open Library work) or album (MusicBrainz release group) from a metadata lookup.
+/// A book (Open Library work), album (MusicBrainz release group) or radio show from a
+/// metadata lookup.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ContentHit {
-    /// Work id / release-group id.
+    /// Work id / release-group id / `{provider}:{external_id}`.
     pub foreign_id: String,
     pub title: String,
-    /// Author / artist name.
+    /// Author / artist name; radio: station, else author.
     pub subtitle: Option<String>,
     /// Author Open Library id / artist MusicBrainz id.
     pub subtitle_id: Option<String>,
@@ -76,6 +80,41 @@ pub struct ContentHit {
     pub album_type: Option<String>,
     /// Description (detail lookups, when known).
     pub overview: Option<String>,
+    /// Library id the source already knows the item by (radio: a followed show matched by
+    /// its feed), used when [`LibraryGateway::content_availability`] has no entry.
+    pub in_library: Option<i64>,
+}
+
+impl ContentHit {
+    /// A radio show hit (search, Discover or preview); `foreign_id` is
+    /// `{provider}:{external_id}` of the hit.
+    pub fn radio(h: &RadioShowHitDto) -> Self {
+        Self {
+            foreign_id: reelix_api_types::requests::radio_foreign_id(&h.provider, &h.external_id),
+            title: h.title.clone(),
+            subtitle: h.station_name.clone().or_else(|| h.author.clone()),
+            subtitle_id: None,
+            year: None,
+            cover: h.artwork_url.clone(),
+            album_type: None,
+            overview: h.synopsis.clone(),
+            in_library: h.show_id,
+        }
+    }
+}
+
+/// Follows an approved radio request's show.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddRadioRequest {
+    /// The requested `(provider, external_id)` (an Apple id is handed to the feed).
+    pub provider: String,
+    pub external_id: String,
+    pub title: String,
+    pub quality_profile_id: Option<i64>,
+    /// `None` = the radio settings' library folder.
+    pub root_folder_id: Option<i64>,
+    pub tags: Vec<i64>,
+    pub request_id: i64,
 }
 
 /// An artist from a MusicBrainz lookup.
@@ -124,6 +163,7 @@ pub struct ContentAdded {
 }
 
 const NOT_CONNECTED: &str = "books and music are not connected";
+const RADIO_NOT_CONNECTED: &str = "radio is not connected";
 
 /// The library as seen by requests (implemented by the server over `reelix-library`).
 #[async_trait]
@@ -199,7 +239,39 @@ pub trait LibraryGateway: Send + Sync {
         anyhow::bail!(NOT_CONNECTED)
     }
 
-    /// Searches for the given books (`formats` empty = every monitored format) or albums.
+    // ---- radio. Defaults: not connected.
+
+    /// The radio Discover lists of the enabled sources.
+    async fn radio_lists(&self) -> anyhow::Result<RadioDiscoverDto> {
+        Ok(RadioDiscoverDto::default())
+    }
+
+    /// The shows of one radio Discover list.
+    async fn radio_discover(&self, _row: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
+        anyhow::bail!(RADIO_NOT_CONNECTED)
+    }
+
+    /// Radio search by name (a link is previewed).
+    async fn lookup_radio(&self, _term: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
+        anyhow::bail!(RADIO_NOT_CONNECTED)
+    }
+
+    /// One radio show with its newest episodes (`None` = unknown show or source).
+    async fn radio_preview(
+        &self,
+        _provider: &str,
+        _external_id: &str,
+    ) -> anyhow::Result<Option<RadioShowPreviewDto>> {
+        anyhow::bail!(RADIO_NOT_CONNECTED)
+    }
+
+    /// Follows the show (or returns the already followed one). `item_id` = the show id.
+    async fn add_radio(&self, _req: AddRadioRequest) -> anyhow::Result<ContentAdded> {
+        anyhow::bail!(RADIO_NOT_CONNECTED)
+    }
+
+    /// Searches for the given books (`formats` empty = every monitored format), albums or
+    /// radio shows (their wanted episodes).
     async fn content_search(
         &self,
         _kind: ContentRequestKind,
@@ -209,12 +281,12 @@ pub trait LibraryGateway: Send + Sync {
         Ok(())
     }
 
-    /// Quality profiles of `ebook`, `audiobook` or `music`.
+    /// Quality profiles of `ebook`, `audiobook`, `music` or `radio` (audiobook profiles).
     async fn content_profiles(&self, _kind: ContentKind) -> anyhow::Result<Vec<NamedIdDto>> {
         Ok(Vec::new())
     }
 
-    /// Root folders of `ebook`, `audiobook` or `music`.
+    /// Root folders of `ebook`, `audiobook`, `music` or `radio`.
     async fn content_root_folders(&self, _kind: ContentKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
         Ok(Vec::new())
     }

@@ -1,0 +1,34 @@
+{
+ "responseHeader": {
+  "status": 0,
+  "QTime": 349,
+  "params": {
+   "query": "(text:dragnet OR text:dragnet OR text__reviews:dragnet) AND mediatype:audio AND (collection:oldtimeradio OR subject:radio)",
+   "qin": "(dragnet) AND mediatype:audio AND (collection:oldtimeradio OR subject:radio)",
+   "fields": "identifier,title,description,creator,date",
+   "wt": "json",
+   "rows": 3,
+   "start": 0
+  }
+ },
+ "response": {
+  "numFound": 275,
+  "start": 0,
+  "docs": [
+   {
+    "creator": "Boxcars711 Old Time Radio",
+    "date": "2009-03-15T00:00:00Z",
+    "description": "Jeff Regan Investigator was one of the three detective shows Jack Webb did before Dragnet (see also Pat Novak For Hire and Johnny Modero: Pier 23). It debuted on CBS in July 1948. Webb played JEFF REGAN, a tough private eye working in a Los Angeles investigation firm run by Anthony J. Lyon. Regan in",
+    "identifier": "shf58jdhqzopvquyh9ijaob0prcp2diycy4zxqfz",
+    "title": "Jeff Regan - 2 Episodes From 1948"
+   },
+   {
+    "creator": "Boxcars711 Old Time Radio",
+    "date": "2015-11-09T00:00:00Z",
+    "description": "Dragnet Big Walk 11-16-52 http://oldtimeradiodvd.com117",
+    "identifier": "avjuqigzxdcqlgpjffv8rpuk2sirhmahnafbrxkp",
+    "title": "Dragnet Big Walk"
+   }
+  ]
+ }
+}

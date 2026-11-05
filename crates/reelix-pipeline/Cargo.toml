@@ -24,6 +24,7 @@ reelix-music.workspace = true
 reelix-notify.workspace = true
 reelix-parser.workspace = true
 reelix-providers.workspace = true
+reelix-radio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

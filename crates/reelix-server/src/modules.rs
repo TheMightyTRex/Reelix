@@ -35,6 +35,9 @@ pub struct Modules {
     pub library: std::sync::Arc<reelix_library::LibraryService>,
     pub books: std::sync::Arc<reelix_books::BooksService>,
     pub music: std::sync::Arc<reelix_music::MusicService>,
+    pub radio: std::sync::Arc<reelix_radio::RadioService>,
+    /// Radio's Audiobookshelf podcast library reader (also a health source).
+    pub radio_library: std::sync::Arc<crate::integrations::radio_library::AbsRadioLibrary>,
     pub requests: std::sync::Arc<reelix_requests::RequestService>,
     pub integrations: std::sync::Arc<crate::integrations::IntegrationsService>,
     pub search: std::sync::Arc<reelix_pipeline::search::SearchService>,
@@ -94,6 +97,52 @@ impl Modules {
                 Default::default(),
             )),
         }));
+        // radio: providers in link-recognition order (specific broadcasters and directories
+        // first, the generic podcast feed last); the Audiobookshelf podcast library reader
+        // (media servers' Audiobookshelf rows) is attached with `RadioService::set_library_sync`
+        let radio = std::sync::Arc::new(reelix_radio::RadioService::new(reelix_radio::RadioDeps {
+            db: deps.db.clone(),
+            events: deps.events.clone(),
+            http: deps.http.clone(),
+            providers: {
+                use reelix_radio::providers::{
+                    AppleProvider, ArchiveProvider, BbcProvider, PodcastIndexProvider, RssProvider,
+                };
+                use std::sync::Arc;
+                // Feeds read for Discover and requests reach public addresses only.
+                let public_http = reelix_providers::public_http_client()?;
+                reelix_radio::ProviderRegistry::default()
+                    .with(Arc::new(BbcProvider::new(deps.http.clone())))
+                    .with(Arc::new(
+                        AppleProvider::new(deps.http.clone()).with_public_client(public_http.clone()),
+                    ))
+                    .with(Arc::new(PodcastIndexProvider::new(deps.http.clone())))
+                    .with(Arc::new(ArchiveProvider::new(deps.http.clone())))
+                    .with(Arc::new(
+                        RssProvider::new(deps.http.clone()).with_public_client(public_http),
+                    ))
+            },
+            library_sync: None,
+        }));
+        // downloaded artwork and logos under <data_dir>/radio/; provider credentials encrypted
+        radio.set_data_dir(deps.data_dir.clone());
+        radio.set_secrets(deps.secrets.clone());
+        let radio_library = {
+            let client_id = deps
+                .db
+                .settings()
+                .get::<String>("providers.client_id")
+                .await?
+                .unwrap_or_else(|| "reelix".into());
+            let p = providers.clone();
+            let sync = crate::integrations::radio_library::AbsRadioLibrary::new(
+                std::sync::Arc::new(move || p.media_servers().into_iter().map(|(row, _)| row).collect()),
+                reelix_mediaserver::BuildContext::new(deps.http.clone(), client_id),
+                std::sync::Arc::downgrade(&radio),
+            );
+            radio.set_library_sync(sync.clone());
+            sync
+        };
         // requests (metadata, media servers and notifications via providers; library via LibraryAdapter)
         let requests = {
             use reelix_requests::gateway::{ResolvingSource, adapters};
@@ -155,6 +204,7 @@ impl Modules {
                             deps.http.clone(),
                             Default::default(),
                         ),
+                        radio: radio.clone(),
                     }),
                     media_servers: Arc::new(media_servers),
                     metadata: Arc::new(metadata),
@@ -197,9 +247,11 @@ impl Modules {
             library.clone(),
             providers.clone(),
         ));
-        // books / music hand-offs (search, import, music import lists)
+        // books / music / radio hand-offs (search, import and filing, music import lists)
         search.set_content(books.clone(), music.clone());
         activity.set_content(books.clone(), music.clone());
+        search.set_radio(radio.clone());
+        activity.set_radio(radio.clone());
         integrations.set_music(music.clone());
         // maintenance: backups, logs, update checks, server settings
         let maintenance =
@@ -227,6 +279,8 @@ impl Modules {
             library,
             books,
             music,
+            radio,
+            radio_library,
             requests,
             integrations,
             search,
@@ -251,6 +305,8 @@ impl Modules {
         // books / music
         builder = reelix_books::jobs::register(builder, &self.books);
         builder = reelix_music::jobs::register(builder, &self.music);
+        // radio (refresh_radio_shows, radio_feed_sync, radio_library_sync)
+        builder = reelix_radio::jobs::register(builder, &self.radio);
         // requests
         builder = builder
             .handler(reelix_requests::RequestStatusSyncJob(self.requests.clone()))
@@ -281,6 +337,9 @@ impl Modules {
         state = state.with_extension(self.books.clone());
         self.music.set_queue(_queue.clone());
         state = state.with_extension(self.music.clone());
+        // radio
+        self.radio.set_queue(_queue.clone());
+        state = state.with_extension(self.radio.clone());
         // requests
         self.requests.set_queue(_queue.clone());
         state = state.with_extension(self.requests.clone());
@@ -294,6 +353,7 @@ impl Modules {
             self.providers.clone(),
             std::sync::Arc::new(reelix_api::ActivityHealth(self.activity.clone())),
             self.maintenance.clone(),
+            self.radio_library.clone(),
         ];
         // integrations (health_watch uses the same sources)
         self.integrations.set_health_sources(health.clone());

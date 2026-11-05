@@ -1,0 +1,52 @@
+{
+ "children": {
+  "page": 1,
+  "total": 2,
+  "limit": 50,
+  "offset": 0,
+  "programmes": [
+   {
+    "type": "episode",
+    "pid": "m002rd20",
+    "media_type": "audio",
+    "title": "6. The time I spent New Year's Eve with Sue Perkins",
+    "short_synopsis": "Paul Merton, Lucy Porter, Zoe Lyons and Chris Cantrill.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": 6,
+    "expected_child_count": null,
+    "first_broadcast_date": "2026-03-09T18:30:00Z",
+    "has_medium_or_long_synopsis": true,
+    "has_related_links": false,
+    "has_clips": false,
+    "has_segment_events": true,
+    "segments_title": "Featured items",
+    "actual_start": "2026-02-02T19:25:00Z",
+    "is_available_mediaset_pc_sd": true,
+    "is_legacy_media": false
+   },
+   {
+    "type": "episode",
+    "pid": "m002rd1y",
+    "media_type": "audio",
+    "title": "5. That's a real headscratcher",
+    "short_synopsis": "Desiree Burch explains the best way to visit IKEA.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": 5,
+    "expected_child_count": null,
+    "first_broadcast_date": "2026-03-02T18:30:00Z",
+    "has_medium_or_long_synopsis": true,
+    "has_related_links": false,
+    "has_clips": false,
+    "has_segment_events": true,
+    "segments_title": "Featured items",
+    "actual_start": "2026-02-02T19:20:00Z",
+    "is_available_mediaset_pc_sd": true,
+    "is_legacy_media": false
+   }
+  ]
+ }
+}

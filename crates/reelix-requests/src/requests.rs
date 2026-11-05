@@ -214,10 +214,10 @@ impl RequestService {
                 "failed" => c.failed += n,
                 _ => {}
             }
-            if kind == "book" {
-                c.book += n;
-            } else {
-                c.music += n;
+            match kind.as_str() {
+                "book" => c.book += n,
+                "radio" => c.radio += n,
+                _ => c.music += n,
             }
         }
         Ok(c)
@@ -286,11 +286,23 @@ impl RequestService {
                 now - i64::from(music_days) * DAY_MS,
             )
             .await?;
+        // Radio has a global quota only (no per-user override).
+        let radio_days = s.radio_quota_days.max(1);
+        let shows = self
+            .content_repo()
+            .count_since(
+                user.id,
+                ContentRequestKind::Radio,
+                now - i64::from(radio_days) * DAY_MS,
+            )
+            .await?;
         Ok(QuotaDto {
             movie: usage(movie_limit, movie_days, movies),
             tv: usage(tv_limit, tv_days, seasons),
             book: usage(book_limit, book_days, books),
             music: usage(music_limit, music_days, albums),
+            radio: usage(s.radio_quota_limit, radio_days, shows),
+
             exempt: user.permissions.has(Permissions::MANAGE_REQUESTS),
         })
     }

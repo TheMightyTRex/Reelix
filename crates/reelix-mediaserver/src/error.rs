@@ -56,6 +56,27 @@ pub(crate) async fn json<T: serde::de::DeserializeOwned>(resp: reqwest::Response
     serde_json::from_slice(&bytes).map_err(|e| MsError::Parse(e.to_string()))
 }
 
+/// Like [`json`], but fails once the body exceeds `limit` bytes (after decompression), so a
+/// broken or hostile server can't make Reelix buffer gigabytes.
+pub(crate) async fn json_limited<T: serde::de::DeserializeOwned>(
+    resp: reqwest::Response,
+    limit: usize,
+) -> Result<T, MsError> {
+    let mut resp = check(resp).await?;
+    let too_big = || MsError::Parse(format!("response larger than {} MB", limit / (1024 * 1024)));
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(too_big());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > limit {
+            return Err(too_big());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&out).map_err(|e| MsError::Parse(e.to_string()))
+}
+
 impl From<reqwest::Error> for MsError {
     fn from(e: reqwest::Error) -> Self {
         Self::Http(e.without_url())

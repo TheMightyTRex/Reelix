@@ -18,6 +18,7 @@ use reelix_indexers::ReleaseInfo;
 use reelix_music::AlbumTarget;
 use reelix_parser::{Language, QualityFamily};
 use reelix_providers::ProviderService;
+use reelix_radio::RadioTarget;
 
 use crate::store::ContentRef;
 use crate::store::blocklist::{self, BlocklistEntry};
@@ -51,7 +52,8 @@ pub struct Shared {
     pub queue: Vec<TrackedDownload>,
     pub now: DateTime<Utc>,
     pub today: NaiveDate,
-    /// Book and music profiles (every family; loaded by [`Shared::load_content`]).
+    /// Book, music and radio (audiobook) profiles (every family; loaded by
+    /// [`Shared::load_content`]).
     pub content_profiles: HashMap<i64, QualityProfile>,
     /// Ebook / audiobook / music quality definitions.
     pub content_definitions: HashMap<QualityFamily, Vec<QualityDefinition>>,
@@ -160,6 +162,8 @@ pub enum Target {
     /// One format of a book.
     Book(Box<BookTarget>),
     Album(Box<AlbumTarget>),
+    /// One radio episode (audiobook qualities).
+    Radio(Box<RadioTarget>),
 }
 
 impl Target {
@@ -178,6 +182,7 @@ impl Target {
             Self::Series { series, .. } => &series.tags,
             Self::Book(b) => &b.tags,
             Self::Album(a) => &a.tags,
+            Self::Radio(r) => &r.tags,
         }
     }
 
@@ -187,6 +192,7 @@ impl Target {
             Self::Series { series, .. } => series.quality_profile_id,
             Self::Book(b) => b.quality_profile_id,
             Self::Album(a) => a.quality_profile_id,
+            Self::Radio(r) => r.quality_profile_id,
         }
     }
 
@@ -196,6 +202,7 @@ impl Target {
             Self::Series { series, .. } => series.id,
             Self::Book(b) => b.book.id,
             Self::Album(a) => a.album.id,
+            Self::Radio(r) => r.episode_id(),
         }
     }
 
@@ -213,24 +220,26 @@ impl Target {
         }
     }
 
-    /// Book (format) / album reference (empty for movies and series).
+    /// Book (format) / album / radio episode reference (empty for movies and series).
     pub fn content(&self) -> ContentRef {
         match self {
             Self::Book(b) => ContentRef::book(b.book.id, b.format),
             Self::Album(a) => ContentRef::album(a.album.id),
+            Self::Radio(r) => ContentRef::radio_episode(r.episode_id()),
             _ => ContentRef::default(),
         }
     }
 
     pub fn is_content(&self) -> bool {
-        matches!(self, Self::Book(_) | Self::Album(_))
+        matches!(self, Self::Book(_) | Self::Album(_) | Self::Radio(_))
     }
 
-    /// Ebook / audiobook / music for content targets.
+    /// Ebook / audiobook / music / radio for content targets.
     pub fn content_kind(&self) -> Option<ContentKind> {
         match self {
             Self::Book(b) => Some(b.format.content_kind()),
             Self::Album(_) => Some(ContentKind::Music),
+            Self::Radio(_) => Some(ContentKind::Radio),
             _ => None,
         }
     }
@@ -240,6 +249,7 @@ impl Target {
         match self {
             Self::Book(b) => QualityFamily::of_book(b.format),
             Self::Album(_) => QualityFamily::Music,
+            Self::Radio(_) => QualityFamily::of_content(ContentKind::Radio),
             _ => QualityFamily::Video,
         }
     }
@@ -264,6 +274,7 @@ impl Target {
                     }
             }
             Self::Album(a) => a.album.monitored && a.artist.monitored,
+            Self::Radio(r) => r.monitored,
         }
     }
 
@@ -285,7 +296,7 @@ impl Target {
             Self::Movie(m) => m.original_language.as_deref(),
             Self::Series { series, .. } => series.original_language.as_deref(),
             // Book/music profiles have no language requirement (see reelix_decision::family).
-            Self::Book(_) | Self::Album(_) => None,
+            Self::Book(_) | Self::Album(_) | Self::Radio(_) => None,
         }?;
         Language::from_iso639_1(code)
     }
@@ -405,6 +416,11 @@ impl<'a> Evaluator<'a> {
                 .release_date
                 .filter(|d| *d > self.shared.today)
                 .map(|d| format!("Album is not released yet ({d})")),
+            Target::Radio(r) => r
+                .episode
+                .first_broadcast
+                .filter(|d| *d > self.shared.now)
+                .map(|d| format!("Episode is not broadcast yet ({})", d.date_naive())),
         }
     }
 
@@ -467,6 +483,8 @@ impl<'a> Evaluator<'a> {
                     .into_iter()
                     .collect()
             }
+            // Wanted radio episodes have no file (radio has no upgrades).
+            Target::Radio(_) => Vec::new(),
         }
     }
 
@@ -479,6 +497,7 @@ impl<'a> Evaluator<'a> {
             // Ebooks: Some(1) (per-book sizes); audiobook: edition duration; album: track minutes.
             Target::Book(b) => size_runtime_minutes(self.target.family(), b.runtime_minutes),
             Target::Album(a) => size_runtime_minutes(QualityFamily::Music, a.runtime_minutes),
+            Target::Radio(r) => size_runtime_minutes(QualityFamily::Audiobook, r.runtime_minutes()),
         }
     }
 
@@ -490,7 +509,7 @@ impl<'a> Evaluator<'a> {
                 Target::Series { series, .. } => {
                     t.series_id == Some(series.id) && t.episode_ids.iter().any(|e| c.episode_ids.contains(e))
                 }
-                Target::Book(_) | Target::Album(_) => t.content == self.target.content(),
+                Target::Book(_) | Target::Album(_) | Target::Radio(_) => t.content == self.target.content(),
             };
             covers
                 && t.release

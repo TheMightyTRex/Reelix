@@ -1,6 +1,7 @@
-//! Completed book and album downloads: handed to the books / music importers
-//! ([`reelix_books::BooksService::import_api`], [`reelix_music::MusicService::import_api`]) and
-//! recorded like movie/episode imports (history, notification, media server refresh).
+//! Completed book, album and radio downloads: handed to the books / music importers
+//! ([`reelix_books::BooksService::import_api`], [`reelix_music::MusicService::import_api`]) or
+//! filed into the podcast library ([`reelix_radio::RadioService::file_download`]) and recorded
+//! like movie/episode imports (history, notification, media server refresh).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -66,8 +67,27 @@ impl ActivityService {
         h.artist_id = artist;
     }
 
-    /// Notification summary of a book format (`Author - Title`) or album (`Artist - Album`).
+    /// Notification summary of a book format (`Author - Title`), album (`Artist - Album`) or
+    /// radio episode (`Show - S20E03 - Title`).
     pub(crate) async fn content_summary(&self, c: &ContentRef) -> Option<MediaSummary> {
+        if let Some(id) = c.radio_episode_id {
+            let r = self.radio.get()?;
+            let e = r.get_episode(id).await.ok()?;
+            let show = r.get_show(e.show_id).await.ok()?;
+            let series = reelix_radio::status::filing_series_number(e.series_kind, e.series_number);
+            let mut title = show.title.clone();
+            if let Some(n) = e.number {
+                title.push_str(&format!(" - S{series:02}E{n:02}"));
+            }
+            if !e.title.trim().is_empty() {
+                title.push_str(&format!(" - {}", e.title.trim()));
+            }
+            let mut s = MediaSummary::content(ContentKind::Radio, title);
+            s.id = Some(e.id);
+            s.year = e.first_broadcast.map(|d| chrono::Datelike::year(&d));
+            s.overview = e.synopsis;
+            return Some(s);
+        }
         if let Some((id, format)) = c.book_ref() {
             let b = self.books.get()?.get_book(id).await.ok()?;
             let mut s =
@@ -87,9 +107,21 @@ impl ActivityService {
         Some(s)
     }
 
-    /// Enqueues a replacement search for a book format / album (errors logged).
+    /// Enqueues a replacement search for a book format / album / radio episode (errors logged).
     pub(crate) async fn search_again_content(&self, c: &ContentRef) {
-        let r = if let Some((id, format)) = c.book_ref() {
+        let r = if let Some(id) = c.radio_episode_id {
+            match self.radio.get() {
+                Some(r) => r
+                    .request_search(reelix_api_types::radio::RadioSearchRequest {
+                        kind: reelix_api_types::content::ContentSearchKind::Item,
+                        ids: vec![id],
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string()),
+                None => return,
+            }
+        } else if let Some((id, format)) = c.book_ref() {
             match self.books.get() {
                 Some(b) => b
                     .request_search(reelix_api_types::books::BookSearchRequest {
@@ -127,6 +159,28 @@ impl ActivityService {
         t: &TrackedDownload,
         d: &ContentDownload,
     ) -> std::result::Result<Outcome, String> {
+        if let Some(id) = t.content.radio_episode_id {
+            let radio = self.radio.get().ok_or("radio is not available")?;
+            let out = radio.file_download(d, id).await.map_err(|e| e.to_string())?;
+            return Ok(match out {
+                reelix_radio::FilingOutcome::Filed(f) => Outcome::Imported {
+                    files: vec![ImportedContent {
+                        destination: f.destination,
+                        source: f.source,
+                        size: f.size,
+                        quality: f.quality,
+                        release_group: f.release_group,
+                    }],
+                    is_upgrade: false,
+                    replaced: Vec::new(),
+                },
+                reelix_radio::FilingOutcome::Rejected(msgs) => Outcome::Rejected(if msgs.is_empty() {
+                    vec!["No audio file could be filed".to_owned()]
+                } else {
+                    msgs
+                }),
+            });
+        }
         if let Some((id, format)) = t.content.book_ref() {
             let books = self.books.get().ok_or("books are not available")?;
             let out = books

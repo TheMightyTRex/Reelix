@@ -6,7 +6,8 @@ use reelix_api_types::pipeline::{BlocklistDto, BulkIdsRequest, Paged};
 
 use crate::api;
 use crate::components::history_table::{MediaCell, ProtoBadge, quality_label};
-use crate::components::library_common::{Pager, on_entity_changed, toggle_id};
+use crate::components::infinite::{InfiniteSentinel, PagedList};
+use crate::components::library_common::{on_entity_changed, toggle_id};
 use crate::components::library_forms::{delete_json, require_library, with_query};
 use crate::components::{ConfirmDialog, EmptyState, ErrorBox, Icon, PageHeader, Skeleton};
 use crate::format;
@@ -18,21 +19,26 @@ const PAGE_SIZE: u32 = 50;
 pub fn BlocklistPage() -> impl IntoView {
     require_library();
     let toasts = Toasts::expect();
-    let page = RwSignal::new(1u32);
     let selected = RwSignal::new(Vec::<i64>::new());
     let clear_open = RwSignal::new(false);
-    let list = LocalResource::new(move || {
-        let url = with_query(
-            "/blocklist",
-            &[
-                ("page", page.get().to_string()),
-                ("page_size", PAGE_SIZE.to_string()),
-            ],
-        );
-        async move { api::get::<Paged<BlocklistDto>>(&url).await }
-    });
-    on_entity_changed(&["blocklist"], false, move || list.refetch());
-    let total = Signal::derive(move || list.get().and_then(Result::ok).map_or(0, |p| p.total));
+    let list = PagedList::new(
+        PAGE_SIZE,
+        |b: &BlocklistDto| b.id,
+        |page, size| {
+            let url = with_query(
+                "/blocklist",
+                &[("page", page.to_string()), ("page_size", size.to_string())],
+            );
+            async move {
+                api::get::<Paged<BlocklistDto>>(&url)
+                    .await
+                    .map(|p| (p.items, p.total))
+            }
+        },
+    );
+    list.reset();
+    on_entity_changed(&["blocklist"], false, move || list.refresh());
+    let total = list.total;
 
     let remove = move |ids: Vec<i64>, what: String| {
         spawn_local(async move {
@@ -45,7 +51,7 @@ pub fn BlocklistPage() -> impl IntoView {
                 Ok(()) => {
                     toasts.success(what);
                     selected.set(Vec::new());
-                    list.refetch();
+                    list.refresh();
                 }
                 Err(e) => toasts.error(format!("Could not update the blocklist: {e}")),
             }
@@ -54,17 +60,25 @@ pub fn BlocklistPage() -> impl IntoView {
     let clear_all = Callback::new(move |()| remove(Vec::new(), "Blocklist cleared.".into()));
 
     let body = move || {
-        match list.get() {
-        None => view! { <Skeleton lines=5 /> }.into_any(),
-        Some(Err(e)) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.refetch()) /> }.into_any(),
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="shield" title="The blocklist is empty"
-                description="Releases that fail to download or import are added here so they aren't grabbed again." />
+        if !list.ready.get() {
+            return view! { <Skeleton lines=5 /> }.into_any();
         }
-        .into_any(),
-        Some(Ok(p)) => {
-            let ids: Vec<i64> = p.items.iter().map(|b| b.id).collect();
+        let items = list.items.get();
+        if items.is_empty() {
+            return match list.error.get() {
+                Some(e) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.reset()) /> }.into_any(),
+                None => view! {
+                    <EmptyState icon="shield" title="The blocklist is empty"
+                        description="Releases that fail to download or import are added here so they aren't grabbed again." />
+                }
+                .into_any(),
+            };
+        }
+        {
+            let ids: Vec<i64> = items.iter().map(|b| b.id).collect();
             let ids2 = ids.clone();
+            // Select-all covers the rows loaded so far.
+            let all_label = format!("Select all {} loaded entries", ids.len());
             view! {
                 <div class="table-wrap">
                     <table class="table">
@@ -72,7 +86,7 @@ pub fn BlocklistPage() -> impl IntoView {
                         <thead>
                             <tr>
                                 <th scope="col" class="col-check">
-                                    <input type="checkbox" aria-label="Select all on this page"
+                                    <input type="checkbox" aria-label=all_label.clone() title=all_label
                                         prop:checked=move || !ids.is_empty() && selected.with(|s| ids.iter().all(|i| s.contains(i)))
                                         on:change=move |e| {
                                             if event_target_checked(&e) { selected.set(ids2.clone()) } else { selected.set(Vec::new()) }
@@ -88,7 +102,7 @@ pub fn BlocklistPage() -> impl IntoView {
                             </tr>
                         </thead>
                         <tbody>
-                            {p.items.into_iter().map(|b| {
+                            {items.into_iter().map(|b| {
                                 let id = b.id;
                                 let select_label = format!("Select {}", b.source_title);
                                 view! {
@@ -121,11 +135,10 @@ pub fn BlocklistPage() -> impl IntoView {
                         </tbody>
                     </table>
                 </div>
-                <Pager page=page page_size=PAGE_SIZE total=total />
+                {move || list.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.retry()) /> })}
             }
             .into_any()
         }
-    }
     };
 
     view! {
@@ -148,7 +161,16 @@ pub fn BlocklistPage() -> impl IntoView {
             </button>
         </PageHeader>
         <div class="card">
-            <div class="card-body">{body}</div>
+            <div class="card-body">
+                {body}
+                <InfiniteSentinel
+                    on_visible=Callback::new(move |()| list.load_more())
+                    enabled=Signal::derive(move || list.can_load_more())
+                    loading=list.loading
+                    loaded=Signal::derive(move || list.loaded())
+                    total=list.total
+                />
+            </div>
         </div>
         <ConfirmDialog open=clear_open title="Clear the blocklist?"
             message=Signal::derive(move || format!("All {} entries are removed. Those releases can be grabbed again.", total.get()))

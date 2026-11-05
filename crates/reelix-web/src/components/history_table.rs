@@ -8,7 +8,8 @@ use reelix_api_types::pipeline::{EpisodeRefDto, FormatRefDto, HistoryDto, MediaR
 use reelix_core::Protocol;
 use reelix_parser::{Language, QualityModel};
 
-use super::library_common::{Pager, on_entity_changed};
+use super::infinite::{InfiniteSentinel, PagedList};
+use super::library_common::on_entity_changed;
 use super::library_forms::with_query;
 use super::{ConfirmDialog, EmptyState, ErrorBox, Icon, Skeleton, StatusBadge, Tone};
 use crate::api;
@@ -33,12 +34,9 @@ pub fn quality_label(q: &QualityModel) -> String {
     out
 }
 
-/// `torrent` / `usenet`.
+/// `torrent` / `usenet` / `soulseek`.
 pub fn proto_key(p: Protocol) -> &'static str {
-    match p {
-        Protocol::Torrent => "torrent",
-        Protocol::Usenet => "usenet",
-    }
+    p.as_str()
 }
 
 /// Small protocol pill.
@@ -68,10 +66,13 @@ pub fn episodes_label(eps: &[EpisodeRefDto]) -> Option<String> {
     }
 }
 
-/// Library link for a media ref: `/movies/{id}`, `/series/{id}`, `/books/book/{id}` or
-/// `/music/albums/{id}`.
+/// Library link for a media ref: `/movies/{id}`, `/series/{id}`, `/books/book/{id}`,
+/// `/music/albums/{id}` or a radio episode's show (`/radio/shows/{show_id}`, else `/radio`).
 pub fn media_href(m: &MediaRefDto) -> String {
     match m.kind.as_str() {
+        "radio_episode" => m
+            .show_id
+            .map_or_else(|| "/radio".to_string(), |id| format!("/radio/shows/{id}")),
         "series" => format!("/series/{}", m.id),
         "book" => format!("/books/book/{}", m.id),
         "album" => format!("/music/albums/{}", m.id),
@@ -79,8 +80,11 @@ pub fn media_href(m: &MediaRefDto) -> String {
     }
 }
 
-/// `by Author · Ebook` / `by Artist` line for books and albums.
+/// `by Author · Ebook` / `by Artist` line for books and albums; the show of a radio episode.
 pub fn media_subtitle(m: &MediaRefDto) -> Option<String> {
+    if m.kind == "radio_episode" {
+        return m.subtitle.clone().filter(|s| !s.is_empty());
+    }
     let format = m.book_format.map(|f| match f {
         reelix_core::BookFormat::Ebook => "Ebook",
         reelix_core::BookFormat::Audiobook => "Audiobook",
@@ -98,12 +102,17 @@ pub fn media_subtitle(m: &MediaRefDto) -> Option<String> {
     }
 }
 
-/// `Title (2024)`.
+/// `Title (2024)`; a radio episode as `S20E03 - Title`.
 pub fn media_title(m: &MediaRefDto) -> String {
     match m.year {
-        Some(y) => format!("{} ({y})", m.title),
-        None => m.title.clone(),
+        Some(y) if m.kind != "radio_episode" => format!("{} ({y})", m.title),
+        _ => m.title.clone(),
     }
+}
+
+/// Icon shown in front of rows that are not films or TV (radio episodes).
+fn media_icon(m: &MediaRefDto) -> Option<&'static str> {
+    (m.kind == "radio_episode").then_some("radio")
 }
 
 /// Media link plus optional episode summary underneath.
@@ -118,7 +127,9 @@ pub fn MediaCell(
         None => view! { <span class="muted">"Unknown"</span> }.into_any(),
         Some(m) => {
             let sub = media_subtitle(&m);
+            let icon = media_icon(&m);
             view! {
+                {icon.map(|i| view! { <span class="media-kind-icon" title="Radio" aria-hidden="true"><Icon name=i /></span> })}
                 <A href=media_href(&m) attr:class="cell-strong">{media_title(&m)}</A>
                 {sub.map(|s| view! { <span class="cell-sub">{s}</span> })}
                 {eps.map(|e| view! {
@@ -212,7 +223,7 @@ fn data_rows(data: &serde_json::Value) -> Vec<(String, String)> {
 
 // ---------- history table ----------
 
-/// Paged history with an event-type filter. Scoped to one movie / series / episode when an id is
+/// History with an event-type filter, loading more rows as it scrolls. Scoped to one movie / series / episode when an id is
 /// given (the media column is then hidden for movies).
 #[component]
 pub fn HistoryTable(
@@ -227,35 +238,42 @@ pub fn HistoryTable(
     let toasts = Toasts::expect();
     let own_filter = event_type.is_none();
     let event_type = event_type.unwrap_or_else(|| RwSignal::new(String::new()));
-    let page = RwSignal::new(1u32);
     let expanded = RwSignal::new(Vec::<i64>::new());
     let fail_target = RwSignal::new(None::<HistoryDto>);
     let fail_open = RwSignal::new(false);
     let show_media = movie_id.is_none();
 
+    let history = PagedList::new(
+        page_size,
+        |h: &HistoryDto| h.id,
+        move |page, size| {
+            let url = with_query(
+                "/history",
+                &[
+                    ("page", page.to_string()),
+                    ("page_size", size.to_string()),
+                    ("movie_id", movie_id.map(|v| v.to_string()).unwrap_or_default()),
+                    ("series_id", series_id.map(|v| v.to_string()).unwrap_or_default()),
+                    (
+                        "episode_id",
+                        episode_id.map(|v| v.to_string()).unwrap_or_default(),
+                    ),
+                    ("event_type", event_type.get_untracked()),
+                ],
+            );
+            async move {
+                api::get::<Paged<HistoryDto>>(&url)
+                    .await
+                    .map(|p| (p.items, p.total))
+            }
+        },
+    );
+    // A new filter starts over from the newest entries.
     Effect::new(move |_| {
         event_type.track();
-        page.set(1);
+        history.reset();
     });
-
-    let history = LocalResource::new(move || {
-        let url = with_query(
-            "/history",
-            &[
-                ("page", page.get().to_string()),
-                ("page_size", page_size.to_string()),
-                ("movie_id", movie_id.map(|v| v.to_string()).unwrap_or_default()),
-                ("series_id", series_id.map(|v| v.to_string()).unwrap_or_default()),
-                (
-                    "episode_id",
-                    episode_id.map(|v| v.to_string()).unwrap_or_default(),
-                ),
-                ("event_type", event_type.get()),
-            ],
-        );
-        async move { api::get::<Paged<HistoryDto>>(&url).await }
-    });
-    on_entity_changed(&["history"], false, move || history.refetch());
+    on_entity_changed(&["history"], false, move || history.refresh());
 
     let mark_failed = Callback::new(move |()| {
         let Some(h) = fail_target.get_untracked() else {
@@ -266,26 +284,29 @@ pub fn HistoryTable(
                 Ok(_) => {
                     toasts
                         .success("Marked as failed. The release is blocklisted and a new search is queued.");
-                    history.refetch();
+                    history.refresh();
                 }
                 Err(e) => toasts.error(format!("Could not mark as failed: {e}")),
             }
         });
     });
 
-    let total = Signal::derive(move || history.get().and_then(Result::ok).map_or(0, |p| p.total));
-
-    let body = move || match history.get() {
-        None => view! { <Skeleton lines=4 /> }.into_any(),
-        Some(Err(e)) => {
-            view! { <ErrorBox error=e on_retry=Callback::new(move |()| history.refetch()) /> }.into_any()
+    let body = move || {
+        if !history.ready.get() {
+            return view! { <Skeleton lines=4 /> }.into_any();
         }
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="clock" title="No history yet" compact=true
-                description="Grabs, imports, upgrades and failures are recorded here as they happen." />
+        let items = history.items.get();
+        if items.is_empty() {
+            return match history.error.get() {
+                Some(e) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| history.reset()) /> }.into_any(),
+                None => view! {
+                    <EmptyState icon="clock" title="No history yet" compact=true
+                        description="Grabs, imports, upgrades and failures are recorded here as they happen." />
+                }
+                .into_any(),
+            };
         }
-        .into_any(),
-        Some(Ok(p)) => {
+        {
             let cols = if show_media { 8 } else { 7 };
             view! {
                 <div class="table-wrap">
@@ -304,7 +325,7 @@ pub fn HistoryTable(
                             </tr>
                         </thead>
                         <tbody>
-                            {p.items.into_iter().map(|h| {
+                            {items.into_iter().map(|h| {
                                 let hid = h.id;
                                 let open = move || expanded.with(|e| e.contains(&hid));
                                 let (tone, label, _) = event_label(&h.event_type);
@@ -357,7 +378,7 @@ pub fn HistoryTable(
                         </tbody>
                     </table>
                 </div>
-                <Pager page=page page_size=page_size total=total />
+                {move || history.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| history.retry()) /> })}
             }
             .into_any()
         }
@@ -370,6 +391,13 @@ pub fn HistoryTable(
             </div>
         })}
         {body}
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| history.load_more())
+            enabled=Signal::derive(move || history.can_load_more())
+            loading=history.loading
+            loaded=Signal::derive(move || history.loaded())
+            total=history.total
+        />
         <ConfirmDialog open=fail_open title="Mark as failed?"
             message=Signal::derive(move || fail_target.get().map(|h| format!(
                 "“{}” is removed, blocklisted, and a new search starts for the same media.", h.source_title
@@ -462,6 +490,7 @@ mod tests {
             year: Some(1965),
             subtitle: Some("Frank Herbert".into()),
             book_format: Some(reelix_core::BookFormat::Audiobook),
+            show_id: None,
         };
         assert_eq!(media_href(&m), "/books/book/4");
         assert_eq!(
@@ -476,6 +505,25 @@ mod tests {
         m.subtitle = None;
         assert_eq!(media_href(&m), "/series/4");
         assert_eq!(media_subtitle(&m), None);
+    }
+
+    #[test]
+    fn links_radio_episodes_to_their_show() {
+        let mut m = MediaRefDto {
+            kind: "radio_episode".into(),
+            id: 31,
+            title: "S20E03 - The Fete".into(),
+            year: Some(2026),
+            subtitle: Some("The Archers".into()),
+            book_format: None,
+            show_id: Some(7),
+        };
+        assert_eq!(media_href(&m), "/radio/shows/7");
+        assert_eq!(media_title(&m), "S20E03 - The Fete");
+        assert_eq!(media_subtitle(&m).as_deref(), Some("The Archers"));
+        assert_eq!(media_icon(&m), Some("radio"));
+        m.show_id = None;
+        assert_eq!(media_href(&m), "/radio");
     }
 
     #[test]

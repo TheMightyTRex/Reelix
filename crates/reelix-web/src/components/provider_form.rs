@@ -42,10 +42,7 @@ fn initial_values(schema: &ProviderSchemaDto, saved: Option<&Value>) -> Map<Stri
 }
 
 fn protocol_label(p: Protocol) -> &'static str {
-    match p {
-        Protocol::Torrent => "Torrent",
-        Protocol::Usenet => "Usenet",
-    }
+    p.label()
 }
 
 /// Result list for a connection test.
@@ -520,6 +517,7 @@ fn Catalog(
                     <option value="">"All protocols"</option>
                     <option value="Torrent">"Torrent"</option>
                     <option value="Usenet">"Usenet"</option>
+                    <option value="Soulseek">"Soulseek"</option>
                 </select>
             })}
             {(!privacies.is_empty()).then(|| view! {

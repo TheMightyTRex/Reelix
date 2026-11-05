@@ -113,6 +113,7 @@ struct Row {
     book_id: Option<i64>,
     book_format: Option<String>,
     album_id: Option<i64>,
+    radio_episode_id: Option<i64>,
 }
 
 impl From<Row> for TrackedDownload {
@@ -127,7 +128,12 @@ impl From<Row> for TrackedDownload {
             series_id: r.series_id,
             episode_ids: from_json(&r.episode_ids),
             release: serde_json::from_str(&r.release).ok(),
-            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
+            content: ContentRef::from_columns(
+                r.book_id,
+                r.book_format.as_deref(),
+                r.album_id,
+                r.radio_episode_id,
+            ),
             state: TrackedState::parse(&r.state).unwrap_or(TrackedState::Downloading),
             status_messages: from_json(&r.status_messages),
             output_path: r.output_path,
@@ -138,7 +144,8 @@ impl From<Row> for TrackedDownload {
 }
 
 const COLS: &str = "id, download_client_id, download_id, protocol, title, movie_id, series_id, episode_ids, \
-    release, state, status_messages, output_path, added, updated, book_id, book_format, album_id";
+    release, state, status_messages, output_path, added, updated, book_id, book_format, album_id, \
+    radio_episode_id";
 
 /// Inserts a new tracked download (state `downloading`); an existing (client, download id) row is replaced.
 pub async fn insert(db: &Db, t: &NewTracked) -> Result<i64> {
@@ -149,7 +156,7 @@ pub async fn insert(db: &Db, t: &NewTracked) -> Result<i64> {
          ON CONFLICT (download_client_id, download_id) DO UPDATE SET title = excluded.title, \
          movie_id = excluded.movie_id, series_id = excluded.series_id, episode_ids = excluded.episode_ids, \
          release = excluded.release, state = 'downloading', status_messages = '[]', updated = excluded.updated, \
-         book_id = NULL, book_format = NULL, album_id = NULL \
+         book_id = NULL, book_format = NULL, album_id = NULL, radio_episode_id = NULL \
          RETURNING id",
     )
     .bind(t.download_client_id)
@@ -167,14 +174,16 @@ pub async fn insert(db: &Db, t: &NewTracked) -> Result<i64> {
     Ok(id)
 }
 
-/// Points a download at a book (format) or album.
+/// Points a download at a book (format), album or radio episode.
 pub async fn set_content(db: &Db, id: i64, c: &ContentRef) -> Result<()> {
     sqlx::query(
-        "UPDATE tracked_downloads SET book_id = ?, book_format = ?, album_id = ?, updated = ? WHERE id = ?",
+        "UPDATE tracked_downloads SET book_id = ?, book_format = ?, album_id = ?, radio_episode_id = ?, \
+         updated = ? WHERE id = ?",
     )
     .bind(c.book_id)
     .bind(c.format_str())
     .bind(c.album_id)
+    .bind(c.radio_episode_id)
     .bind(now_ms())
     .bind(id)
     .execute(db.pool())

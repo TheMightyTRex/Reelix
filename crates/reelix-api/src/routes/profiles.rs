@@ -486,10 +486,13 @@ pub async fn export_format(
 // ---------------- delay profiles ----------------
 
 fn validate_delay(p: &DelayProfile) -> ApiResult<()> {
-    if !p.enable_usenet && !p.enable_torrent {
+    if !p.enable_usenet && !p.enable_torrent && !p.enable_soulseek {
         return Err(ApiError::validation("enable at least one protocol"));
     }
-    if p.usenet_delay > 60 * 24 * 30 || p.torrent_delay > 60 * 24 * 30 {
+    if [p.usenet_delay, p.torrent_delay, p.soulseek_delay]
+        .iter()
+        .any(|d| *d > 60 * 24 * 30)
+    {
         return Err(ApiError::validation("delays are limited to 30 days"));
     }
     Ok(())

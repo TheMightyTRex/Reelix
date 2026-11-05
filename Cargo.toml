@@ -27,10 +27,11 @@ default-members = [
     "crates/reelix-migrate",
     "crates/reelix-books",
     "crates/reelix-music",
+    "crates/reelix-radio",
 ]
 
 [workspace.package]
-version = "0.7.1"
+version = "0.8.3"
 edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
@@ -59,6 +60,7 @@ reelix-requests = { path = "crates/reelix-requests" }
 reelix-pipeline = { path = "crates/reelix-pipeline" }
 reelix-books = { path = "crates/reelix-books" }
 reelix-music = { path = "crates/reelix-music" }
+reelix-radio = { path = "crates/reelix-radio" }
 
 anyhow = "1"
 argon2 = "0.5"
@@ -83,6 +85,7 @@ rand = "0.8"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha1 = "0.10"
 sha2 = "0.10"
 # Release archives for self-update.
 tar = { version = "0.4", default-features = false }
