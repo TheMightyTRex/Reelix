@@ -264,7 +264,9 @@ pub fn clip(s: &str, max: usize) -> String {
 /// Text from a server, without control characters (escape sequences among them), so it cannot
 /// redraw the screen or fake a prompt. Line breaks and tabs stay.
 pub fn clean(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect()
+    text.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .collect()
 }
 
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
