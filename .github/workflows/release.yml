@@ -310,6 +310,90 @@ jobs:
           foreach ($i in 1..60) { if (-not (Test-Path "$dir\reelix.exe")) { break }; Start-Sleep 1 }
           if (Get-Service Reelix -ErrorAction SilentlyContinue) { throw 'service still registered after uninstall' }
           if (-not (Test-Path "$env:ProgramData\Reelix")) { throw 'uninstall deleted the data folder' }
+      # Setup's "How would you like to install Reelix?" modes, driven by /MODE= etc. Each step makes
+      # its own Reelix data with the portable reelix.exe from the zip, installs per-user, checks
+      # the result through the API and uninstalls.
+      - name: smoke test (recovery from a backup)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . scripts\windows-smoke.ps1
+          $src = "$env:RUNNER_TEMP\recovery-src"
+          Remove-Item $ReelixData -Recurse -Force -ErrorAction SilentlyContinue
+          New-ReelixData $src 'restored-admin' 7795
+          $zip = (& $Portable backup create --data-dir $src | Select-Object -Last 1).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zip)) { throw "reelix backup create failed: $zip" }
+          # An invalid backup is refused before anything is installed.
+          Set-Content "$env:RUNNER_TEMP\junk.zip" 'not a zip'
+          $code = Install-Reelix 'recovery-bad' '/MODE=recovery', "/BACKUP=$env:RUNNER_TEMP\junk.zip"
+          if ($code -eq 0) { throw 'setup accepted an invalid backup' }
+          if (Test-Path "$InstallDir\reelix.exe") { throw 'setup installed Reelix despite the invalid backup' }
+          $code = Install-Reelix 'recovery' '/MODE=recovery', "/BACKUP=$zip"
+          if ($code -ne 0) { throw "setup exited $code" }
+          if (-not (Test-Path "$ReelixData\restore\pending.zip")) { throw 'the backup was not staged' }
+          $rx = Start-Installed 7794
+          $status = Invoke-RestMethod http://127.0.0.1:7794/api/v1/setup
+          if ($status.needs_setup) { throw 'the restored database has no admin account' }
+          Invoke-RestMethod -Method Post http://127.0.0.1:7794/api/v1/auth/login -ContentType 'application/json' `
+            -Body (@{ username = 'restored-admin'; password = $Password } | ConvertTo-Json) | Out-Null
+          if (Test-Path "$ReelixData\restore\pending.zip") { throw 'the staged restore was not applied' }
+          Stop-Process -Id $rx.Id -Force; $rx.WaitForExit()
+          Uninstall-Reelix
+          Remove-Item $ReelixData, $src -Recurse -Force
+      - name: smoke test (migration from another Reelix folder)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . scripts\windows-smoke.ps1
+          $old = "$env:RUNNER_TEMP\old-reelix"
+          Remove-Item $ReelixData -Recurse -Force -ErrorAction SilentlyContinue
+          New-ReelixData "$old\data" 'old-admin' 7793
+          # A location pinned to the old folder, which Setup has to point at the new one.
+          $cfg = "$old\data\config.toml"
+          (Get-Content $cfg -Raw).Replace('# log_dir = "<data_dir>/logs"', "log_dir = '$old\data\logs'") | Set-Content $cfg
+          if (-not (Get-Content $cfg -Raw).Contains("log_dir = '")) { throw 'could not pin log_dir in the old config.toml' }
+          $code = Install-Reelix 'migrate-folder' '/MODE=migrate', "/MIGRATEFROM=$old"
+          if ($code -ne 0) { throw "setup exited $code" }
+          foreach ($f in 'reelix.db', 'secret.key', 'config.toml') {
+            if (-not (Test-Path "$ReelixData\$f")) { throw "$f was not copied to $ReelixData" }
+          }
+          if (-not (Test-Path "$old\data\reelix.db")) { throw 'the old folder was changed' }
+          $toml = Get-Content "$ReelixData\config.toml" -Raw
+          if ($toml.Contains('old-reelix')) { Write-Host $toml; throw 'config.toml still points at the old folder' }
+          $rx = Start-Installed 7792
+          Invoke-RestMethod -Method Post http://127.0.0.1:7792/api/v1/auth/login -ContentType 'application/json' `
+            -Body (@{ username = 'old-admin'; password = $Password } | ConvertTo-Json) | Out-Null
+          Stop-Process -Id $rx.Id -Force; $rx.WaitForExit()
+          # A data folder that already has a database is never overwritten.
+          Uninstall-Reelix
+          $code = Install-Reelix 'migrate-folder-again' '/MODE=migrate', "/MIGRATEFROM=$old"
+          if ($code -eq 0) { throw 'setup overwrote an existing database' }
+          Remove-Item $ReelixData, $old -Recurse -Force
+      - name: smoke test (migration from Radarr on this PC)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . scripts\windows-smoke.ps1
+          Remove-Item $ReelixData -Recurse -Force -ErrorAction SilentlyContinue
+          $arr = "$env:ProgramData\Radarr"
+          $key = '0123456789abcdef0123456789abcdef'
+          New-Item -ItemType Directory $arr -Force | Out-Null
+          Set-Content "$arr\config.xml" "<Config><BindAddress>*</BindAddress><Port>7878</Port><SslPort>9898</SslPort><EnableSsl>False</EnableSsl><UrlBase></UrlBase><ApiKey>$key</ApiKey></Config>"
+          $code = Install-Reelix 'migrate-arr' '/MODE=migrate', '/ARR=radarr'
+          if ($code -ne 0) { throw "setup exited $code" }
+          $rx = Start-Installed 7791
+          # Setup from this PC needs no token; it signs the new admin in.
+          Invoke-RestMethod -Method Post http://127.0.0.1:7791/api/v1/setup -ContentType 'application/json' -SessionVariable s `
+            -Body (@{ username = 'admin'; password = $Password } | ConvertTo-Json) | Out-Null
+          $pending = @(Invoke-RestMethod http://127.0.0.1:7791/api/v1/system/migrate/pending -WebSession $s)
+          $pending | ConvertTo-Json | Write-Host
+          if ($pending.Count -ne 1 -or $pending[0].source -ne 'radarr' -or $pending[0].url -ne 'http://localhost:7878' -or $pending[0].api_key -ne '********') {
+            throw 'the Radarr found by Setup is not pending in Reelix'
+          }
+          Stop-Process -Id $rx.Id -Force; $rx.WaitForExit()
+          if (Select-String -Path "$ReelixData\reelix.db*" -SimpleMatch $key -Quiet) { throw 'the API key is stored in plain text' }
+          Uninstall-Reelix
+          Remove-Item $ReelixData, $arr -Recurse -Force
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-installer
