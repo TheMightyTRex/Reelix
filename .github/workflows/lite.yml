@@ -66,13 +66,15 @@ jobs:
 
       - name: Build and check the lite image
         run: |
-          docker build -f docker/Dockerfile.lite -t reelix:lite .
+          tag="${{ steps.merge.outputs.tag }}"
+          docker build -f docker/Dockerfile.lite --build-arg VERSION="${tag#v}" -t reelix:lite .
           docker run -d --name lite -e PUID=1000 -e PGID=1000 reelix:lite
           for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' lite)" = healthy ] && break; sleep 5
           done
           docker inspect -f '{{.State.Health.Status}}' lite | grep -qx healthy
           docker exec lite ffprobe -version | head -1
+          test "$(docker image inspect reelix:lite --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "${tag#v}"
           sleep 60
           {
             echo "### Lite image"
