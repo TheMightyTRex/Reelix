@@ -91,10 +91,14 @@ pub fn parse_time_ago(s: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
             u if u.starts_with('y') => 31_536_000.0,
             _ => continue,
         };
-        total += ChronoDuration::seconds((n * secs) as i64);
+        // Absurd values ("100000000000 years ago") overflow chrono and would panic: give up.
+        total = total.checked_add(&ChronoDuration::try_seconds((n * secs) as i64)?)?;
         found = true;
     }
-    found.then(|| now - total)
+    if !found {
+        return None;
+    }
+    now.checked_sub_signed(total)
 }
 
 fn regex_cache() -> &'static regex::Regex {
@@ -144,6 +148,14 @@ impl SettingsExt for Map<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn time_ago_too_far_back_is_none_not_a_panic() {
+        let now = Utc::now();
+        assert_eq!(parse_time_ago("100000000000 years ago", now), None);
+        assert_eq!(parse_time_ago("9999999999999999999 days ago", now), None);
+        assert!(parse_time_ago("3 hours ago", now).is_some());
+    }
 
     #[test]
     fn sizes() {

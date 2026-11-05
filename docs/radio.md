@@ -112,7 +112,7 @@ pub trait RadioProvider: Send + Sync + 'static {
     async fn search(&self, query: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError>;
     async fn preview(&self, link: &str) -> Result<Option<ShowData>, ProviderError>;
     async fn show(&self, external_id: &str, fetch: &ShowFetch) -> Result<ShowData, ProviderError>;
-    fn discover_lists(&self) -> Vec<DiscoverList> { Vec::new() }   // DiscoverList { id, name, category }
+    fn discover_lists(&self) -> Vec<DiscoverList> { Vec::new() }   // DiscoverList { id, name, category, group }
     async fn discover(&self, list: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError>;
 }
 ```
@@ -292,8 +292,16 @@ reaching the source), body size limit.
   with `complete = false`. Station from `ownership.service` (logo
   `sounds.files.bbci.co.uk/3.12.0/networks/{id}/blocks-colour_default.svg`), artwork from
   `image.pid` (`ichef.bbci.co.uk/images/ic/640x640/{pid}.jpg`). Previews and quick adds read
-  the newest series only. The walk follows Storyarr's BBC adapter (MIT, attribution in the
-  module).
+  the newest series only. **A to Z fallback:** BBC Sounds search leaves out many older shows
+  (Cabin Pressure, Old Harry's Game), so when no Sounds hit has the name asked for (compared by
+  `atoz_key`: no case, accents, punctuation or leading "The"), the programmes A to Z
+  `/programmes/a-z/by/{letter}/all.json?page=N` (`@` for digits; 30 titles a page, in order)
+  is read too: a binary search on each page's first title finds the page in about ten requests
+  (cached 1 h like every programme read), the pages either side are scanned, and up to 10 radio
+  brands and series (`ownership.service.type = radio`; episodes and television are left out)
+  whose title starts with the name come before the Sounds hits. A failed A to Z read keeps the
+  Sounds hits. The walk and the A to Z search follow Storyarr's BBC adapter (MIT, attribution
+  in the module).
 - **Apple Podcasts**: `itunes.apple.com/search?media=podcast&entity=podcast&term=&country=`
   (settings country, else `US`), `lookup?id=` for a link's `feedUrl`. Apple only knows where
   the feed is, so hits are `provider: "rss"` with the feed URL, and previews/adds return the
@@ -321,7 +329,9 @@ placeholder in search results and on Discover (`hit_artwork` in
 shows use the downloaded copy.
 
 Tests: `tests/providers.rs` with trimmed real responses in `tests/fixtures/providers/`
-(Podcast Index fixtures are written to its documented format).
+(Podcast Index fixtures are written to its documented format; `bbc_atoz/` holds the A to Z
+pages a search for "Cabin Pressure" reads, each trimmed to its first title except the page
+with the show).
 
 ### (c) Artwork and logos
 
@@ -464,15 +474,19 @@ with `get_for`, so the providers' pacing and rate-limit handling apply):
 | Provider | Rows | Categories | Source |
 |---|---|---|---|
 | `apple` | `top` (Top podcasts) | `genre-{id}`: Arts, Business, Comedy, Education, Fiction, Government, Health & Fitness, History, Kids & Family, Leisure, Music, News, Religion & Spirituality, Science, Society & Culture, Sports, Technology, True Crime, TV & Film | `rss.marketingtools.apple.com/api/v2/{cc}/podcasts/top/50/podcasts.json` (no categories there), categories from the older `itunes.apple.com/{cc}/rss/toppodcasts/limit=50/genre={id}/json` (served as `text/javascript`; `entry` is an object for a single hit and missing for none); `cc` = settings country, else `us` |
-| `bbc` | `popular` (Popular on BBC Sounds) | `category-{id}`: Comedy, Drama, Documentaries, Science & Technology, True Crime, News, Sport | `rms.api.bbc.co.uk/v2/programmes/playable?sort=popular&limit=100[&category=]` (undocumented, like search): the 100 most played episodes reduced to their programmes (brand or series pid), artwork from the episode image |
+| `bbc` | `popular` (Popular on BBC Sounds); `station-{service id}` (Popular on Radio 4, Radio 4 Extra, Radio 2, Radio 5 Live, World Service) | `category-{id}` in four groups (`DiscoverList::group`): **Comedy** (all, sitcoms, satire, stand-up, sketches, chat, panel games and quizzes), **Drama** (all, science fiction and fantasy, crime, thrillers, horror and supernatural, historical, classic and period, relationships and romance, soaps, readings, audiobooks), **Factual** (news, documentaries, history, science and nature, science and technology, politics, crime and justice, true crime, arts, culture and media, health and wellbeing, food and drink, discussion and talk), **Sport and music** (sport, music); 32 in all, sub-genres such as `drama-scifiandfantasy` included (BBC Sounds has no science fiction category of its own) | `rms.api.bbc.co.uk/v2/programmes/playable?sort=popular&limit=100[&network=\|&category=]` (undocumented, like search): the 100 most played episodes reduced to their programmes (brand or series pid), artwork from the episode image |
 | `podcastindex` | `trending` (Trending podcasts) | — | `/podcasts/trending?max=50&lang={settings language}` (only when configured) |
 
 Lists follow the settings like search (`ProviderRegistry::for_discover`): enabled and configured
 providers only, the BBC only for `GB` or no country (and `en`/`cy`/`gd` or no language). Apple
 chart hits carry `provider: "apple"` and the Apple id, not the feed: the feed is looked up only
 when a show is opened (`preview_show`) or added (`AppleProvider::show` with an id), never for a
-whole chart. Storyarr's BBC adapter has no lists; the BBC endpoint was found on the same public
-API as BBC Sounds search.
+whole chart. The BBC stations and categories follow Storyarr's radio Discover (MIT, attribution
+in the module); Storyarr lets each person choose their types, Reelix lists them all.
+
+A category may carry a `group` (`RadioDiscoverListDto.group`, left out of the JSON when
+empty): the web page shows a source's categories under one heading per group ("Comedy · BBC"),
+and under "Categories · {source}" when there is none.
 
 **Service** (`src/discover.rs`): `discover_lists()` → `RadioDiscoverDto {rows, categories}` with
 ids `{provider}-{list}`; `discover(row)` (unknown or unavailable rows are `NotFound`);
@@ -515,7 +529,8 @@ Settings → Requests has a Radio card (defaults), the auto-approve toggle and t
 the Requests page lists radio requests (Radio filter, link to the show for library managers).
 
 Tests: `crates/reelix-radio/tests/discover.rs` (trimmed real Apple and BBC responses, Podcast
-Index in its documented format; list selection; marking by id, alias and feed),
+Index in its documented format; BBC stations and category groups; list selection; marking by
+id, alias and feed),
 `crates/reelix-requests/tests/radio.rs`, `crates/reelix-api/tests/requests.rs`
 (`radio_discover_and_requests_for_requesters`).
 

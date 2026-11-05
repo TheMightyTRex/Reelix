@@ -67,6 +67,9 @@ pub struct DiscoverList {
     pub name: String,
     /// A category (shown as a chip) rather than a row of its own.
     pub category: bool,
+    /// The heading a category is shown under (`Comedy`, `Drama`); `None` = the source's
+    /// general one.
+    pub group: Option<String>,
 }
 
 impl DiscoverList {
@@ -75,6 +78,7 @@ impl DiscoverList {
             id: id.to_owned(),
             name: name.to_owned(),
             category: false,
+            group: None,
         }
     }
 
@@ -83,7 +87,14 @@ impl DiscoverList {
             id: id.to_owned(),
             name: name.to_owned(),
             category: true,
+            group: None,
         }
+    }
+
+    /// The same list under the heading `group`.
+    pub fn in_group(mut self, group: &str) -> Self {
+        self.group = Some(group.to_owned());
+        self
     }
 }
 

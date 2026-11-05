@@ -368,7 +368,10 @@ async fn setup_restore_needs_the_token_and_no_accounts() {
     }
     // A cross-site post from a browser on the server itself: no code is needed there, but the CSRF
     // header is, and a page on another site cannot send it without the browser asking first.
-    let cross_site = Req { peer: Some("127.0.0.1:5000"), ..Default::default() };
+    let cross_site = Req {
+        peer: Some("127.0.0.1:5000"),
+        ..Default::default()
+    };
     let r = call(&app, Method::POST, "/api/v1/setup/restore", cross_site).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
     // Past the checks, the upload reaches the backup service (not registered in these tests).
