@@ -308,9 +308,15 @@ mod tests {
         let old = dir.path().join("old").join("data");
         let new = dir.path().join("new");
         let o = old.to_string_lossy().replace('\\', "/");
+        // An absolute path outside the old data folder (Windows needs a drive letter).
+        let elsewhere = if cfg!(windows) {
+            "C:/srv/backups"
+        } else {
+            "/srv/backups"
+        };
         let text = format!(
             "# keep me\n[server]\nport = 7711\n\n[database]\nurl = \"sqlite://{o}/reelix.db?mode=rwc\"\n\n\
-             [paths]\ndata_dir = \"./data\"\nlog_dir = '{o}/logs' # logs\nbackup_dir = \"/srv/backups\"\n\
+             [paths]\ndata_dir = \"./data\"\nlog_dir = '{o}/logs' # logs\nbackup_dir = \"{elsewhere}\"\n\
              web_dir = \"{o}/../web\"\n\n[security]\nsecret_key_file = \"data/secret.key\"\n"
         );
         std::fs::write(&path, text).unwrap();
@@ -335,7 +341,7 @@ mod tests {
             Some(&*new.join("logs").to_string_lossy())
         );
         // Outside the old data folder: untouched.
-        assert_eq!(doc["paths"]["backup_dir"].as_str(), Some("/srv/backups"));
+        assert_eq!(doc["paths"]["backup_dir"].as_str(), Some(elsewhere));
         assert!(doc["paths"]["web_dir"].as_str().unwrap().ends_with("../web"));
         // Relative: dropped, so the default (<data_dir>/secret.key) applies.
         assert!(doc["security"].get("secret_key_file").is_none());
