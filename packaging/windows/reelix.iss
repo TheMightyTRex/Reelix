@@ -843,3 +843,22 @@ begin
     'Install FFmpeg (ffprobe) and put it on PATH so Reelix can read codec and resolution details.';
   NotesPage.RichEditViewer.Text := S;
 end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Data: String;
+begin
+  if CurUninstallStep = usUninstall then begin
+    { Service mode: [UninstallRun] stops and deletes the service. }
+    if not IsAdminInstallMode then
+      StopInstalledProcess(ExpandConstant('{app}'));
+  end else if CurUninstallStep = usPostUninstall then begin
+    Data := DataDir;
+    if DirExists(Data) then begin
+      if SuppressibleMsgBox('Reelix was removed. Your settings, database, backups and logs are still in' + #13#10 +
+          Data + #13#10#13#10 + 'Delete them too? Choose No to keep them for a later reinstall.',
+          mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
+        DelTree(Data, True, True, True);
+    end;
+  end;
+end;
