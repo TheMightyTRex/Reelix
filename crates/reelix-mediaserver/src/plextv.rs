@@ -184,6 +184,16 @@ impl Metadata {
     }
 }
 
+/// A Discover rating key is a plain identifier (hex or digits). Anything else is not put in a
+/// request path, so a reply cannot steer the follow-up request to another path or query.
+fn is_safe_rating_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 64
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// plex.tv client (no server needed).
 #[derive(Debug, Clone)]
 pub struct PlexTv {
@@ -348,6 +358,7 @@ impl PlexTv {
             if resolve_ids
                 && m.guids.is_empty()
                 && let Some(key) = m.rating_key.clone()
+                && is_safe_rating_key(&key)
             {
                 let url = format!("{}/library/metadata/{key}", self.discover_url);
                 let detail: Container<MetadataList> =
@@ -361,5 +372,20 @@ impl PlexTv {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_rating_key;
+
+    #[test]
+    fn rating_keys_are_plain_identifiers() {
+        assert!(is_safe_rating_key("5d776825880197001ec967c6"));
+        assert!(is_safe_rating_key("12345"));
+        assert!(!is_safe_rating_key(""));
+        assert!(!is_safe_rating_key("../../api/v2/user"));
+        assert!(!is_safe_rating_key("1?X-Plex-Token=x"));
+        assert!(!is_safe_rating_key("a/b"));
     }
 }
