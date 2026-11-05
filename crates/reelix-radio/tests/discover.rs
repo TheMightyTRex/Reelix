@@ -12,7 +12,7 @@ use reelix_db::secrets::SecretBox;
 
 use reelix_radio::providers::{AppleProvider, BbcProvider, PodcastIndexProvider, RssProvider, podcastindex};
 use reelix_radio::*;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 fn fixture(name: &str) -> String {
@@ -149,7 +149,7 @@ async fn bbc_popular_programmes_per_category() {
         .with_interval(Duration::ZERO);
     assert!(
         p.discover_lists()
-            .contains(&DiscoverList::category("category-comedy", "Comedy"))
+            .contains(&DiscoverList::category("category-comedy", "All comedy").in_group("Comedy"))
     );
     let hits = p.discover("category-comedy", &gb()).await.unwrap();
     // Six popular episodes of five programmes, in order.
@@ -178,6 +178,88 @@ async fn bbc_popular_programmes_per_category() {
         reelix_radio::providers::bbc::popular_hits(&serde_json::json!({"x": 1})),
         Err(ProviderError::Parse(_))
     ));
+}
+
+#[test]
+fn bbc_lists_stations_and_every_category_in_groups() {
+    let lists = BbcProvider::new(reqwest::Client::new()).discover_lists();
+    let rows: Vec<&str> = lists
+        .iter()
+        .filter(|l| !l.category)
+        .map(|l| l.id.as_str())
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "popular",
+            "station-bbc_radio_four",
+            "station-bbc_radio_four_extra",
+            "station-bbc_radio_two",
+            "station-bbc_radio_five_live",
+            "station-bbc_world_service",
+        ]
+    );
+    assert!(lists.contains(&DiscoverList::row(
+        "station-bbc_radio_four_extra",
+        "Popular on Radio 4 Extra"
+    )));
+    let categories: Vec<&DiscoverList> = lists.iter().filter(|l| l.category).collect();
+    assert_eq!(categories.len(), 32);
+    assert!(categories.iter().all(|c| c.group.is_some()));
+    // BBC Sounds has no science fiction category of its own: it is a drama sub-genre.
+    assert!(
+        lists.contains(
+            &DiscoverList::category("category-drama-scifiandfantasy", "Science fiction and fantasy")
+                .in_group("Drama")
+        )
+    );
+    let mut groups: Vec<&str> = categories.iter().filter_map(|c| c.group.as_deref()).collect();
+    groups.dedup();
+    assert_eq!(groups, ["Comedy", "Drama", "Factual", "Sport and music"]);
+}
+
+#[tokio::test]
+async fn bbc_popular_programmes_per_station_and_sub_genre() {
+    let s = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/programmes/playable"))
+        .and(query_param("sort", "popular"))
+        .and(query_param("network", "bbc_radio_four_extra"))
+        .and(query_param_is_missing("category"))
+        .respond_with(json("bbc_popular_station.json"))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/programmes/playable"))
+        .and(query_param("category", "drama-scifiandfantasy"))
+        .and(query_param_is_missing("network"))
+        .respond_with(json("bbc_popular.json"))
+        .mount(&s)
+        .await;
+    let p = BbcProvider::new(reqwest::Client::new())
+        .with_base_urls(&s.uri(), &s.uri())
+        .with_interval(Duration::ZERO);
+    let hits = p.discover("station-bbc_radio_four_extra", &gb()).await.unwrap();
+    // Five popular episodes of four programmes, in order.
+    let ids: Vec<&str> = hits.iter().map(|h| h.external_id.as_str()).collect();
+    assert_eq!(ids, ["p0fsqm4x", "b009v07q", "b036y0y4", "b009v6h3"]);
+    assert_eq!(hits[0].title, "Whodunnits");
+    assert!(
+        hits.iter()
+            .all(|h| h.station_name.as_deref() == Some("Radio 4 Extra"))
+    );
+    assert!(
+        !p.discover("category-drama-scifiandfantasy", &gb())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    for unknown in ["station-bbc_radio_one_xtra", "station-", "nope"] {
+        assert!(matches!(
+            p.discover(unknown, &gb()).await,
+            Err(ProviderError::NotFound(_))
+        ));
+    }
 }
 
 // ---------------------------------------------------------------- Podcast Index

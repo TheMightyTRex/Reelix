@@ -1,0 +1,75 @@
+{
+ "$schema": "https://rms.api.bbc.co.uk/docs/swagger.json#/definitions/ContainerItems",
+ "data": [
+  {
+   "type": "container_item",
+   "id": "p0397866",
+   "urn": "urn:bbc:radio:brand:p0397866",
+   "tlec_urn": "urn:bbc:radio:brand:p0397866",
+   "network": {
+    "id": "bbc_world_service",
+    "key": "worldserviceradio",
+    "short_title": "World Service",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_world_service/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Bathroom Cabinets",
+    "secondary": null,
+    "tertiary": null
+   },
+   "synopses": {
+    "short": "Advice on medicines you can keep at home",
+    "medium": "Advice on medicines you can keep at home",
+    "long": "Advice on medicines you can keep at home"
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p06lrx0y.jpg",
+   "activities": [],
+   "uris": [
+    {
+     "type": "latest",
+     "id": null,
+     "label": "Latest",
+     "uri": "/v2/programmes/playable?container=p0397866&sort=sequential&type=episode&experience=domestic"
+    }
+   ],
+   "playable_count": null,
+   "recommendation": null
+  },
+  {
+   "type": "container_item",
+   "id": "b01mk97n",
+   "urn": "urn:bbc:radio:brand:b01mk97n",
+   "tlec_urn": "urn:bbc:radio:brand:b01mk97n",
+   "network": {
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "short_title": "Radio 4",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "John Finnemore's Souvenir Programme",
+    "secondary": null,
+    "tertiary": null
+   },
+   "synopses": {
+    "short": "Sketch show from the writer of Radio 4's Cabin Pressure, John Finnemore",
+    "medium": "Sketch show from the writer of Radio 4's Cabin Pressure and regular guest on The Now Show, John Finnemore, with Carrie Quinlan, Margaret Cabourn-Smith, Lawry Lewin and Simon Kane",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0m2fgvs.jpg",
+   "activities": [],
+   "uris": [
+    {
+     "type": "latest",
+     "id": null,
+     "label": "Latest",
+     "uri": "/v2/programmes/playable?container=b01mk97n&sort=sequential&type=episode&experience=domestic"
+    }
+   ],
+   "playable_count": null,
+   "recommendation": null
+  }
+ ]
+}
