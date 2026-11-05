@@ -140,6 +140,8 @@ On a server with no desktop, follow [Set up Reelix from a terminal only](docs/te
 - **Install for me only** (no admin rights): installs to `%LOCALAPPDATA%\Programs\Reelix` and keeps data in `%LOCALAPPDATA%\Reelix`. Start Reelix from the Start menu; optionally it starts when you sign in.
 - **Install for all users** (admin): installs to `C:\Program Files\Reelix` and runs Reelix as the Windows service `Reelix`, which starts with Windows even when nobody is signed in. Data lives in `C:\ProgramData\Reelix`.
 
+A new installation then offers a **Fresh install**, a **Recovery** from a Reelix backup zip, or a **Migration** from Radarr, Sonarr, Prowlarr, Lidarr or Readarr on the same PC (reviewed and run in System → Migrate after setup) or from an existing Reelix folder such as the portable zip; silent installs take `/MODE=`, `/BACKUP=`, `/MIGRATEFROM=` and `/ARR=`.
+
 Either way, **Open Reelix** in the Start menu opens <http://localhost:7700>, updates install in place from **System → Updates**, and uninstalling keeps your data unless you ask to delete it. See [docs/installers.md](docs/installers.md).
 
 **Portable zip:**

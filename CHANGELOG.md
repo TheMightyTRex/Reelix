@@ -18,6 +18,35 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 - **Terminal-only instructions** in `docs/terminal-setup.md`: every command from installing Reelix to the last set-up question.
 - **Send feedback in the wizard,** with [Snaglist](https://github.com/TheMightyTRex/snaglist) (MIT). Reports name the step and open a GitHub issue. **Show as a QR code** sends a report from a phone when the server is not online yet; in the terminal the code is sized to the window, and the whole report is saved under the data directory's `feedback` folder.
 
+## [0.8.5] - 2026-11-06
+
+### Added
+- **The Windows installer asks how to install Reelix:**
+  - **Fresh install:** a new, empty Reelix.
+  - **Recovery:** pick a Reelix backup (`reelix_backup_*.zip`). Setup checks it and stages it, and Reelix restores it on first start, rolling back if the restored database won't open.
+  - **Migration:**
+    - **From Radarr, Sonarr, Prowlarr, Lidarr or Readarr on this PC.** Setup finds them from their `config.xml`, and you tick the ones to bring over. After you create the admin account, Reelix shows a "Ready to migrate" banner and opens System → Migrate with those apps filled in. Their API keys are stored encrypted and never put on a command line.
+    - **From an existing Reelix folder,** such as the zip download. Setup copies its data and updates `config.toml` for the new location.
+  - Upgrades skip this question and keep your data.
+  - Silent installs can use `/MODE=fresh|recovery|migrate`, `/BACKUP=`, `/MIGRATEFROM=` and `/ARR=`; see `docs/installers.md`.
+- New commands:
+  - `reelix backup create`
+  - `reelix restore check|stage <zip>`
+  - `reelix migrate prepare|list`
+  - `reelix config relocate`
+- API: `GET`/`DELETE /api/v1/system/migrate/pending` (admin).
+
+### Changed
+- Release builds time out instead of hanging when a download stalls.
+
+## [0.8.4] - 2026-11-06
+
+### Fixed
+- **Opening an Apple Podcasts show from Discover works again.** In 0.8.2 and 0.8.3 it failed with "Request failed (502)" or "this link cannot be read here", because the Apple source's feed reader was missing the public-only client that Discover uses.
+
+### Security
+- Feed links read for Discover and requests now also refuse private IP addresses written as numbers (such as `http://127.0.0.1/…`), not only host names that resolve to private addresses.
+
 ## [0.8.3] - 2026-11-05
 
 ### Added

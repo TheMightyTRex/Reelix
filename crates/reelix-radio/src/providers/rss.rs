@@ -43,6 +43,36 @@ fn is_restricted() -> bool {
     RESTRICTED.try_with(|r| *r).unwrap_or(false)
 }
 
+/// Whether `url`'s host is an IP literal that isn't a public address (loopback, private,
+/// link-local, unique-local, unspecified, or an IPv4-mapped one of those).
+fn literal_is_private(url: &str) -> bool {
+    use std::net::IpAddr;
+    let Ok(u) = url::Url::parse(url) else {
+        return false;
+    };
+    let ip: IpAddr = match u.host() {
+        Some(url::Host::Ipv4(v4)) => v4.into(),
+        Some(url::Host::Ipv6(v6)) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        _ => return false,
+    };
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 impl RssProvider {
     /// `http` is the server's shared client (user agent, timeouts).
     pub fn new(http: reqwest::Client) -> Self {
@@ -62,6 +92,13 @@ impl RssProvider {
     async fn fetch(&self, url: &str) -> Result<String, ProviderError> {
         let net = |e: reqwest::Error| ProviderError::Network(e.without_url().to_string());
         let http = if is_restricted() {
+            // The public client refuses private addresses when it resolves a host name; an IP
+            // literal is never resolved, so it is checked here.
+            if literal_is_private(url) {
+                return Err(ProviderError::Network(
+                    "this link cannot be read here; ask a library manager to add the show".into(),
+                ));
+            }
             self.public_http.as_ref().ok_or_else(|| {
                 ProviderError::Network(
                     "this link cannot be read here; ask a library manager to add the show".into(),

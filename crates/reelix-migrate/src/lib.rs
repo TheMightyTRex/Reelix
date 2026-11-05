@@ -7,6 +7,7 @@
 //! example after adding a path rewrite or a TMDB key).
 
 mod engine;
+pub mod pending;
 mod quality;
 pub mod source;
 
