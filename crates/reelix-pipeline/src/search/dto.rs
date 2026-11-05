@@ -129,6 +129,7 @@ pub fn book_ref(b: &reelix_api_types::books::BookDto) -> MediaRefDto {
         year: b.year,
         subtitle: Some(b.author_name.clone()),
         book_format: None,
+        show_id: None,
     }
 }
 
@@ -142,6 +143,7 @@ pub fn album_ref(a: &reelix_api_types::music::AlbumDto) -> MediaRefDto {
         year: a.release_date.map(|d| d.year()),
         subtitle: Some(a.artist_name.clone()),
         book_format: None,
+        show_id: None,
     }
 }
 
@@ -163,6 +165,7 @@ pub async fn radio_ref(svc: &reelix_radio::RadioService, episode_id: i64) -> Opt
         year: e.first_broadcast.map(|d| d.year()),
         subtitle: Some(show.title),
         book_format: None,
+        show_id: Some(show.id),
     })
 }
 
@@ -209,6 +212,7 @@ impl SearchService {
                         year: x.year,
                         subtitle: None,
                         book_format: None,
+                        show_id: None,
                     },
                 );
             }
@@ -224,6 +228,7 @@ impl SearchService {
                         year: x.year,
                         subtitle: None,
                         book_format: None,
+                        show_id: None,
                     },
                 );
             }

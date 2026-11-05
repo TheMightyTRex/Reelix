@@ -172,4 +172,14 @@ impl RadioService {
         )
         .await
     }
+
+    /// Queues an indexer search for every wanted episode (`radio_missing_search`, run by the
+    /// pipeline; also scheduled every 6 hours).
+    pub async fn queue_missing_search(&self) -> Result<Option<i64>> {
+        self.enqueue(
+            NewJob::new(kinds::RADIO_MISSING_SEARCH, serde_json::json!({}))
+                .dedupe(kinds::RADIO_MISSING_SEARCH),
+        )
+        .await
+    }
 }

@@ -1,5 +1,5 @@
 //! Interactive search modal: search every indexer for one movie / season / episode / book format
-//! / album, show the decision for each release (rejection reasons, custom-format score, rank) and
+//! / album / radio episode, show the decision for each release (rejection reasons, custom-format score, rank) and
 //! grab one.
 
 use leptos::prelude::*;
@@ -19,6 +19,8 @@ use crate::state::Toasts;
 pub struct SearchTarget {
     pub title: String,
     pub query: ReleaseQuery,
+    /// A radio episode: searched with `GET /radio/episodes/{id}/releases` instead of `query`.
+    pub radio_episode: Option<i64>,
 }
 
 impl SearchTarget {
@@ -29,6 +31,7 @@ impl SearchTarget {
                 movie_id: Some(id),
                 ..Default::default()
             },
+            radio_episode: None,
         }
     }
 
@@ -40,6 +43,7 @@ impl SearchTarget {
                 season: Some(season),
                 ..Default::default()
             },
+            radio_episode: None,
         }
     }
 
@@ -50,6 +54,7 @@ impl SearchTarget {
                 episode_id: Some(episode_id),
                 ..Default::default()
             },
+            radio_episode: None,
         }
     }
 
@@ -62,6 +67,7 @@ impl SearchTarget {
                 book_format: format,
                 ..Default::default()
             },
+            radio_episode: None,
         }
     }
 
@@ -72,10 +78,23 @@ impl SearchTarget {
                 album_id: Some(album_id),
                 ..Default::default()
             },
+            radio_episode: None,
+        }
+    }
+
+    /// One radio episode (`/radio/episodes/{id}/releases`).
+    pub fn radio_episode(episode_id: i64, title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            query: ReleaseQuery::default(),
+            radio_episode: Some(episode_id),
         }
     }
 
     fn url(&self) -> String {
+        if let Some(id) = self.radio_episode {
+            return format!("/radio/episodes/{id}/releases");
+        }
         let q = &self.query;
         let s = |v: Option<i64>| v.map(|v| v.to_string()).unwrap_or_default();
         with_query(
@@ -438,5 +457,9 @@ mod tests {
         );
         assert_eq!(SearchTarget::book(5, None, "x").url(), "/releases?book_id=5");
         assert_eq!(SearchTarget::album(8, "x").url(), "/releases?album_id=8");
+        assert_eq!(
+            SearchTarget::radio_episode(12, "x").url(),
+            "/radio/episodes/12/releases"
+        );
     }
 }

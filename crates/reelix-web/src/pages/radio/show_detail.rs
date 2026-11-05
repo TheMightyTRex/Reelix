@@ -1,6 +1,8 @@
 //! `/radio/shows/{id}` — one show: artwork, station, follow choice, monitoring, tags, root
-//! folder and actions, then its episodes by series with an episode side panel (matched file,
-//! "Not this file", "Match automatically again" and a manual choice from unmatched files).
+//! folder and actions (refresh, search missing, open in Audiobookshelf), then its episodes by
+//! series with monitor toggles and an episode side panel (indexer search, interactive search,
+//! filed file, matched file, "Not this file", "Match automatically again" and a manual choice
+//! from unmatched files).
 
 use leptos::ev;
 use leptos::prelude::*;
@@ -10,15 +12,17 @@ use leptos_router::hooks::{use_navigate, use_params_map};
 use reelix_api_types::EnqueuedJob;
 use reelix_api_types::radio::{
     RadioEpisodeDto, RadioEpisodeFileDto, RadioEpisodeFileRequest, RadioFollow, RadioLibraryReviewDto,
-    RadioSeriesKind, RadioShowDto, RadioShowEdit, RadioShowEpisodesDto,
+    RadioMonitorRequest, RadioSeriesKind, RadioShowDto, RadioShowEdit, RadioShowEpisodesDto,
 };
 
 use crate::api;
+use crate::components::interactive_search::{InteractiveSearchModal, SearchTarget};
 use crate::components::library_common::{LibIcon, bytes, on_entity_changed};
 use crate::components::library_forms::{opt_from, require_library};
 use crate::components::radio::{
-    FOLLOW, RADIO_ENTITIES, RadioArtwork, RadioOptions, RadioProfileSelect, RadioRootSelect, RadioTagPicker,
-    StationLogo, artwork_url, episode_code, file_label, length, opt_id, series_label, status_badge,
+    FOLLOW, RADIO_ENTITIES, RadioArtwork, RadioMonitorToggle, RadioOptions, RadioProfileSelect,
+    RadioRootSelect, RadioTagPicker, StationLogo, artwork_url, episode_code, file_label, length, opt_id,
+    queue_search, series_label, status_badge,
 };
 use crate::components::request_drawer::Drawer;
 use crate::components::{ConfirmDialog, EmptyState, ErrorBox, Icon, Modal, Skeleton, Spinner, StatusBadge};
@@ -40,6 +44,21 @@ fn save_edit(id: i64, edit: RadioShowEdit, ok: &'static str, done: impl Fn() + '
         match api::put::<_, RadioShowDto>(&format!("/radio/shows/{id}"), &edit).await {
             Ok(_) => {
                 toasts.success(ok);
+                done();
+            }
+            Err(e) => toasts.error(format!("Could not save: {e}")),
+        }
+    });
+}
+
+/// Monitors or unmonitors an episode (`/radio/episodes/{id}`) or a whole series
+/// (`/radio/series/{id}`) and reloads.
+fn save_monitored(path: String, monitored: bool, done: impl Fn() + 'static) {
+    let toasts = Toasts::expect();
+    spawn_local(async move {
+        match api::put::<_, serde_json::Value>(&path, &RadioMonitorRequest { monitored }).await {
+            Ok(_) => {
+                toasts.success(if monitored { "Monitored." } else { "Unmonitored." });
                 done();
             }
             Err(e) => toasts.error(format!("Could not save: {e}")),
@@ -70,6 +89,12 @@ fn ShowDetail(id: i64) -> impl IntoView {
 
     let edit_open = RwSignal::new(false);
     let delete_open = RwSignal::new(false);
+    let isearch_open = RwSignal::new(false);
+    let isearch_target = RwSignal::new(None::<SearchTarget>);
+    let interactive = Callback::new(move |(eid, title): (i64, String)| {
+        isearch_target.set(Some(SearchTarget::radio_episode(eid, title)));
+        isearch_open.set(true);
+    });
     let reload = move || {
         show.refetch();
         episodes.refetch();
@@ -115,6 +140,7 @@ fn ShowDetail(id: i64) -> impl IntoView {
         let follow = s.follow;
         let web = s.web_url.as_deref().and_then(http_url);
         let feed = s.feed_url.as_deref().and_then(http_url);
+        let abs = s.abs_web_url.as_deref().and_then(http_url);
         let station = s.station_id.zip(s.station_name.clone());
         view! {
             <div class="detail-hero">
@@ -175,7 +201,6 @@ fn ShowDetail(id: i64) -> impl IntoView {
                                 </div>
                             })}
                             {s.abs_item_id.clone().map(|item| view! {
-                                // TODO: link to the item in Audiobookshelf once the API exposes its base URL.
                                 <div class="fact"><span class="fact-label">"Audiobookshelf item"</span><span class="mono">{item}</span></div>
                             })}
                         </div>
@@ -183,6 +208,12 @@ fn ShowDetail(id: i64) -> impl IntoView {
                             <button type="button" class="btn btn-primary" on:click=refresh>
                                 <Icon name="refresh" />
                                 "Refresh"
+                            </button>
+                            <button type="button" class="btn btn-secondary" disabled=st.wanted_count == 0
+                                title=if st.wanted_count == 0 { "No episode is wanted" } else { "Search indexers for every wanted episode" }
+                                on:click=move |_| queue_search(format!("/radio/shows/{id}/search"))>
+                                <Icon name="search" />
+                                "Search missing"
                             </button>
                             <button type="button" class="btn btn-secondary" on:click=move |_| {
                                 let edit = RadioShowEdit { monitored: Some(!monitored), ..Default::default() };
@@ -199,6 +230,12 @@ fn ShowDetail(id: i64) -> impl IntoView {
                                 <a class="btn btn-ghost" href=u target="_blank" rel="noopener noreferrer">
                                     <Icon name="external" />
                                     "Show page"
+                                </a>
+                            })}
+                            {abs.map(|u| view! {
+                                <a class="btn btn-ghost" href=u target="_blank" rel="noopener noreferrer">
+                                    <Icon name="external" />
+                                    "Open in Audiobookshelf"
                                 </a>
                             })}
                             {feed.map(|u| view! {
@@ -228,13 +265,14 @@ fn ShowDetail(id: i64) -> impl IntoView {
 
     view! {
         {header}
-        <EpisodeList episodes=episodes on_open=open_episode />
+        <EpisodeList episodes=episodes on_open=open_episode on_changed=Callback::new(move |()| reload()) />
         <ShowEditModal open=edit_open show=show_sig opts=opts on_saved=Callback::new(move |()| reload()) />
         <ConfirmDialog open=delete_open title="Delete show?"
             message=Signal::derive(move || show_sig.get().map(|s| format!("“{}” and its series and episodes will be removed from Reelix. Files in the podcast library are kept.", s.title)).unwrap_or_default())
             confirm_label="Delete" on_confirm=delete />
         <EpisodePanel open=drawer_open episode_id=selected show=show_sig rev=episode_rev
-            on_changed=Callback::new(move |()| reload()) />
+            on_changed=Callback::new(move |()| reload()) on_interactive=interactive />
+        <InteractiveSearchModal open=isearch_open target=isearch_target />
     }
 }
 
@@ -243,6 +281,7 @@ fn ShowDetail(id: i64) -> impl IntoView {
 fn EpisodeList(
     episodes: LocalResource<api::ApiResult<RadioShowEpisodesDto>>,
     on_open: Callback<i64>,
+    on_changed: Callback<()>,
 ) -> impl IntoView {
     let series = RwSignal::new(0i64);
     // Default to the newest numbered series (specials last).
@@ -293,6 +332,7 @@ fn EpisodeList(
             .filter(|e| e.series_id == current)
             .collect();
         let n = rows.len();
+        let all_monitored = !rows.is_empty() && rows.iter().all(|e| e.monitored);
         let subtitle = cur
             .as_ref()
             .map(|s| {
@@ -317,6 +357,13 @@ fn EpisodeList(
                         <p class="card-subtitle">{subtitle}</p>
                     </div>
                     <div class="card-actions">
+                        {(n > 0).then(|| view! {
+                            <button type="button" class="btn btn-sm btn-secondary"
+                                on:click=move |_| save_monitored(format!("/radio/series/{current}"), !all_monitored, move || on_changed.run(()))>
+                                <LibIcon name=if all_monitored { "bookmark-off" } else { "bookmark" } />
+                                {if all_monitored { "Unmonitor series" } else { "Monitor series" }}
+                            </button>
+                        })}
                         <label class="visually-hidden" for="radio-series">"Series"</label>
                         <select id="radio-series" class="input" on:change=move |e| series.set(event_target_value(&e).parse().unwrap_or(0))>
                             {list.iter().map(|s| {
@@ -353,10 +400,8 @@ fn EpisodeList(
                                             view! {
                                                 <tr class:muted=e.source_removed_at.is_some()>
                                                     <td>
-                                                        <span class="monitor-flag" title=if mon { "Monitored" } else { "Not monitored" }>
-                                                            <LibIcon name=if mon { "bookmark" } else { "bookmark-off" } />
-                                                            <span class="visually-hidden">{if mon { "Monitored" } else { "Not monitored" }}</span>
-                                                        </span>
+                                                        <RadioMonitorToggle monitored=mon label=format!("{} {}", episode_code(&e), e.title)
+                                                            on_toggle=Callback::new(move |()| save_monitored(format!("/radio/episodes/{eid}"), !mon, move || on_changed.run(()))) />
                                                     </td>
                                                     <td class="mono nowrap">{episode_code(&e)}</td>
                                                     <td class="cell-strong">
@@ -503,6 +548,8 @@ fn EpisodePanel(
     #[prop(into)] show: Signal<Option<RadioShowDto>>,
     rev: RwSignal<u32>,
     on_changed: Callback<()>,
+    /// Opens the interactive search for `(episode id, title)`.
+    on_interactive: Callback<(i64, String)>,
 ) -> impl IntoView {
     let toasts = Toasts::expect();
     let local_rev = RwSignal::new(0u32);
@@ -599,6 +646,54 @@ fn EpisodePanel(
         let enclosure = e.enclosure_url.as_deref().and_then(http_url);
         let file = e.file.clone();
         let cleared_by_hand = e.manual_match && e.file_id.is_none();
+        let has_file = e.file_id.is_some();
+        let monitored = e.monitored;
+        let search_title = StoredValue::new(format!(
+            "{} · {} {}",
+            show.get_untracked().map(|s| s.title).unwrap_or_default(),
+            episode_code(&e),
+            e.title
+        ));
+        let filed = e.filed_path.clone().map(|p| (p, e.filed_at));
+        let search_view = view! {
+            <section class="stack">
+                <h3 class="form-section">"Search"</h3>
+                {match filed {
+                    Some((path, at)) => view! {
+                        <dl class="kv">
+                            <div class="kv-row"><dt>"Filed"</dt><dd class="mono">{path}</dd></div>
+                            {at.map(|d| view! { <div class="kv-row"><dt>"Filed at"</dt><dd>{crate::format::datetime(d)}</dd></div> })}
+                        </dl>
+                        {(!has_file).then(|| view! {
+                            <p class="field-hint">"Reelix filed a download into the podcast library; the episode is In library once the next library sync matches the file."</p>
+                        })}
+                    }
+                    .into_any(),
+                    None => ().into_any(),
+                }}
+                {has_file.then(|| view! { <p class="field-hint">"The episode has a file, so it is not searched for."</p> })}
+                <div class="drawer-actions">
+                    <button type="button" class="btn btn-primary" disabled=has_file
+                        on:click=move |_| queue_search(format!("/radio/episodes/{eid}/search"))>
+                        <Icon name="search" />
+                        "Search"
+                    </button>
+                    <button type="button" class="btn btn-secondary" disabled=has_file
+                        on:click=move |_| on_interactive.run((eid, search_title.get_value()))>
+                        <Icon name="search" />
+                        "Interactive search"
+                    </button>
+                    <button type="button" class="btn btn-ghost" disabled=move || busy.get()
+                        on:click=move |_| save_monitored(format!("/radio/episodes/{eid}"), !monitored, move || {
+                            local_rev.update(|n| *n += 1);
+                            on_changed.run(());
+                        })>
+                        <LibIcon name=if monitored { "bookmark-off" } else { "bookmark" } />
+                        {if monitored { "Unmonitor" } else { "Monitor" }}
+                    </button>
+                </div>
+            </section>
+        };
         let file_view = match file {
             Some(f) => view! {
                 <section class="stack">
@@ -710,6 +805,7 @@ fn EpisodePanel(
                 })}
             </dl>
             {e.synopsis.clone().map(|t| view! { <p class="detail-overview">{t}</p> })}
+            {search_view}
             {file_view}
             <section class="stack">
                 <h3 class="form-section">{if e.file_id.is_some() { "Choose another file" } else { "Choose a file" }}</h3>

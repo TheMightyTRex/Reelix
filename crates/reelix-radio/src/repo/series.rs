@@ -6,7 +6,7 @@ use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
 use crate::convert::{enum_str, from_ms_opt, parse_enum, u32_opt};
-use crate::error::Result;
+use crate::error::{RadioError, Result};
 use crate::provider::SeriesData;
 
 const COLS: &str = "x.id, x.show_id, x.external_id, x.kind, x.number, x.number_source, x.title, x.synopsis, \
@@ -42,6 +42,17 @@ pub async fn for_show(db: &Db, show_id: i64) -> Result<Vec<RadioSeriesDto>> {
     .iter()
     .map(map)
     .collect()
+}
+
+pub async fn require(db: &Db, id: i64) -> Result<RadioSeriesDto> {
+    sqlx::query(&format!("SELECT {COLS} FROM radio_series x WHERE x.id = ?"))
+        .bind(id)
+        .fetch_optional(db.pool())
+        .await?
+        .as_ref()
+        .map(map)
+        .transpose()?
+        .ok_or_else(|| RadioError::NotFound(format!("radio series {id} not found")))
 }
 
 /// Inserts or updates a series from the provider and returns its id. A series the source

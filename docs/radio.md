@@ -84,7 +84,10 @@ library files.
 `episodes.monitored` comes from the follow choice when an episode first appears:
 `all` → yes; `none` → no; `from_now_on` → only if `first_broadcast >= followed_at` (undated
 episodes: only if they appear after the show was added). Changing the follow choice sets
-`followed_at` to now and re-applies it to every episode.
+`followed_at` to now and re-applies it to every episode, including episodes monitored or
+unmonitored by hand (`PUT /radio/episodes/{id}`, `PUT /radio/series/{id}`;
+`RadioService::set_episode_monitored` / `set_series_monitored`, which re-derive the status of
+those episodes and emit `entity.changed` for them and the show).
 
 Numbering: episodes (and series) with no number from the source get the lowest numbers not
 taken by source numbers, in broadcast order (undated last), recomputed on every refresh.
@@ -148,7 +151,9 @@ root-folder changes need `ADMIN`.
 | `GET/PUT/DELETE /radio/shows/{id}` | Read, edit (follow, monitored, tags, root folder, quality profile, `abs_item_id`; `null` clears), delete |
 | `GET /radio/shows/{id}/episodes` | `{series, episodes}` |
 | `POST /radio/shows/{id}/refresh` | Queues `refresh_radio_shows` for the show |
-| `GET /radio/episodes/{id}` | Episode with its matched `file` |
+| `GET /radio/episodes/{id}` | Episode with its matched `file` (and `filed_path`/`filed_at` when Reelix filed a download) |
+| `PUT /radio/episodes/{id}` | `{monitored}`: monitor or unmonitor one episode by hand; the status follows |
+| `PUT /radio/series/{id}` | `{monitored}` for every episode of the series; returns the series' episodes |
 | `PUT /radio/episodes/{id}/file` | `{file_id}`: hand-set match |
 | `DELETE /radio/episodes/{id}/file` | Clear; `?auto=true` hands it back to automatic matching |
 | `GET /radio/search?q=&provider=` | Search by name (a link is previewed); saves nothing |
@@ -158,7 +163,7 @@ root-folder changes need `ADMIN`.
 | `GET /radio/library/review` | `{unmatched_shows, unmatched_files, synced_at}` from `radio_episode_files` |
 | `GET/POST /radio/rootfolders`, `DELETE /radio/rootfolders/{id}` | Root folders of kind `radio` |
 | `GET/PUT /radio/settings` | `RadioSettingsDto` |
-| `POST /command` | `{name: "RefreshRadioShow", show_ids}` or `{name: "RescanRadioLibrary"}` |
+| `POST /command` | `{name: "RefreshRadioShow", show_ids}`, `{name: "RescanRadioLibrary"}` or `{name: "RadioMissingSearch"}` (queues `radio_missing_search`) |
 
 Events: `entity.changed` with entity `radio_show`, `radio_episode`, `radio_episode_file`
 (also `radio_station`, `rootfolder`, `settings`).
@@ -193,7 +198,11 @@ Audiobookshelf rows of the media servers (same URL and API token), finds the one
 radio settings' `abs_library_id`, reads it and calls
 `RadioService::sync_library_files(&[NewEpisodeFile])`, which upserts with one `seen_at`,
 `remove_unseen_files` (episodes return to Wanted/Not requested from the follow choice),
-`match_library()` and `mark_library_synced`. If the library cannot be read nothing is removed
+`match_library()` and `mark_library_synced`. The sync also saves the server's address
+(`RadioService::set_abs_web_url`, key `radio.abs_web_url`): shows mapped to an item get
+`abs_web_url` = `{server URL}/item/{abs_item_id}` ("Open in Audiobookshelf" on the show page).
+It is the URL from the media server's settings, so a server set up by an internal address
+(e.g. a container name) links there. If the library cannot be read nothing is removed
 and the job fails. `request_scan()` (a default no-op method on `RadioLibrarySync`, for filing)
 scans that library. The `radio_library_sync` task and
 `POST /command {"name": "RescanRadioLibrary"}` run the sync.
@@ -421,7 +430,16 @@ pub trait RadioLibrarySync: Send + Sync + 'static {
 | `GET/PUT /radio/naming` | `RadioNamingDto` |
 
 Queue, history and blocklist rows of radio episodes carry `media.kind = "radio_episode"`
-(title `S20E03 - Title`, subtitle the show); `GET /history?radio_episode_id=` filters them.
+(`id` = the episode, title `S20E03 - Title`, subtitle the show, `show_id`);
+`GET /history?radio_episode_id=` filters them. The Activity pages show them with a radio icon
+and link to the show page.
+
+**Web UI**: the show page has "Search missing" (`POST /radio/shows/{id}/search`), monitor
+toggles per episode and per series, and in the episode panel "Search", "Interactive search"
+(the shared interactive search modal with `GET /radio/episodes/{id}/releases`; grabs go through
+`POST /releases/grab`) and the filed file. The shows page has "Search all missing"
+(`RadioMissingSearch`). The naming templates are on Settings → Naming. Radio is not on the
+Wanted page or the calendar (which list movies and TV episodes only, like books and music).
 
 Not built yet: manual import of an arbitrary folder for a radio episode (retrying a queue item
 works), a profile check at filing time (the release was already scored), and telling radio

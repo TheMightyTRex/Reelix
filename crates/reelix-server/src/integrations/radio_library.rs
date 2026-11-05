@@ -126,6 +126,8 @@ impl AbsRadioLibrary {
                 ));
             }
         };
+        // Links to the podcasts' pages in Audiobookshelf ("Open in Audiobookshelf").
+        svc.set_abs_web_url(Some(abs.url())).await?;
         let mut checks = Vec::new();
         if let Some(f) = &settings.abs_library_folder
             && !library.folders.iter().any(|x| within(f, &x.full_path))

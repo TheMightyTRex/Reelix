@@ -57,6 +57,7 @@ fn map(r: &SqliteRow) -> Result<RadioShowDto> {
             in_library_count: count(r, "n_have")?,
             wanted_count: count(r, "n_wanted")?,
         },
+        abs_web_url: None,
     })
 }
 

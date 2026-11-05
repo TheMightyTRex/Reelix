@@ -34,7 +34,7 @@ pub struct FormatRefDto {
 pub struct MediaRefDto {
     /// `movie`, `series`, `book`, `album` or `radio_episode`.
     pub kind: String,
-    /// Movie / series / book / album id.
+    /// Movie / series / book / album / radio episode id.
     pub id: i64,
     pub title: String,
     pub year: Option<i32>,
@@ -45,6 +45,9 @@ pub struct MediaRefDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub book_format: Option<BookFormat>,
+    /// The radio show of a `radio_episode` row (`id` is the episode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

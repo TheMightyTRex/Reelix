@@ -13,7 +13,7 @@ use crate::error::{RadioError, Result};
 use crate::provider::{ProviderError, RadioProvider, SearchPrefs, ShowData, ShowFetch};
 use crate::repo::{self, shows::NewShow};
 use crate::status::{episode_status, monitored_by_follow};
-use crate::{RadioService, entities};
+use crate::{RadioService, entities, keys};
 
 /// Newest episodes shown by a preview.
 const PREVIEW_EPISODES: usize = 10;
@@ -22,7 +22,8 @@ impl RadioService {
     // ---------------- shows ----------------
 
     pub async fn list_shows(&self, q: &RadioShowListQuery) -> Result<Paged<RadioShowDto>> {
-        let (items, total, page, page_size) = repo::shows::page(&self.db, q).await?;
+        let (mut items, total, page, page_size) = repo::shows::page(&self.db, q).await?;
+        self.fill_abs_urls(&mut items).await?;
         Ok(Paged {
             items,
             total,
@@ -32,7 +33,45 @@ impl RadioService {
     }
 
     pub async fn get_show(&self, id: i64) -> Result<RadioShowDto> {
-        repo::shows::require(&self.db, id).await
+        let mut show = repo::shows::require(&self.db, id).await?;
+        self.fill_abs_urls(std::slice::from_mut(&mut show)).await?;
+        Ok(show)
+    }
+
+    /// Remembers the address of the Audiobookshelf server holding the podcast library (set by
+    /// the library sync; `None` forgets it), from which shows get their `abs_web_url`.
+    pub async fn set_abs_web_url(&self, base: Option<&str>) -> Result<()> {
+        let base = base
+            .map(|b| b.trim().trim_end_matches('/').to_owned())
+            .filter(|b| !b.is_empty());
+        if self.abs_web_base().await? != base {
+            self.db.settings().set(keys::ABS_WEB_URL, &base).await?;
+        }
+        Ok(())
+    }
+
+    /// The Audiobookshelf server address saved by the last library sync.
+    pub async fn abs_web_base(&self) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .settings()
+            .get::<Option<String>>(keys::ABS_WEB_URL)
+            .await?
+            .flatten())
+    }
+
+    /// Sets `abs_web_url` (`{server}/item/{abs_item_id}`) on shows mapped to an item.
+    async fn fill_abs_urls(&self, shows: &mut [RadioShowDto]) -> Result<()> {
+        if shows.iter().all(|s| s.abs_item_id.is_none()) {
+            return Ok(());
+        }
+        let Some(base) = self.abs_web_base().await? else {
+            return Ok(());
+        };
+        for s in shows {
+            s.abs_web_url = s.abs_item_id.as_deref().map(|item| abs_item_url(&base, item));
+        }
+        Ok(())
     }
 
     /// A show's series and episodes.
@@ -175,6 +214,58 @@ impl RadioService {
         }
         self.emit(entities::SHOW, "updated", id);
         self.get_show(id).await
+    }
+
+    /// Monitors or unmonitors one episode by hand and re-derives its status.
+    pub async fn set_episode_monitored(&self, id: i64, monitored: bool) -> Result<RadioEpisodeDto> {
+        let e = repo::episodes::require(&self.db, id).await?;
+        self.apply_monitored(e.show_id, &[id], monitored).await?;
+        self.get_episode(id).await
+    }
+
+    /// Monitors or unmonitors every episode of a series by hand and re-derives their statuses.
+    pub async fn set_series_monitored(
+        &self,
+        series_id: i64,
+        monitored: bool,
+    ) -> Result<Vec<RadioEpisodeDto>> {
+        let series = repo::series::require(&self.db, series_id).await?;
+        let ids = repo::episodes::ids_for_series(&self.db, series_id).await?;
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.apply_monitored(series.show_id, &ids, monitored).await?;
+        repo::episodes::load(&self.db, &ids).await
+    }
+
+    /// Saves `monitored` on episodes `ids` of show `show_id` and their new statuses; emits
+    /// `entity.changed` for each changed episode and, if any changed, the show.
+    async fn apply_monitored(&self, show_id: i64, ids: &[i64], monitored: bool) -> Result<()> {
+        let show = repo::shows::require(&self.db, show_id).await?;
+        let now = self.now();
+        let mut any = false;
+        for e in repo::episodes::load(&self.db, ids).await? {
+            let flag_changed = e.monitored != monitored;
+            if flag_changed {
+                repo::episodes::set_monitored(&self.db, e.id, monitored).await?;
+            }
+            let status = episode_status(
+                e.file_id.is_some(),
+                show.monitored,
+                monitored,
+                e.first_broadcast,
+                now,
+            );
+            let status_changed = repo::episodes::set_status(&self.db, e.id, status).await?;
+            if flag_changed || status_changed {
+                any = true;
+                self.emit(entities::EPISODE, "updated", e.id);
+            }
+        }
+        if any {
+            self.emit(entities::SHOW, "updated", show_id);
+        }
+        Ok(())
     }
 
     /// Deletes a show with its series and episodes (library files are not touched).
@@ -377,5 +468,25 @@ impl RadioService {
                 "quality profile {id} does not exist"
             ))),
         }
+    }
+}
+
+/// `{server}/item/{item}`: a podcast's page in the Audiobookshelf web app.
+fn abs_item_url(base: &str, item: &str) -> String {
+    format!("{}/item/{}", base.trim_end_matches('/'), item.trim())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn abs_item_urls() {
+        assert_eq!(
+            super::abs_item_url("http://abs:13378/", "li_1"),
+            "http://abs:13378/item/li_1"
+        );
+        assert_eq!(
+            super::abs_item_url("https://x.example/audiobookshelf", "li_2"),
+            "https://x.example/audiobookshelf/item/li_2"
+        );
     }
 }

@@ -18,9 +18,9 @@ use reelix_api_types::library::Paged;
 use reelix_api_types::pipeline::ReleaseDto;
 use reelix_api_types::radio::{
     AddRadioShowRequest, RadioClearFileQuery, RadioEpisodeDto, RadioEpisodeFileRequest,
-    RadioLibraryReviewDto, RadioNamingDto, RadioPreviewQuery, RadioProviderDto, RadioSearchQuery,
-    RadioSearchRequest, RadioSettingsDto, RadioShowDto, RadioShowEdit, RadioShowEpisodesDto, RadioShowHitDto,
-    RadioShowListQuery, RadioShowPreviewDto, RadioStationDto,
+    RadioLibraryReviewDto, RadioMonitorRequest, RadioNamingDto, RadioPreviewQuery, RadioProviderDto,
+    RadioSearchQuery, RadioSearchRequest, RadioSettingsDto, RadioShowDto, RadioShowEdit,
+    RadioShowEpisodesDto, RadioShowHitDto, RadioShowListQuery, RadioShowPreviewDto, RadioStationDto,
 };
 use reelix_api_types::{ApiErrorBody, EnqueuedJob};
 use reelix_core::Permissions;
@@ -44,7 +44,8 @@ pub fn routes() -> Router<AppState> {
         .route("/radio/shows/{id}/artwork", get(show_artwork))
         .route("/radio/shows/{id}/refresh", post(refresh_show))
         .route("/radio/shows/{id}/search", post(search_show))
-        .route("/radio/episodes/{id}", get(get_episode))
+        .route("/radio/episodes/{id}", get(get_episode).put(edit_episode))
+        .route("/radio/series/{id}", put(edit_series))
         .route("/radio/episodes/{id}/search", post(search_episode))
         .route("/radio/episodes/{id}/releases", get(episode_releases))
         .route(
@@ -69,7 +70,7 @@ pub fn routes() -> Router<AppState> {
         list_shows, add_show, get_show, edit_show, delete_show, show_episodes, show_artwork, refresh_show,
         get_episode, set_episode_file, clear_episode_file, search, preview, stations, station_logo, providers,
         library_review, list_root_folders, add_root_folder, delete_root_folder, get_settings, put_settings,
-        search_show, search_episode, episode_releases, get_naming, put_naming,
+        search_show, search_episode, episode_releases, get_naming, put_naming, edit_episode, edit_series,
     ),
     components(schemas(
         reelix_api_types::radio::RadioFollow,
@@ -90,6 +91,7 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::radio::AddRadioShowRequest,
         reelix_api_types::radio::RadioShowEdit,
         reelix_api_types::radio::RadioEpisodeFileRequest,
+        reelix_api_types::radio::RadioMonitorRequest,
         reelix_api_types::radio::RadioLibraryReviewDto,
         reelix_api_types::radio::RadioLibraryShowDto,
         reelix_api_types::radio::RadioSettingsDto,
@@ -391,6 +393,49 @@ pub async fn get_episode(
 ) -> ApiResult<ApiJson<RadioEpisodeDto>> {
     require_lib(&user)?;
     Ok(ApiJson(svc(&state)?.get_episode(id).await?))
+}
+
+/// Monitors or unmonitors one episode by hand; its status follows (Not requested when
+/// unmonitored, else Wanted, Not released or In library).
+#[utoipa::path(put, path = "/api/v1/radio/episodes/{id}", tag = "radio", request_body = RadioMonitorRequest,
+    params(("id" = i64, Path, description = "Episode id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Updated", body = RadioEpisodeDto),
+        (status = 403, description = "Requires MANAGE_LIBRARY", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn edit_episode(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(req): ApiJson<RadioMonitorRequest>,
+) -> ApiResult<ApiJson<RadioEpisodeDto>> {
+    require_lib(&user)?;
+    Ok(ApiJson(
+        svc(&state)?.set_episode_monitored(id, req.monitored).await?,
+    ))
+}
+
+/// Monitors or unmonitors every episode of a series by hand; returns the series' episodes.
+#[utoipa::path(put, path = "/api/v1/radio/series/{id}", tag = "radio", request_body = RadioMonitorRequest,
+    params(("id" = i64, Path, description = "Series id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "The series' episodes", body = Vec<RadioEpisodeDto>),
+        (status = 403, description = "Requires MANAGE_LIBRARY", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn edit_series(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(req): ApiJson<RadioMonitorRequest>,
+) -> ApiResult<ApiJson<Vec<RadioEpisodeDto>>> {
+    require_lib(&user)?;
+    Ok(ApiJson(
+        svc(&state)?.set_series_monitored(id, req.monitored).await?,
+    ))
 }
 
 /// Links a podcast library file to the episode by hand (kept by automatic matching).

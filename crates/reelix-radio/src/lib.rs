@@ -71,6 +71,9 @@ pub mod keys {
     pub const NAMING: &str = "radio.naming";
     /// Unix ms of the last finished library sync (set by [`crate::RadioService::mark_library_synced`]).
     pub const LIBRARY_SYNCED_AT: &str = "radio.library_synced_at";
+    /// Address of the Audiobookshelf server that held the podcast library at the last sync
+    /// (links to its items).
+    pub const ABS_WEB_URL: &str = "radio.abs_web_url";
 }
 
 /// `entity.changed` entity names.

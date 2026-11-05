@@ -136,6 +136,7 @@ impl Refs {
             year: *year,
             subtitle: None,
             book_format: None,
+            show_id: None,
         })
     }
 

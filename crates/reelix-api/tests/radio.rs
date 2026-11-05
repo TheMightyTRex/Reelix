@@ -244,6 +244,23 @@ async fn radio_permissions() {
             "/api/v1/command".to_owned(),
             Some(json!({"name": "RescanRadioLibrary"})),
         ),
+        (
+            Method::PUT,
+            format!("/api/v1/radio/episodes/{ep}"),
+            Some(json!({"monitored": false})),
+        ),
+        (
+            Method::PUT,
+            format!("/api/v1/radio/series/{}", eps[0].series_id),
+            Some(json!({"monitored": false})),
+        ),
+        (
+            Method::POST,
+            "/api/v1/command".to_owned(),
+            Some(json!({"name": "RadioMissingSearch"})),
+        ),
+        (Method::POST, format!("/api/v1/radio/shows/{id}/search"), None),
+        (Method::POST, format!("/api/v1/radio/episodes/{ep}/search"), None),
     ] {
         let (s, _) = call(&app, m.clone(), &uri, &user, body).await;
         assert_eq!(s, StatusCode::FORBIDDEN, "{m} {uri}");
@@ -263,8 +280,33 @@ async fn radio_permissions() {
     )
     .await;
     assert_eq!(s, StatusCode::OK);
+    let (s, e) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/episodes/{ep}"),
+        &manager,
+        Some(json!({"monitored": true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{e}");
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/api/v1/command",
+        &manager,
+        Some(json!({"name": "RadioMissingSearch"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED);
     let (s, _) = call(&app, Method::GET, "/api/v1/radio/settings", &manager, None).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
+    for (m, body) in [
+        (Method::GET, None),
+        (Method::PUT, Some(json!({"show_folder": "{Show Title}"}))),
+    ] {
+        let (s, _) = call(&app, m.clone(), "/api/v1/radio/naming", &manager, body).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{m} naming");
+    }
     let (s, _) = call(
         &app,
         Method::PUT,
@@ -523,6 +565,213 @@ async fn radio_shows_episodes_matches_and_commands() {
 }
 
 #[tokio::test]
+async fn radio_monitor_toggles_recompute_statuses() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let (s, show) = call(
+        &app,
+        Method::POST,
+        "/api/v1/radio/shows",
+        &admin,
+        Some(json!({"provider": "fake", "external_id": "p001", "follow": "all"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{show}");
+    let id = show["id"].as_i64().unwrap();
+    let eps = app.radio.show_episodes(id).await.unwrap();
+    let (ep, series) = (eps.episodes[0].id, eps.series[0].id);
+    let mut events = app.state.events().subscribe();
+
+    // One episode: unmonitored → not requested, monitored again → wanted.
+    let (s, e) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/episodes/{ep}"),
+        &admin,
+        Some(json!({"monitored": false})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{e}");
+    assert_eq!(
+        (e["monitored"].as_bool(), e["status"].as_str()),
+        (Some(false), Some("not_requested"))
+    );
+    let mut changed = Vec::new();
+    while let Ok(ev) = events.try_recv() {
+        if let reelix_core::DomainEvent::EntityChanged { entity, id, .. } = ev {
+            changed.push((entity, id));
+        }
+    }
+    assert!(changed.contains(&("radio_episode".to_owned(), ep)), "{changed:?}");
+    assert!(changed.contains(&("radio_show".to_owned(), id)), "{changed:?}");
+    let (_, show) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/radio/shows/{id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(show["statistics"]["wanted_count"], 2);
+    let (s, e) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/episodes/{ep}"),
+        &admin,
+        Some(json!({"monitored": true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(e["status"], "wanted");
+
+    // A monitored episode broadcast in the future is not released.
+    app.radio
+        .set_now(Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap());
+    let (_, e) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/episodes/{}", eps.episodes[2].id),
+        &admin,
+        Some(json!({"monitored": true})),
+    )
+    .await;
+    assert_eq!(e["status"], "not_released");
+
+    // A whole series.
+    let (s, list) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/series/{series}"),
+        &admin,
+        Some(json!({"monitored": false})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    let list = list.as_array().unwrap();
+    assert_eq!(list.len(), 3);
+    assert!(
+        list.iter()
+            .all(|e| e["status"] == "not_requested" && e["monitored"] == false)
+    );
+    let (_, show) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/radio/shows/{id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(show["statistics"]["wanted_count"], 0);
+
+    // Unknown ids.
+    for uri in ["/api/v1/radio/episodes/999", "/api/v1/radio/series/999"] {
+        let (s, _) = call(&app, Method::PUT, uri, &admin, Some(json!({"monitored": true}))).await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{uri}");
+    }
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/episodes/{ep}"),
+        &admin,
+        Some(json!({})),
+    )
+    .await;
+    assert!(s.is_client_error(), "{s}");
+
+    // The missing search command queues the scheduled job kind (deduplicated).
+    let (s, job) = call(
+        &app,
+        Method::POST,
+        "/api/v1/command",
+        &admin,
+        Some(json!({"name": "RadioMissingSearch"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+    assert!(job["job_id"].as_i64().is_some(), "{job}");
+    let (_, again) = call(
+        &app,
+        Method::POST,
+        "/api/v1/command",
+        &admin,
+        Some(json!({"name": "RadioMissingSearch"})),
+    )
+    .await;
+    assert_eq!(again["job_id"], Value::Null);
+}
+
+#[tokio::test]
+async fn radio_shows_link_to_audiobookshelf() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let (_, show) = call(
+        &app,
+        Method::POST,
+        "/api/v1/radio/shows",
+        &admin,
+        Some(json!({"provider": "fake", "external_id": "p001"})),
+    )
+    .await;
+    let id = show["id"].as_i64().unwrap();
+    assert_eq!(show["abs_web_url"], Value::Null);
+
+    // No item yet: no link even once the server is known.
+    app.radio
+        .set_abs_web_url(Some("http://abs.local:13378/"))
+        .await
+        .unwrap();
+    let (_, show) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/radio/shows/{id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(show["abs_web_url"], Value::Null);
+
+    let (s, show) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/radio/shows/{id}"),
+        &admin,
+        Some(json!({"abs_item_id": "li_42"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(show["abs_web_url"], "http://abs.local:13378/item/li_42");
+    let (_, list) = call(&app, Method::GET, "/api/v1/radio/shows", &admin, None).await;
+    assert_eq!(
+        list["items"][0]["abs_web_url"],
+        "http://abs.local:13378/item/li_42"
+    );
+
+    // Forgetting the server drops the link.
+    app.radio.set_abs_web_url(None).await.unwrap();
+    let (_, show) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/radio/shows/{id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(show["abs_web_url"], Value::Null);
+    assert_eq!(show["abs_item_id"], "li_42");
+
+    // Episodes expose where Reelix filed a download.
+    let (_, eps) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/radio/shows/{id}/episodes"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(eps["episodes"][0]["filed_path"], Value::Null);
+}
+
+#[tokio::test]
 async fn openapi_documents_radio_routes() {
     let doc = serde_json::to_value(reelix_api::openapi()).unwrap();
     for p in [
@@ -534,6 +783,8 @@ async fn openapi_documents_radio_routes() {
         "/api/v1/radio/preview",
         "/api/v1/radio/library/review",
         "/api/v1/radio/settings",
+        "/api/v1/radio/episodes/{id}",
+        "/api/v1/radio/series/{id}",
         "/api/v1/command",
     ] {
         assert!(doc["paths"].get(p).is_some(), "{p} missing from OpenAPI");

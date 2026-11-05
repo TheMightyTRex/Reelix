@@ -279,6 +279,11 @@ impl Audiobookshelf {
         })
     }
 
+    /// The server address from the settings (also where its web app is).
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     fn req(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         self.http
             .request(method, format!("{}{path}", self.url))

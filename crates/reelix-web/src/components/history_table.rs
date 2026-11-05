@@ -68,10 +68,13 @@ pub fn episodes_label(eps: &[EpisodeRefDto]) -> Option<String> {
     }
 }
 
-/// Library link for a media ref: `/movies/{id}`, `/series/{id}`, `/books/book/{id}` or
-/// `/music/albums/{id}`.
+/// Library link for a media ref: `/movies/{id}`, `/series/{id}`, `/books/book/{id}`,
+/// `/music/albums/{id}` or a radio episode's show (`/radio/shows/{show_id}`, else `/radio`).
 pub fn media_href(m: &MediaRefDto) -> String {
     match m.kind.as_str() {
+        "radio_episode" => m
+            .show_id
+            .map_or_else(|| "/radio".to_string(), |id| format!("/radio/shows/{id}")),
         "series" => format!("/series/{}", m.id),
         "book" => format!("/books/book/{}", m.id),
         "album" => format!("/music/albums/{}", m.id),
@@ -79,8 +82,11 @@ pub fn media_href(m: &MediaRefDto) -> String {
     }
 }
 
-/// `by Author · Ebook` / `by Artist` line for books and albums.
+/// `by Author · Ebook` / `by Artist` line for books and albums; the show of a radio episode.
 pub fn media_subtitle(m: &MediaRefDto) -> Option<String> {
+    if m.kind == "radio_episode" {
+        return m.subtitle.clone().filter(|s| !s.is_empty());
+    }
     let format = m.book_format.map(|f| match f {
         reelix_core::BookFormat::Ebook => "Ebook",
         reelix_core::BookFormat::Audiobook => "Audiobook",
@@ -98,12 +104,17 @@ pub fn media_subtitle(m: &MediaRefDto) -> Option<String> {
     }
 }
 
-/// `Title (2024)`.
+/// `Title (2024)`; a radio episode as `S20E03 - Title`.
 pub fn media_title(m: &MediaRefDto) -> String {
     match m.year {
-        Some(y) => format!("{} ({y})", m.title),
-        None => m.title.clone(),
+        Some(y) if m.kind != "radio_episode" => format!("{} ({y})", m.title),
+        _ => m.title.clone(),
     }
+}
+
+/// Icon shown in front of rows that are not films or TV (radio episodes).
+fn media_icon(m: &MediaRefDto) -> Option<&'static str> {
+    (m.kind == "radio_episode").then_some("radio")
 }
 
 /// Media link plus optional episode summary underneath.
@@ -118,7 +129,9 @@ pub fn MediaCell(
         None => view! { <span class="muted">"Unknown"</span> }.into_any(),
         Some(m) => {
             let sub = media_subtitle(&m);
+            let icon = media_icon(&m);
             view! {
+                {icon.map(|i| view! { <span class="media-kind-icon" title="Radio" aria-hidden="true"><Icon name=i /></span> })}
                 <A href=media_href(&m) attr:class="cell-strong">{media_title(&m)}</A>
                 {sub.map(|s| view! { <span class="cell-sub">{s}</span> })}
                 {eps.map(|e| view! {
@@ -462,6 +475,7 @@ mod tests {
             year: Some(1965),
             subtitle: Some("Frank Herbert".into()),
             book_format: Some(reelix_core::BookFormat::Audiobook),
+            show_id: None,
         };
         assert_eq!(media_href(&m), "/books/book/4");
         assert_eq!(
@@ -476,6 +490,25 @@ mod tests {
         m.subtitle = None;
         assert_eq!(media_href(&m), "/series/4");
         assert_eq!(media_subtitle(&m), None);
+    }
+
+    #[test]
+    fn links_radio_episodes_to_their_show() {
+        let mut m = MediaRefDto {
+            kind: "radio_episode".into(),
+            id: 31,
+            title: "S20E03 - The Fete".into(),
+            year: Some(2026),
+            subtitle: Some("The Archers".into()),
+            book_format: None,
+            show_id: Some(7),
+        };
+        assert_eq!(media_href(&m), "/radio/shows/7");
+        assert_eq!(media_title(&m), "S20E03 - The Fete");
+        assert_eq!(media_subtitle(&m).as_deref(), Some("The Archers"));
+        assert_eq!(media_icon(&m), Some("radio"));
+        m.show_id = None;
+        assert_eq!(media_href(&m), "/radio");
     }
 
     #[test]

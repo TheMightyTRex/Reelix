@@ -1,6 +1,6 @@
 //! Shared radio components: option lists (radio root folders, audiobook quality profiles,
-//! tags), artwork and logo images, status / follow labels, episode numbers and the library
-//! rescan command.
+//! tags), artwork and logo images, status / follow labels, episode numbers, the library
+//! rescan and missing-search commands and indexer searches.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -15,7 +15,7 @@ use reelix_api_types::radio::{
 use reelix_api_types::{CommandRequest, EnqueuedJob};
 
 use crate::api::{self, ApiResult};
-use crate::components::library_common::{bytes, toggle_id};
+use crate::components::library_common::{LibIcon, bytes, toggle_id};
 use crate::components::{Icon, Tone};
 use crate::state::Toasts;
 
@@ -303,6 +303,23 @@ pub fn StationLogo(station_id: i64, #[prop(into)] name: String) -> impl IntoView
     }
 }
 
+/// Bookmark button that monitors or unmonitors an episode (`label` names it for screen
+/// readers).
+#[component]
+pub fn RadioMonitorToggle(
+    monitored: bool,
+    #[prop(into)] label: String,
+    on_toggle: Callback<()>,
+) -> impl IntoView {
+    let text = format!("{} {label}", if monitored { "Unmonitor" } else { "Monitor" });
+    view! {
+        <button type="button" class="monitor-btn" class:off=!monitored aria-pressed=monitored.to_string()
+            title=text.clone() aria-label=text on:click=move |e| { e.stop_propagation(); on_toggle.run(()); }>
+            <LibIcon name=if monitored { "bookmark" } else { "bookmark-off" } />
+        </button>
+    }
+}
+
 /// A show tile on the shows grid.
 #[component]
 pub fn RadioShowCard(show: RadioShowDto, anchor: Option<String>) -> impl IntoView {
@@ -348,6 +365,37 @@ pub fn rescan_library() {
             Ok(job) if job.job_id.is_none() => toasts.info("A library rescan is already queued."),
             Ok(_) => toasts.success("Rescanning the podcast library in the background."),
             Err(e) => toasts.error(format!("Could not start the rescan: {e}")),
+        }
+    });
+}
+
+/// Queues an indexer search for every wanted radio episode (`POST /command RadioMissingSearch`).
+pub fn search_all_missing() {
+    let toasts = Toasts::expect();
+    let req = CommandRequest {
+        name: "RadioMissingSearch".into(),
+        show_ids: Vec::new(),
+    };
+    spawn_local(async move {
+        match api::post::<_, EnqueuedJob>("/command", &req).await {
+            Ok(job) if job.job_id.is_none() => {
+                toasts.info("A search for missing episodes is already queued.")
+            }
+            Ok(_) => toasts.success("Searching indexers for every wanted episode in the background."),
+            Err(e) => toasts.error(format!("Could not start the search: {e}")),
+        }
+    });
+}
+
+/// Queues an indexer search: `/radio/shows/{id}/search` (the show's wanted episodes) or
+/// `/radio/episodes/{id}/search` (one episode).
+pub fn queue_search(path: String) {
+    let toasts = Toasts::expect();
+    spawn_local(async move {
+        match api::post_empty::<EnqueuedJob>(&path).await {
+            Ok(job) if job.job_id.is_none() => toasts.info("This search is already queued."),
+            Ok(_) => toasts.success("Search queued; found releases are grabbed automatically."),
+            Err(e) => toasts.error(format!("Could not start the search: {e}")),
         }
     });
 }

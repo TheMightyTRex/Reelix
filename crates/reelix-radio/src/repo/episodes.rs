@@ -12,7 +12,7 @@ use crate::provider::EpisodeData;
 
 const COLS: &str = "e.id, e.show_id, e.series_id, e.external_id, x.number AS series_number, x.kind AS series_kind, \
     e.number, e.number_source, e.title, e.synopsis, e.first_broadcast, e.duration_secs, e.monitored, e.status, \
-    e.file_id, e.manual_match, e.enclosure_url, e.guid, e.source_removed_at";
+    e.file_id, e.manual_match, e.enclosure_url, e.guid, e.source_removed_at, e.filed_path, e.filed_at";
 
 const FROM: &str = "radio_episodes e JOIN radio_series x ON x.id = e.series_id";
 
@@ -41,6 +41,8 @@ fn map(r: &SqliteRow) -> Result<RadioEpisodeDto> {
         enclosure_url: r.try_get("enclosure_url")?,
         guid: r.try_get("guid")?,
         source_removed_at: from_ms_opt(r.try_get("source_removed_at")?),
+        filed_path: r.try_get("filed_path")?,
+        filed_at: from_ms_opt(r.try_get("filed_at")?),
         file: None,
     })
 }
@@ -55,6 +57,16 @@ pub async fn for_show(db: &Db, show_id: i64) -> Result<Vec<RadioEpisodeDto>> {
     .iter()
     .map(map)
     .collect()
+}
+
+/// Ids of a series' episodes.
+pub async fn ids_for_series(db: &Db, series_id: i64) -> Result<Vec<i64>> {
+    Ok(
+        sqlx::query_scalar("SELECT id FROM radio_episodes WHERE series_id = ? ORDER BY id")
+            .bind(series_id)
+            .fetch_all(db.pool())
+            .await?,
+    )
 }
 
 pub async fn load(db: &Db, ids: &[i64]) -> Result<Vec<RadioEpisodeDto>> {

@@ -1,11 +1,12 @@
 //! `/settings/radio` — the Audiobookshelf podcast library, the default follow choice, the
-//! sources and search preferences; radio root folders are managed in Media management.
+//! sources and search preferences; radio root folders are managed in Media management. The
+//! naming of filed episodes ([`RadioNamingCard`]) is shown on Settings → Naming.
 
 use leptos::ev;
 use leptos::prelude::*;
 use leptos_router::components::A;
 use reelix_api_types::content::ContentRootFolderDto;
-use reelix_api_types::radio::{RadioProviderDto, RadioSettingsDto};
+use reelix_api_types::radio::{RadioNamingDto, RadioProviderDto, RadioSettingsDto};
 
 use crate::api;
 use crate::components::library_common::{bytes, on_entity_changed};
@@ -14,6 +15,41 @@ use crate::components::radio::FOLLOW;
 use crate::components::settings_draft::{SettingsDraft, loaded_view, save_button};
 use crate::components::{Card, EmptyState, ErrorBox, Icon, PageHeader, Skeleton};
 use crate::pages::system::require_admin;
+
+const NAMING_TOKENS: &[(&str, &[&str])] = &[
+    ("Show", &["{Show Title}", "{Show CleanTitle}", "{Station Name}"]),
+    (
+        "Episode",
+        &[
+            "{Series:00}",
+            "{Episode:00}",
+            "{Episode Title}",
+            "{Air Date}",
+            "{Air Year}",
+        ],
+    ),
+    ("File", &["{Quality Title}"]),
+];
+
+type Getter = fn(&RadioNamingDto) -> String;
+type Setter = fn(&mut RadioNamingDto, String);
+
+const NAMING_FIELDS: &[(&str, &str, &str, Getter, Setter)] = &[
+    (
+        "show_folder",
+        "Show folder",
+        "Folder of a show under the radio root folder (or the podcast library folder).",
+        |n| n.show_folder.clone(),
+        |n, v| n.show_folder = v,
+    ),
+    (
+        "episode_file",
+        "Episode file",
+        "File name without the extension. Specials are series 0.",
+        |n| n.episode_file.clone(),
+        |n, v| n.episode_file = v,
+    ),
+];
 
 fn text(v: &Option<String>) -> String {
     v.clone().unwrap_or_default()
@@ -194,5 +230,94 @@ fn RadioRootsCard() -> impl IntoView {
             }.into_any()>
             {body}
         </Card>
+    }
+}
+
+/// Folder and file naming of filed radio episodes with a token cheat-sheet (shown on Naming).
+#[component]
+pub fn RadioNamingCard() -> impl IntoView {
+    let s = SettingsDraft::<RadioNamingDto>::new("/radio/naming");
+    let focused = RwSignal::new("episode_file");
+
+    let insert_token = move |tok: &'static str| {
+        let field = focused.get_untracked();
+        if let Some((_, _, _, get, set)) = NAMING_FIELDS.iter().find(|f| f.0 == field) {
+            s.edit(|d| {
+                let mut v = get(d);
+                if !v.is_empty() && !v.ends_with(' ') {
+                    v.push(' ');
+                }
+                v.push_str(tok);
+                set(d, v);
+            });
+        }
+    };
+    let save = move |e: ev::SubmitEvent| {
+        e.prevent_default();
+        s.save("Radio naming", |fresh, d| *fresh = d.clone());
+    };
+
+    let form = move || {
+        view! {
+            <form class="form" on:submit=save>
+                {NAMING_FIELDS.iter().map(|&(id, label, hint, get, set)| view! {
+                    <div class="field">
+                        <label for=format!("rn-{id}")>{label}</label>
+                        <input id=format!("rn-{id}") class="input mono" type="text" spellcheck="false"
+                            prop:value=move || s.get(get)
+                            on:focus=move |_| focused.set(id)
+                            on:input=move |e| { let v = event_target_value(&e); s.edit(|d| set(d, v)); } />
+                        <span class="field-hint">{hint}</span>
+                    </div>
+                }).collect_view()}
+                <label class="checkbox">
+                    <input type="checkbox" prop:checked=move || s.get(|d| d.write_tags)
+                        on:change=move |e| { let v = event_target_checked(&e); s.edit(|d| d.write_tags = v); } />
+                    "Write tags into filed episodes (show, title, series, episode, date, station)"
+                </label>
+                <p class="field-hint">
+                    "Tags are written into a copy of its own, so a download that is still seeding is never changed; turn this off to hard link instead."
+                </p>
+                {save_button(s.saving)}
+            </form>
+        }
+    };
+
+    view! {
+        <div class="split-grid naming-grid">
+            <Card title="Radio" subtitle="Episodes Reelix files into the podcast library.">{loaded_view(s, 4, form)}</Card>
+            <Card title="Radio tokens" subtitle="Click a token to add it to the last radio field you edited.">
+                <div class="stack">
+                    {NAMING_TOKENS.iter().map(|(group, toks)| view! {
+                        <div class="field">
+                            <span class="field-label">{*group}</span>
+                            <div class="token-grid">
+                                {toks.iter().map(|t| {
+                                    let t: &'static str = t;
+                                    view! { <button type="button" class="token" on:click=move |_| insert_token(t)>{t}</button> }
+                                }).collect_view()}
+                            </div>
+                        </div>
+                    }).collect_view()}
+                    <p class="field-hint">"{Air Date} is the first broadcast as 2026-11-04. The defaults file episodes as {Show Title}/{Show Title} - S20E03 - {Episode Title}."</p>
+                </div>
+            </Card>
+        </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn naming_fields_read_and_write_their_template() {
+        let mut n = RadioNamingDto::default();
+        for (id, _, _, get, set) in NAMING_FIELDS {
+            set(&mut n, format!("x-{id}"));
+            assert_eq!(get(&n), format!("x-{id}"));
+        }
+        assert_eq!(n.show_folder, "x-show_folder");
+        assert_eq!(n.episode_file, "x-episode_file");
     }
 }

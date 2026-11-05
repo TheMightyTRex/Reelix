@@ -3390,7 +3390,7 @@ select.input {
 .station-logo { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; background: var(--surface-2); }
 .station-logo-cell { width: 44px; }
 .station-logo-fallback { display: inline-grid; place-items: center; width: 28px; height: 28px; color: var(--text-faint); }
-.monitor-flag { display: inline-flex; color: var(--text-muted); }
+.media-kind-icon { display: inline-flex; vertical-align: -2px; margin-right: var(--space-1); color: var(--text-muted); }
 .radio-episodes tr.muted td { color: var(--text-faint); }
 .radio-preview { display: grid; grid-template-columns: 120px 1fr; gap: var(--space-4); align-items: start; margin-bottom: var(--space-4); }
 .radio-preview .table-wrap { max-height: 320px; overflow-y: auto; }

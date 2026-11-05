@@ -10,7 +10,7 @@ mod stations;
 
 pub use add::AddRadioShowPage;
 pub use review::RadioReviewPage;
-pub use settings::RadioSettingsPage;
+pub use settings::{RadioNamingCard, RadioSettingsPage};
 pub use show_detail::RadioShowPage;
 pub use shows::RadioShowsPage;
 pub use stations::RadioStationsPage;

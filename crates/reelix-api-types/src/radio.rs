@@ -127,6 +127,10 @@ pub struct RadioShowDto {
     pub refreshed_at: Option<DateTime<Utc>>,
     pub added_at: DateTime<Utc>,
     pub statistics: RadioShowStatisticsDto,
+    /// The show's page in Audiobookshelf (`{server}/item/{abs_item_id}`), from the server that
+    /// held the podcast library at the last library sync; `None` without an item or a sync.
+    #[serde(default)]
+    pub abs_web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -193,6 +197,11 @@ pub struct RadioEpisodeDto {
     pub enclosure_url: Option<String>,
     pub guid: Option<String>,
     pub source_removed_at: Option<DateTime<Utc>>,
+    /// Where Reelix filed a downloaded copy (kept until the library sync matches the file).
+    #[serde(default)]
+    pub filed_path: Option<String>,
+    #[serde(default)]
+    pub filed_at: Option<DateTime<Utc>>,
     /// The matched file (single-episode reads only; `None` in lists).
     #[serde(default)]
     pub file: Option<RadioEpisodeFileDto>,
@@ -342,6 +351,16 @@ pub struct RadioShowEdit {
     #[serde(default, deserialize_with = "double", skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub abs_item_id: Option<Option<String>>,
+}
+
+/// `PUT /radio/episodes/{id}` and `PUT /radio/series/{id}` (every episode of the series):
+/// monitor or unmonitor by hand. The status follows (not requested when unmonitored; else
+/// wanted, not released or in library). A later change of the show's follow choice re-applies
+/// the choice to every episode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioMonitorRequest {
+    pub monitored: bool,
 }
 
 /// `PUT /radio/episodes/{id}/file`: links a library file to the episode by hand.

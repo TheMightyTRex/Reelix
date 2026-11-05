@@ -206,7 +206,8 @@ pub mod direct;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommandRequest {
-    /// `RefreshRadioShow` (`show_ids`, empty = every show) or `RescanRadioLibrary`.
+    /// `RefreshRadioShow` (`show_ids`, empty = every show), `RescanRadioLibrary` or
+    /// `RadioMissingSearch` (indexer search for every wanted radio episode).
     pub name: String,
     #[serde(default)]
     pub show_ids: Vec<i64>,

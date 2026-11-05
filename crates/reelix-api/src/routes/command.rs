@@ -1,5 +1,5 @@
 //! `POST /api/v1/command`: named commands that queue a job (`RefreshRadioShow`,
-//! `RescanRadioLibrary`). Each command checks the permission of the module it belongs to;
+//! `RescanRadioLibrary`, `RadioMissingSearch`). Each command checks the permission of the module it belongs to;
 //! add new names to [`command`].
 
 use axum::Router;
@@ -26,8 +26,9 @@ pub fn routes() -> Router<AppState> {
 )]
 pub struct Api;
 
-/// Runs a named command: `RefreshRadioShow` (`show_ids`, empty = every show) or
-/// `RescanRadioLibrary` (reads the podcast library and re-matches).
+/// Runs a named command: `RefreshRadioShow` (`show_ids`, empty = every show),
+/// `RescanRadioLibrary` (reads the podcast library and re-matches) or `RadioMissingSearch`
+/// (indexer search for every wanted radio episode).
 #[utoipa::path(post, path = "/api/v1/command", tag = "command", request_body = CommandRequest,
     security(("session" = []), ("api_key" = [])),
     responses(
@@ -53,6 +54,12 @@ pub async fn command(
             require_lib(&user)?;
             Ok(accepted(
                 crate::routes::radio::svc(&state)?.queue_library_sync().await?,
+            ))
+        }
+        "RadioMissingSearch" => {
+            require_lib(&user)?;
+            Ok(accepted(
+                crate::routes::radio::svc(&state)?.queue_missing_search().await?,
             ))
         }
         other => Err(ApiError::validation(format!("unknown command {other}"))),

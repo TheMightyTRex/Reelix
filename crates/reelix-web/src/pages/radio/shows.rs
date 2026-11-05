@@ -11,7 +11,7 @@ use reelix_api_types::radio::{Paged, RadioShowDto, RadioStationDto};
 use crate::api;
 use crate::components::library_common::{Pager, on_entity_changed, pref_get, pref_set};
 use crate::components::library_forms::{require_library, with_query};
-use crate::components::radio::{RADIO_ENTITIES, RadioShowCard, letter_of};
+use crate::components::radio::{RADIO_ENTITIES, RadioShowCard, letter_of, search_all_missing};
 use crate::components::{EmptyState, ErrorBox, Icon, PageHeader, Skeleton};
 
 const PAGE_SIZE: u32 = 48;
@@ -192,6 +192,10 @@ pub fn RadioShowsPage() -> impl IntoView {
 
     view! {
         <PageHeader title="Radio">
+            <button type="button" class="btn btn-secondary" on:click=move |_| search_all_missing()>
+                <Icon name="search" />
+                "Search all missing"
+            </button>
             <A href="/radio/add" attr:class="btn btn-primary"><Icon name="plus" />"Add show"</A>
         </PageHeader>
         <div class="lib-toolbar">
