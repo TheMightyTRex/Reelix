@@ -17,6 +17,11 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 - **Classic onboarding as a build option:** build the web UI with `--features classic-setup` (or the Docker build argument `REELIX_WEB_FEATURES=classic-setup`) to keep the classic onboarding instead of the set-up wizard.
 - **Terminal-only instructions** in `docs/terminal-setup.md`: every command from installing Reelix to the last set-up question.
 - **Send feedback in the wizard,** with [Snaglist](https://github.com/TheMightyTRex/snaglist) (MIT). Reports name the step and open a GitHub issue. **Show as a QR code** sends a report from a phone when the server is not online yet; in the terminal the code is sized to the window, and the whole report is saved under the data directory's `feedback` folder.
+- **Radio: popular shows on each BBC station.** Discover's Radio tab has a row for Radio 4, Radio 4 Extra, Radio 2, Radio 5 Live and the World Service, next to Popular on BBC Sounds (UK only, like the other BBC rows).
+- **Radio: 32 BBC Sounds categories, up from 7**, under four headings: Comedy, Drama, Factual, and Sport and music. They include sub-genres such as Science fiction and fantasy, Sitcoms, Panel games and quizzes, and Thrillers.
+
+### Changed
+- **Radio search finds older BBC shows.** BBC Sounds search leaves out many shows, such as Cabin Pressure and Old Harry's Game. When none of its results has the name you typed, Reelix also reads the BBC programmes A to Z and lists its radio shows first.
 
 ## [0.8.5] - 2026-11-06
 

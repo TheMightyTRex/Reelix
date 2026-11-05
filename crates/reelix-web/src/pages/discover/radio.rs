@@ -1,5 +1,6 @@
 //! Radio on Discover / Search: rows of the enabled radio sources (Apple's top podcasts,
-//! Podcast Index trending, popular on BBC Sounds), category chips, search results, and the
+//! Podcast Index trending, popular on BBC Sounds and on each BBC station), category chips
+//! (under the source's headings, such as Comedy and Drama for the BBC), search results, and the
 //! show dialog (synopsis, station, newest episodes) with Follow (MANAGE_LIBRARY: adds the
 //! show directly) or Request (REQUEST_RADIO).
 
@@ -211,20 +212,25 @@ pub fn RadioRows() -> impl IntoView {
     let lists = LocalResource::new(|| api::get::<RadioDiscoverDto>("/discover/genres/radio"));
 
     let chips = move |cats: Vec<RadioDiscoverListDto>| {
-        // Grouped by source, in the order the server lists them.
+        // Grouped by source and heading (Comedy, Drama), in the order the server lists them.
         let mut groups: Vec<(String, Vec<RadioDiscoverListDto>)> = Vec::new();
         for c in cats {
-            match groups.iter_mut().find(|(p, _)| *p == c.provider_name) {
+            let heading = format!(
+                "{} · {}",
+                c.group.as_deref().unwrap_or("Categories"),
+                c.provider_name
+            );
+            match groups.iter_mut().find(|(h, _)| *h == heading) {
                 Some((_, v)) => v.push(c),
-                None => groups.push((c.provider_name.clone(), vec![c])),
+                None => groups.push((heading, vec![c])),
             }
         }
         groups
             .into_iter()
-            .map(|(name, cats)| {
+            .map(|(heading, cats)| {
                 view! {
                     <section class="media-row">
-                        <header class="media-row-head"><h2 class="media-row-title">{format!("Categories · {name}")}</h2></header>
+                        <header class="media-row-head"><h2 class="media-row-title">{heading}</h2></header>
                         <div class="chip-row" role="list">
                             {cats.into_iter().map(|c| {
                                 let id = c.id.clone();

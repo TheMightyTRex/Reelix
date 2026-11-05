@@ -92,9 +92,18 @@ impl Discord {
                     false,
                 );
             }
-            // Imports keep the library path that used to be the description.
-            if m.release.as_deref() != Some(m.body.as_str()) {
-                field("Path", m.body.clone(), false);
+            // Imports and file deletions keep the library path that used to be the
+            // description. Other events show their text as details, unless it repeats the
+            // overview (added, requests) or the release name (grabs).
+            let body = m.body.trim();
+            let repeated =
+                m.release.as_deref() == Some(body) || m.overview.as_deref().map(str::trim) == Some(body);
+            if !repeated {
+                let name = match event {
+                    NotificationEvent::Import { .. } | NotificationEvent::FileDeleted { .. } => "Path",
+                    _ => "Details",
+                };
+                field(name, m.body.clone(), false);
             }
         }
         let (title, description) = if rich {
@@ -229,6 +238,38 @@ mod tests {
             "```\nThe.Lighthouse.Keeper.2023.1080p.BluRay.x264-NOCTURN\n```"
         );
         assert!(get("Path").unwrap().1.ends_with("Bluray-1080p.mkv"));
+    }
+
+    #[test]
+    fn overview_is_not_repeated_as_a_path() {
+        for event in crate::samples::all().into_iter().filter(|e| {
+            matches!(
+                e,
+                NotificationEvent::MediaAdded { .. } | NotificationEvent::RequestApproved { .. }
+            )
+        }) {
+            let f = fields(&discord().payload(&event));
+            assert!(f.iter().filter(|(n, ..)| n == "Overview").count() <= 1, "{f:?}");
+            assert!(f.iter().all(|(n, ..)| n != "Path"), "{f:?}");
+            // The overview, when there is one, is shown once: never again under another name.
+            if let Some((_, overview, _)) = f.iter().find(|(n, ..)| n == "Overview") {
+                assert!(f.iter().filter(|(_, v, _)| v == overview).count() == 1, "{f:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn text_that_is_not_a_path_is_shown_as_details() {
+        let deleted = crate::samples::all()
+            .into_iter()
+            .find(|e| matches!(e, NotificationEvent::MediaDeleted { .. }))
+            .unwrap();
+        let f = fields(&discord().payload(&deleted));
+        assert!(f.iter().all(|(n, ..)| n != "Path"));
+        assert!(
+            f.iter()
+                .any(|(n, v, _)| n == "Details" && v.starts_with("Removed from the library"))
+        );
     }
 
     #[test]

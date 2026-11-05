@@ -1,0 +1,228 @@
+{
+ "$schema": "https://rms.api.bbc.co.uk/docs/swagger.json#/definitions/PlayableItems",
+ "total": 5,
+ "limit": 100,
+ "offset": 0,
+ "data": [
+  {
+   "type": "playable_item",
+   "id": "m001rhmd",
+   "urn": "urn:bbc:radio:episode:m001rhmj",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Whodunnits",
+    "secondary": "Inspector Purbright - Lonelyheart 4122",
+    "tertiary": "3. Paper Trail",
+    "entity_title": "3. Paper Trail"
+   },
+   "synopses": {
+    "short": "Clients of the Handclasp Marriage Bureau come under scrutiny.",
+    "medium": "Clients of Flaxborough’s Handclasp Marriage Bureau come under police scrutiny. Stars John Rowe and Linda Gardner.",
+    "long": "Clients of the Handclasp Marriage Bureau come under police scrutiny. \n\nMeanwhile Lucy Teatime makes initial contact with Lonelyheart 4122.\n\nColin Watson's Flaxborough Chronicles. \n\nWhy are lonely, well-off middle-aged women disappearing from the sleepy, small market town?\n\nJohn Rowe stars as Inspector Walter Purbright.\n\nDramatised by Christopher Denys.\n\nInsp Purbright .... John Rowe\nMiss Teatime .... Linda Gardner\nDet Sgt Love .... Paul Downing\nMrs Staunch .... Ann Rye\nReceptionist .... Victoria Finney\nPhyllis .... Judy Holt\nCapper .... Keith Clifford\nRusk .... Malcolm Raeburn\nSingleton .... Neville Barber\n\nDirected at BBC Manchester by: Tony Cliff. \n\nFirst broadcast on BBC Radio 4 in May 1990."
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0pj7r7l.jpg",
+   "duration": {
+    "value": 1800,
+    "label": "30 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "p0fsqm4x",
+    "urn": "urn:bbc:radio:brand:p0fsqm4x",
+    "title": "Whodunnits",
+    "synopses": {
+     "short": "Murder mysteries from the world's greatest crime fiction writers. Only on BBC Sounds.",
+     "medium": "A collection of murder mysteries from some of the world's greatest writers of crime fiction. Only on BBC Sounds.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "1990-05-31T00:00:00Z",
+    "label": "31 May 1990"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "m001rhnl",
+   "urn": "urn:bbc:radio:episode:m001rhnp",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Whodunnits",
+    "secondary": "Inspector Purbright - Lonelyheart 4122",
+    "tertiary": "2. Contact",
+    "entity_title": "2. Contact"
+   },
+   "synopses": {
+    "short": "Purbright and Sergeant Love hit the trail of Flaxborough’s missing women.",
+    "medium": "Purbright and Sergeant Love hit the trail of Flaxborough’s missing women. Lucy Teatime looks for a partner. Stars John Rowe.",
+    "long": "Inspector Purbright and Sergeant Love take to the teashops of Flaxborough on the trail of the local missing women.\n\nMeanwhile, Lucy Teatime is looking for a partner...\n\nColin Watson's Flaxborough Chronicles.  \n\nWhy are lonely, well-off middle-aged women disappearing from the sleepy, small market town?     \n\nJohn Rowe stars as Inspector Walter Purbright.\n\nDramatised by Christopher Denys.\n\nInspector Purbright .... John Rowe\nLucy Teatime .... Linda Gardner\nDetective Sergeant Love .... Paul Downing\nMrs Staunch .... Ann Rye\nRev Leaper .... Renny Krupinski\nPhyllis .... Judy Holt\nItalian Waitress .... Victoria Finney\n\nDirected at BBC Manchester by Tony Cliff.\n\nFirst broadcast on BBC Radio 4 in May 1990."
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0pj7r7l.jpg",
+   "duration": {
+    "value": 1800,
+    "label": "30 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "p0fsqm4x",
+    "urn": "urn:bbc:radio:brand:p0fsqm4x",
+    "title": "Whodunnits",
+    "synopses": {
+     "short": "Murder mysteries from the world's greatest crime fiction writers. Only on BBC Sounds.",
+     "medium": "A collection of murder mysteries from some of the world's greatest writers of crime fiction. Only on BBC Sounds.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "1990-05-24T00:00:00Z",
+    "label": "24 May 1990"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "m000llvq",
+   "urn": "urn:bbc:radio:episode:b007jq4g",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "After Henry",
+    "secondary": "Series 3",
+    "tertiary": "Intellectual Aspirations",
+    "entity_title": "Intellectual Aspirations"
+   },
+   "synopses": {
+    "short": "Graduate Julian's brainy parents make Clare feel inadequate.",
+    "medium": "Clare is seeing a graduate, but his brainy parents make her feel inadequate. Stars Prunella Scales and Gerry Cowper. From 1987.",
+    "long": "'... but he did look at you twice. So clearly you have something that appeals to him other than your ability to discuss Schopenhauer's Weltanschauung.'\n\nClare's seeing graduate Julian, but his brainy parents leave her feeling inadequate.\n\nSimon Brett's comedy about three generations of women - struggling to cope after the death of Sarah's GP husband - who never quite manage to see eye to eye. \n\nSarah ...... Prunella Scales\nEleanor ...... Joan Sanderson\nRussell ...... Benjamin Whitrow\nClare ...... Gerry Cowper\nJulian    ......    Jasper Jacob \n\nFour radio series were made, but instead of moving to BBC TV - Thames Television produced 'After Henry' for the ITV network. \n\nProducer: Pete Atkin\n\nFirst broadcast on BBC Radio 4 in October 1987."
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0gscjs7.jpg",
+   "duration": {
+    "value": 1800,
+    "label": "30 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "b009v07q",
+    "urn": "urn:bbc:radio:brand:b009v07q",
+    "title": "After Henry",
+    "synopses": {
+     "short": "Prunella Scales stars in the sitcom about three generations of women in one family.",
+     "medium": "Prunella Scales stars in the sitcom about three generations of women in one family.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "1987-10-20T00:00:00Z",
+    "label": "20 Oct 1987"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "b006mnyt",
+   "urn": "urn:bbc:radio:episode:b007jz06",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Peter Tinniswood",
+    "secondary": "Dorothy, A Manager's Wife",
+    "tertiary": null,
+    "entity_title": "Dorothy, A Manager's Wife"
+   },
+   "synopses": {
+    "short": "A resentful soccer spouse rants about the game and her football manager husband.",
+    "medium": "A resentful soccer spouse rants about the game and her football manager husband. Stars Pauline Collins and Timothy West.",
+    "long": "The acerbic wit and seething resentment involved in a relationship.\n\nHow a wife has always supported her football manager husband in his successful career, while loathing both him and the game.\n\nWritten by Peter Tinniswood.\n\nDorothy …. Pauline Collins\nBilly …. Timothy West\nWarren …. David Thorpe\n\nDirector: Enyd Williams\n\nFirst broadcast on BBC Radio 4 in October 2000"
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p01glmln.jpg",
+   "duration": {
+    "value": 2700,
+    "label": "45 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "b036y0y4",
+    "urn": "urn:bbc:radio:brand:b036y0y4",
+    "title": "Peter Tinniswood",
+    "synopses": {
+     "short": "Dramas and comedies from the popular British TV and radio writer, Peter Tinniswood",
+     "medium": "Dramas and comedies from the popular British TV and radio writer, Peter Tinniswood",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "2000-10-17T00:00:00Z",
+    "label": "17 Oct 2000"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "b005fr8v",
+   "urn": "urn:bbc:radio:episode:b007jrl4",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Dad's Army",
+    "secondary": "Series 3",
+    "tertiary": "Is There Honey Still for Tea?",
+    "entity_title": "Is There Honey Still for Tea?"
+   },
+   "synopses": {
+    "short": "Godfrey's idyllic cottage is threatened with demolition.",
+    "medium": "A new aerodrome threatens Godfrey's idyllic cottage with demolition. Adapted from BBCTV with Arnold Ridley. From 1976.",
+    "long": "Private Godfrey's humble abode, Cherry Tree Cottage, is threatened with demolition to make way for a new aerodrome...\n\nThe comic exploits of a Second World War Home Guard platoon in Walmington-on-Sea.\n\nAdapted for radio from Jimmy Perry and David Croft's TV scripts by Harold Snoad and Michael Knowles.\n\nCaptain Mainwaring …. Arthur Lowe\nSergeant Wilson …. John Le Mesurier\nCorporal Jones …. Clive Dunn\nPrivate Frazer …. John Laurie\nPrivate Godfrey …. Arnold Ridley\nPrivate Pike …. Ian Lavender\nCissie Godfrey …. Joan Cooper\nColonel/Sir Charles …. Fraser Kerr\nAnnouncer/Newsreader …. John Snagge\n\nProducer: John Dyas \n\nFirst broadcast on BBC Radio 4 in August 1976."
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0m614nn.jpg",
+   "duration": {
+    "value": 1800,
+    "label": "30 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "b009v6h3",
+    "urn": "urn:bbc:radio:brand:b009v6h3",
+    "title": "Dad's Army",
+    "synopses": {
+     "short": "Classic sitcom about the exploits of a Second World War Home Guard platoon.",
+     "medium": "Classic sitcom about the exploits of a Second World War Home Guard platoon. Adapted from BBC TV",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "1976-08-31T00:00:00Z",
+    "label": "31 Aug 1976"
+   }
+  }
+ ]
+}

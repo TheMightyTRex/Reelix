@@ -51,7 +51,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 ### Discover and requests
 - Discover page with trending, popular and upcoming movies and TV.
 - Books and music on Discover too: trending books and books by subject (fantasy, science fiction, mystery and more) from Open Library, and new releases and popular albums from ListenBrainz, plus search for both.
-- Radio and podcasts on Discover: Apple Podcasts top charts and categories for your country, BBC Sounds popular programmes, and Podcast Index trending.
+- Radio and podcasts on Discover: Apple Podcasts top charts and categories for your country, BBC Sounds popular programmes overall, per station and in 32 categories, and Podcast Index trending.
 - Shows availability everywhere: available, partially available, requested, pending or processing.
 - Request movies, whole series or single seasons, books (ebook, audiobook or both), albums and radio shows.
 - Approval workflow with auto-approve per user or permission, per-user quotas, and decline reasons.
