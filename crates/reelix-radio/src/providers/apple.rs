@@ -86,6 +86,13 @@ impl AppleProvider {
         }
     }
 
+    /// The public-only client for feeds read inside [`super::rss::restricted`] (Discover and
+    /// requests); see [`RssProvider::with_public_client`].
+    pub fn with_public_client(mut self, client: reqwest::Client) -> Self {
+        self.feeds = self.feeds.with_public_client(client);
+        self
+    }
+
     /// Another API host (tests).
     pub fn with_base_url(mut self, base: &str) -> Self {
         self.base = base.trim_end_matches('/').to_owned();
