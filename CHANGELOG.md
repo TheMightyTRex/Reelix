@@ -6,7 +6,12 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+### Added
+- **Radio: popular shows on each BBC station.** Discover's Radio tab has a row for Radio 4, Radio 4 Extra, Radio 2, Radio 5 Live and the World Service, next to Popular on BBC Sounds (UK only, like the other BBC rows).
+- **Radio: 32 BBC Sounds categories, up from 7**, under four headings: Comedy, Drama, Factual, and Sport and music. They include sub-genres such as Science fiction and fantasy, Sitcoms, Panel games and quizzes, and Thrillers.
+
 ### Changed
+- **Radio search finds older BBC shows.** BBC Sounds search leaves out many shows, such as Cabin Pressure and Old Harry's Game. When none of its results has the name you typed, Reelix also reads the BBC programmes A to Z and lists its radio shows first.
 - **Radio searches find more episodes:**
   - **BBC programme ids:** get_iplayer names such as `The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a` are now read, including the BBC programme id (`b09zv5m0`). For a BBC episode the id decides: a release with the episode's id matches even when the show is named differently, and one with another id is refused.
   - **More categories:** radio is now searched in Audio/MP3 and Audio/Audiobook as well as Audio/Other, because indexers often file radio there (MyAnonamouse's Radio categories arrive as Audio/Audiobook through Prowlarr and Jackett). A release still has to match a wanted episode, so music and audiobooks are not grabbed as radio. RSS sync also checks Audio/MP3 releases against wanted episodes before passing them to music.

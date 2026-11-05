@@ -4,7 +4,7 @@ Reelix is licensed under the GNU GPL v3.0 or later (see `LICENSE`). Parts of it 
 
 ## Storyarr
 
-The BBC radio provider (`crates/reelix-radio/src/providers/bbc.rs`) adapts the endpoints, hierarchy walk and link patterns of Storyarr's BBC adapter: <https://github.com/TheMightyTRex/storyarr>
+The BBC radio provider (`crates/reelix-radio/src/providers/bbc.rs`) adapts the endpoints, hierarchy walk, link patterns and programmes A to Z search of Storyarr's BBC adapter, and the stations and categories of its radio Discover: <https://github.com/TheMightyTRex/storyarr>
 
 Reading the BBC programme id from get_iplayer release names (`crates/reelix-parser/src/radio.rs`), matching radio releases by it (`crates/reelix-radio/src/search.rs`) and the wider radio search categories (`crates/reelix-indexers/src/categories.rs`) adapt the same ideas from Storyarr's radio release matching (`services/app/domain/radio_releases.py`).
 
