@@ -763,3 +763,28 @@ async fn feed_fetch_limits() {
     assert!(!p.supports_search());
     assert!(p.search("x", &SearchPrefs::default()).await.is_err());
 }
+
+#[tokio::test]
+async fn restricted_reads_use_only_the_public_client() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/gone.xml"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let url = format!("{}/gone.xml", server.uri());
+    // Without a public client, links read on behalf of users are refused outright.
+    let p = RssProvider::new(reqwest::Client::new());
+    let refused = rss::restricted(p.show(&url, &ShowFetch::default())).await;
+    assert!(
+        matches!(refused, Err(ProviderError::Network(ref m)) if m.contains("cannot be read here")),
+        "{refused:?}"
+    );
+    // Outside the scope the shared client is used as before.
+    let normal = p.show(&url, &ShowFetch::default()).await;
+    assert!(matches!(normal, Err(ProviderError::NotFound(_))), "{normal:?}");
+    // With one, restricted reads go through it.
+    let p = RssProvider::new(reqwest::Client::new()).with_public_client(reqwest::Client::new());
+    let routed = rss::restricted(p.show(&url, &ShowFetch::default())).await;
+    assert!(matches!(routed, Err(ProviderError::NotFound(_))), "{routed:?}");
+}

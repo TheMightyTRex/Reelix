@@ -1,5 +1,6 @@
 //! Adapters that connect domain crates which must not depend on each other.
 
+use reelix_radio::providers::rss::restricted;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -527,7 +528,11 @@ impl LibraryGateway for LibraryAdapter {
     }
 
     async fn lookup_radio(&self, term: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
-        self.radio.search(term, None).await.map_err(|e| anyhow!("{e}"))
+        // Discover and requests: a pasted link may come from any user, so feeds are read with
+        // the public-only client (also for library managers here; Radio → Add has no limit).
+        restricted(self.radio.search(term, None))
+            .await
+            .map_err(|e| anyhow!("{e}"))
     }
 
     async fn radio_preview(
@@ -535,7 +540,7 @@ impl LibraryGateway for LibraryAdapter {
         provider: &str,
         external_id: &str,
     ) -> anyhow::Result<Option<RadioShowPreviewDto>> {
-        match self.radio.preview_show(provider, external_id).await {
+        match restricted(self.radio.preview_show(provider, external_id)).await {
             Ok(p) => Ok(Some(p)),
             Err(e) if radio_missing(&e) => Ok(None),
             Err(e) => Err(anyhow!("{e}")),
@@ -546,19 +551,17 @@ impl LibraryGateway for LibraryAdapter {
     /// show (also under another id, e.g. its feed) is returned as it is.
     async fn add_radio(&self, req: AddRadioRequest) -> anyhow::Result<ContentAdded> {
         let key = (req.provider.clone(), req.external_id.clone());
-        let added = self
-            .radio
-            .add_show(AddRadioShowRequest {
-                provider: Some(req.provider),
-                external_id: Some(req.external_id),
-                link: None,
-                follow: None,
-                monitored: true,
-                root_folder_id: req.root_folder_id,
-                quality_profile_id: req.quality_profile_id,
-                tags: req.tags,
-            })
-            .await;
+        let added = restricted(self.radio.add_show(AddRadioShowRequest {
+            provider: Some(req.provider),
+            external_id: Some(req.external_id),
+            link: None,
+            follow: None,
+            monitored: true,
+            root_folder_id: req.root_folder_id,
+            quality_profile_id: req.quality_profile_id,
+            tags: req.tags,
+        }))
+        .await;
         let id = match added {
             Ok(show) => show.id,
             Err(reelix_radio::RadioError::Conflict(msg)) => self

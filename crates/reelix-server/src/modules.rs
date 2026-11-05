@@ -114,7 +114,10 @@ impl Modules {
                     .with(Arc::new(AppleProvider::new(deps.http.clone())))
                     .with(Arc::new(PodcastIndexProvider::new(deps.http.clone())))
                     .with(Arc::new(ArchiveProvider::new(deps.http.clone())))
-                    .with(Arc::new(RssProvider::new(deps.http.clone())))
+                    .with(Arc::new(
+                        RssProvider::new(deps.http.clone())
+                            .with_public_client(reelix_providers::public_http_client()?),
+                    ))
             },
             library_sync: None,
         }));

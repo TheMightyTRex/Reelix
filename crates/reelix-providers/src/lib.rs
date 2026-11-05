@@ -19,5 +19,5 @@ pub use model::{ProviderRow, RemotePathMapping, Tag, apply_mappings};
 pub use reelix_api_types::providers::ProviderKind;
 pub use service::{
     DEFINITIONS_SETTINGS_KEY, DefinitionsSyncOutcome, INDEXER_SETTINGS_KEY, METADATA_SETTINGS_KEY,
-    ProviderOptions, ProviderService,
+    ProviderOptions, ProviderService, public_http_client,
 };

@@ -24,19 +24,53 @@ pub const MAX_FEED_BYTES: usize = 10 * 1024 * 1024;
 
 pub struct RssProvider {
     http: reqwest::Client,
+    /// Used inside [`restricted`]: reaches public addresses only.
+    public_http: Option<reqwest::Client>,
+}
+
+tokio::task_local! {
+    static RESTRICTED: bool;
+}
+
+/// Runs `f` with feed reads limited to public addresses (the client given with
+/// [`RssProvider::with_public_client`]), for links that come from users who may not reach the
+/// server's network: redirects and a page's advertised feed are checked on every hop.
+pub async fn restricted<F: std::future::Future>(f: F) -> F::Output {
+    RESTRICTED.scope(true, f).await
+}
+
+fn is_restricted() -> bool {
+    RESTRICTED.try_with(|r| *r).unwrap_or(false)
 }
 
 impl RssProvider {
     /// `http` is the server's shared client (user agent, timeouts).
     pub fn new(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            public_http: None,
+        }
+    }
+
+    /// The client used for reads inside [`restricted`]; without one those reads are refused.
+    pub fn with_public_client(mut self, client: reqwest::Client) -> Self {
+        self.public_http = Some(client);
+        self
     }
 
     /// GETs `url` and returns the body, refusing more than [`MAX_FEED_BYTES`].
     async fn fetch(&self, url: &str) -> Result<String, ProviderError> {
         let net = |e: reqwest::Error| ProviderError::Network(e.without_url().to_string());
-        let mut res = self
-            .http
+        let http = if is_restricted() {
+            self.public_http.as_ref().ok_or_else(|| {
+                ProviderError::Network(
+                    "this link cannot be read here; ask a library manager to add the show".into(),
+                )
+            })?
+        } else {
+            &self.http
+        };
+        let mut res = http
             .get(url)
             .header(
                 reqwest::header::ACCEPT,

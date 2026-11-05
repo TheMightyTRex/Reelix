@@ -201,6 +201,20 @@ fn definitions_source_ok(url: &url::Url) -> bool {
     }
 }
 
+/// A client that can only reach public addresses: host names resolving to private, loopback or
+/// link-local addresses are refused when connecting (so DNS rebinding can't get round it), and
+/// redirects to such literals are not followed. For URLs that come from users.
+pub fn public_http_client() -> reqwest::Result<reqwest::Client> {
+    let guard = AddressGuard { allow_private: false };
+    guard
+        .secure(reqwest::Client::builder())
+        .user_agent(concat!("Reelix/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .redirect(guard.redirect_policy())
+        .build()
+}
+
 impl ProviderService {
     /// Loads definitions, settings and every provider; builds live instances.
     pub async fn new(
@@ -218,15 +232,8 @@ impl ProviderService {
                 id
             }
         };
-        let guard = AddressGuard { allow_private: false };
-        let guarded_http = guard
-            .secure(reqwest::Client::builder())
-            .user_agent(concat!("Reelix/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(60))
-            .redirect(guard.redirect_policy())
-            .build()
-            .map_err(|e| ProviderError::Upstream(format!("http client: {e}")))?;
+        let guarded_http =
+            public_http_client().map_err(|e| ProviderError::Upstream(format!("http client: {e}")))?;
         let mut xem_opts = XemOptions::default();
         if let Some(u) = &opts.xem_base_url {
             xem_opts.base_url = u.clone();
