@@ -2496,6 +2496,16 @@ select.input {
 }
 .pager-summary, .pager-page { color: var(--text-muted); font-size: var(--text-sm); }
 .pager-buttons { display: flex; align-items: center; gap: var(--space-2); }
+.infinite-sentinel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1px;
+  margin-top: var(--space-4);
+}
+.infinite-summary { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+.card-body.flush .infinite-sentinel { padding: 0 var(--space-4) var(--space-4); }
 
 .bulk-bar {
   position: sticky;
@@ -2893,7 +2903,6 @@ select.input {
   text-align: center;
 }
 .brand-tile:hover { text-decoration: none; border-color: var(--accent); }
-.load-more { display: flex; justify-content: center; margin: var(--space-5) 0; }
 
 /* Search */
 .search-page-form { display: flex; gap: var(--space-2); margin-bottom: var(--space-5); max-width: 640px; }

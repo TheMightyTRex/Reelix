@@ -10,6 +10,7 @@ chrono = { workspace = true, features = ["wasmbind"] }
 console_error_panic_hook = "0.1"
 gloo-net = { version = "0.6", features = ["http", "json", "websocket"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
 futures.workspace = true
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = "0.8"
@@ -30,6 +31,9 @@ web-sys = { version = "0.3", features = [
     "FileList",
     "HtmlElement",
     "HtmlInputElement",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
     "KeyboardEvent",
     "Location",
     "Navigator",

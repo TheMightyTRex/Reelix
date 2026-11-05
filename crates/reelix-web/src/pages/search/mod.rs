@@ -11,6 +11,7 @@ use reelix_api_types::Permissions;
 use reelix_api_types::requests::{ContentRequestKind, DiscoverItemDto, PersonDto, SearchPageDto};
 
 use crate::api;
+use crate::components::infinite::InfiniteSentinel;
 use crate::components::media_card::{MediaCard, MediaCardSkeleton, MediaGrid};
 use crate::components::request_status::{item_badge, kind_label, media_href, url_encode};
 use crate::components::{EmptyState, ErrorBox, Icon};
@@ -215,14 +216,15 @@ pub fn SearchPage() -> impl IntoView {
                 </MediaGrid>
             }.into_any()
         }}
-        <div class="load-more">
-            <Show when=move || page.get() < total_pages.get() && !items.with(Vec::is_empty)>
-                <button type="button" class="btn btn-secondary" disabled=move || loading.get()
-                    on:click=move |_| load(page.get_untracked() + 1)>
-                    {move || if loading.get() { "Loading…" } else { "Load more" }}
-                </button>
-            </Show>
-        </div>
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| load(page.get_untracked() + 1))
+            enabled=Signal::derive(move || {
+                page.get() < total_pages.get() && !items.with(Vec::is_empty) && error.with(Option::is_none)
+            })
+            loading=loading
+            loaded=Signal::derive(move || items.with(Vec::len))
+            total=Signal::derive(move || u64::from(total.get()))
+        />
         </Show>
     }
 }

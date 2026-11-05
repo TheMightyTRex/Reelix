@@ -4599,6 +4599,7 @@ dependencies = [
  "futures",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
  "leptos",
  "leptos_router",
  "reelix-api-types",

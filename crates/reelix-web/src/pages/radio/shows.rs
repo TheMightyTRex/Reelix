@@ -1,5 +1,5 @@
 //! `/radio` — the followed radio shows and podcasts: artwork grid with station / followed /
-//! monitored filters, paging and an A–Z jump list from the sort title.
+//! monitored filters, infinite scrolling and an A–Z jump list from the sort title.
 
 use std::time::Duration;
 
@@ -9,12 +9,13 @@ use leptos_router::hooks::use_query_map;
 use reelix_api_types::radio::{Paged, RadioShowDto, RadioStationDto};
 
 use crate::api;
-use crate::components::library_common::{Pager, on_entity_changed, pref_get, pref_set};
+use crate::components::infinite::{InfiniteSentinel, remember_window, window_covering};
+use crate::components::library_common::{on_entity_changed, pref_get, pref_set};
 use crate::components::library_forms::{require_library, with_query};
 use crate::components::radio::{RADIO_ENTITIES, RadioShowCard, letter_of, search_all_missing};
 use crate::components::{EmptyState, ErrorBox, Icon, PageHeader, Skeleton};
 
-const PAGE_SIZE: u32 = 48;
+const PAGE_CHUNK: usize = 48;
 const LETTERS: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 fn letter_anchor(c: char) -> String {
@@ -34,20 +35,24 @@ pub fn RadioShowsPage() -> impl IntoView {
     let station = RwSignal::new(initial_station);
     let followed = RwSignal::new(pref_get("radio.followed").unwrap_or_else(|| "all".into()));
     let monitored = RwSignal::new(pref_get("radio.monitored").unwrap_or_else(|| "all".into()));
-    let page = RwSignal::new(1u32);
+    let shown = RwSignal::new(PAGE_CHUNK);
 
     Effect::new(move |_| {
         pref_set("radio.followed", &followed.get());
         pref_set("radio.monitored", &monitored.get());
     });
-    // A new filter starts from the first page.
-    Effect::new(move |_| {
-        let _ = (q.get(), station.get(), followed.get(), monitored.get());
-        page.set(1);
+    let filters = move || [q.get(), station.get(), followed.get(), monitored.get()].join("|");
+    // A new filter starts from the top.
+    Effect::new(move |prev: Option<String>| {
+        let f = filters();
+        if prev.is_some_and(|p| p != f) {
+            shown.set(PAGE_CHUNK);
+        }
+        f
     });
 
     let stations = LocalResource::new(|| api::get::<Vec<RadioStationDto>>("/radio/stations"));
-    // Every matching show, sorted by sort title; paged here so the A–Z list can reach any letter.
+    // Every matching show, sorted by sort title; windowed here so the A–Z list can reach any letter.
     let shows = LocalResource::new(move || {
         let mut p: Vec<(&str, String)> = vec![
             ("search", q.get().trim().to_string()),
@@ -80,13 +85,15 @@ pub fn RadioShowsPage() -> impl IntoView {
             .map(|p| p.items)
             .unwrap_or_default()
     });
-    let total = Signal::derive(move || items.with(|i| i.len() as u64));
+    let item_count = Memo::new(move |_| items.with(Vec::len));
+    remember_window("radio", shown, filters, move || item_count.get() > 0);
 
     let jump = move |c: char| {
         let Some(idx) = items.with(|list| list.iter().position(|s| letter_of(&s.sort_title) == c)) else {
             return;
         };
-        page.set(idx as u32 / PAGE_SIZE + 1);
+        // Grow the window far enough to render the letter, then scroll to it.
+        shown.update(|s| *s = (*s).max(window_covering(idx, PAGE_CHUNK)));
         let id = letter_anchor(c);
         set_timeout(
             move || {
@@ -158,16 +165,11 @@ pub fn RadioShowsPage() -> impl IntoView {
                 .into_any()
             };
         }
-        let start = (page.get().saturating_sub(1) * PAGE_SIZE) as usize;
-        // The first show of each letter on this page carries the jump anchor.
-        let mut prev = start
-            .checked_sub(1)
-            .and_then(|i| list.get(i))
-            .map(|s| letter_of(&s.sort_title));
+        // The first show of each letter carries the jump anchor.
+        let mut prev = None;
         let cards = list
             .into_iter()
-            .skip(start)
-            .take(PAGE_SIZE as usize)
+            .take(shown.get())
             .map(|s| {
                 let c = letter_of(&s.sort_title);
                 let anchor = (prev != Some(c)).then(|| letter_anchor(c));
@@ -175,11 +177,7 @@ pub fn RadioShowsPage() -> impl IntoView {
                 view! { <RadioShowCard show=s anchor=anchor /> }
             })
             .collect_view();
-        view! {
-            <div class="poster-grid radio-grid">{cards}</div>
-            <Pager page=page page_size=PAGE_SIZE total=total />
-        }
-        .into_any()
+        view! { <div class="poster-grid radio-grid">{cards}</div> }.into_any()
     };
 
     let count_label = move || {
@@ -225,5 +223,11 @@ pub fn RadioShowsPage() -> impl IntoView {
         <p class="lib-count" aria-live="polite">{count_label}</p>
         {jump_list}
         {content}
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| shown.update(|s| *s += PAGE_CHUNK))
+            enabled=Signal::derive(move || shown.get() < item_count.get())
+            loaded=Signal::derive(move || shown.get().min(item_count.get()))
+            total=Signal::derive(move || item_count.get() as u64)
+        />
     }
 }
