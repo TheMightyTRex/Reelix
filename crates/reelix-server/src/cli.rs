@@ -4,6 +4,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use reelix_api_types::migrate::SourceKind;
 
 use crate::config::CliOverrides;
 
@@ -56,6 +57,84 @@ pub enum Command {
         #[command(subcommand)]
         action: ServiceAction,
     },
+    /// Back up the database, config.toml and secret key of `--data-dir`.
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
+    /// Check or stage a backup archive (`reelix_backup_*.zip`) for restoring.
+    Restore {
+        #[command(subcommand)]
+        action: RestoreAction,
+    },
+    /// Save apps to migrate from for the admin to review in System → Migrate.
+    Migrate {
+        #[command(subcommand)]
+        action: MigrateAction,
+    },
+    /// Edit config.toml of `--data-dir`.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum BackupAction {
+    /// Write a new backup to the backup folder (`<data-dir>/backups`) and print its path. Works
+    /// while Reelix runs, too. Creates the database if there is none yet.
+    Create,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum RestoreAction {
+    /// Check that the archive is a Reelix backup, without changing anything.
+    Check { archive: PathBuf },
+    /// Validate the archive and copy it to `<data-dir>/restore` as the pending restore, like
+    /// uploading it in System → Backup: Reelix restores it on its next start (and rolls back if
+    /// the restored database won't open). Exits non-zero, with the reason on stderr, if the
+    /// archive isn't a valid backup.
+    Stage { archive: PathBuf },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum MigrateAction {
+    /// Save a source (URL and API key, encrypted with the secret key) to migrate from. Nothing is
+    /// imported: after setup, System → Migrate offers it pre-filled for preview and run. Creates
+    /// the database if there is none yet.
+    Prepare {
+        /// radarr, sonarr, prowlarr, lidarr, readarr or jellyseerr.
+        #[arg(long, value_parser = parse_source)]
+        source: SourceKind,
+        /// e.g. http://localhost:7878 (include any URL base).
+        #[arg(long)]
+        url: String,
+        /// File holding the API key (not passed on the command line, where other users of the
+        /// computer could see it in the process list).
+        #[arg(long, value_name = "PATH")]
+        api_key_file: PathBuf,
+    },
+    /// Print the saved sources (keys masked) as JSON.
+    List,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum ConfigAction {
+    /// After copying a data folder from FROM to `--data-dir`: point the locations in config.toml
+    /// that are inside FROM (data_dir, backup_dir, log_dir, secret_key_file, the SQLite database
+    /// URL) at `--data-dir`. Everything else, comments included, is kept.
+    Relocate {
+        /// The old data folder.
+        #[arg(long, value_name = "DIR")]
+        from: PathBuf,
+    },
+}
+
+fn parse_source(s: &str) -> Result<SourceKind, String> {
+    SourceKind::parse(&s.to_ascii_lowercase()).ok_or_else(|| {
+        let all: Vec<_> = SourceKind::ALL.iter().map(|k| k.as_str()).collect();
+        format!("expected one of {}", all.join(", "))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Subcommand)]
@@ -131,6 +210,80 @@ mod tests {
             })
         ));
         assert!(Cli::try_parse_from(["reelix", "service"]).is_err());
+
+        let cli = Cli::parse_from(["reelix", "restore", "stage", "b.zip", "--data-dir", "d"]);
+        assert!(matches!(
+            &cli.command,
+            Some(Command::Restore { action: RestoreAction::Stage { archive } }) if archive.as_os_str() == "b.zip"
+        ));
+        assert!(cli.data_dir.is_some());
+        assert!(Cli::try_parse_from(["reelix", "restore", "stage"]).is_err());
+        let cli = Cli::parse_from(["reelix", "backup", "create", "--data-dir", "d"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Backup {
+                action: BackupAction::Create
+            })
+        ));
+        let cli = Cli::parse_from([
+            "reelix",
+            "migrate",
+            "prepare",
+            "--source",
+            "Radarr",
+            "--url",
+            "http://localhost:7878",
+            "--api-key-file",
+            "k.txt",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Migrate {
+                action: MigrateAction::Prepare {
+                    source: SourceKind::Radarr,
+                    ..
+                }
+            })
+        ));
+        // The key itself is never a command-line argument.
+        assert!(
+            Cli::try_parse_from([
+                "reelix",
+                "migrate",
+                "prepare",
+                "--source",
+                "radarr",
+                "--url",
+                "http://x",
+                "--api-key",
+                "secret"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "reelix",
+                "migrate",
+                "prepare",
+                "--source",
+                "plex",
+                "--url",
+                "http://x",
+                "--api-key-file",
+                "k"
+            ])
+            .is_err()
+        );
+        let cli = Cli::parse_from([
+            "reelix", "--config", "c.toml", "config", "relocate", "--from", "old",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Config {
+                action: ConfigAction::Relocate { .. }
+            })
+        ));
+        assert!(cli.config.is_some());
         assert!(Cli::try_parse_from(["reelix", "--port", "notaport"]).is_err());
     }
 }

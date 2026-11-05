@@ -109,14 +109,17 @@ impl Modules {
                     AppleProvider, ArchiveProvider, BbcProvider, PodcastIndexProvider, RssProvider,
                 };
                 use std::sync::Arc;
+                // Feeds read for Discover and requests reach public addresses only.
+                let public_http = reelix_providers::public_http_client()?;
                 reelix_radio::ProviderRegistry::default()
                     .with(Arc::new(BbcProvider::new(deps.http.clone())))
-                    .with(Arc::new(AppleProvider::new(deps.http.clone())))
+                    .with(Arc::new(
+                        AppleProvider::new(deps.http.clone()).with_public_client(public_http.clone()),
+                    ))
                     .with(Arc::new(PodcastIndexProvider::new(deps.http.clone())))
                     .with(Arc::new(ArchiveProvider::new(deps.http.clone())))
                     .with(Arc::new(
-                        RssProvider::new(deps.http.clone())
-                            .with_public_client(reelix_providers::public_http_client()?),
+                        RssProvider::new(deps.http.clone()).with_public_client(public_http),
                     ))
             },
             library_sync: None,

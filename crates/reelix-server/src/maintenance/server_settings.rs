@@ -1,8 +1,8 @@
 //! Reads and edits the `[server]` and `[logging]` keys of `config.toml`, keeping comments and
-//! every other key as they are.
+//! every other key as they are, and moves data-folder paths after a copy ([`relocate`]).
 
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use reelix_api_types::system::ServerSettingsValues;
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -122,6 +122,112 @@ pub fn save(path: &Path, v: &ServerSettingsValues) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Keys that may point into the data directory.
+const DATA_LOCATIONS: &[(&str, &str)] = &[
+    ("paths", "data_dir"),
+    ("paths", "backup_dir"),
+    ("paths", "log_dir"),
+    ("security", "secret_key_file"),
+    ("database", "url"),
+];
+
+/// `path` with `/` separators, no trailing separator and (on Windows) ASCII lower case, for
+/// comparing paths; byte offsets stay the same as in `path`.
+fn comparable(path: &str) -> String {
+    let p = path.replace('\\', "/");
+    let p = p.trim_end_matches('/');
+    if cfg!(windows) {
+        p.to_ascii_lowercase()
+    } else {
+        p.to_owned()
+    }
+}
+
+/// `value` moved from under `old` to under `new`, if it is `old` or inside it.
+fn moved(value: &str, old: &str, new: &Path) -> Option<PathBuf> {
+    let (v, o) = (comparable(value), comparable(old));
+    if o.is_empty() {
+        return None;
+    }
+    if v == o {
+        return Some(new.to_path_buf());
+    }
+    v.strip_prefix(&format!("{o}/"))?;
+    let rest = value[o.len() + 1..].trim_start_matches(['/', '\\']);
+    Some(new.join(rest))
+}
+
+/// The `sqlite:` URL with its file moved from under `old` to under `new`.
+fn moved_sqlite_url(url: &str, old: &str, new: &Path) -> Option<String> {
+    let rest = url
+        .strip_prefix("sqlite://")
+        .or_else(|| url.strip_prefix("sqlite:"))?;
+    let (path, query) = match rest.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (rest, None),
+    };
+    let file = moved(path, old, new)?;
+    let mut out = format!("sqlite://{}", file.to_string_lossy().replace('\\', "/"));
+    if let Some(q) = query {
+        out.push('?');
+        out.push_str(q);
+    }
+    Some(out)
+}
+
+/// After the data directory was copied from `old` to `new` (the Windows installer's migration
+/// from another Reelix folder): rewrites the keys of the config file at `path` that point into
+/// `old` so they point to the same place under `new`. Relative locations depended on the old
+/// working directory: a relative `paths.data_dir` becomes `new`, the others are dropped so their
+/// defaults under the new data directory apply. Comments and every other key stay as they are;
+/// the file is only written when something changed. Returns the changed `table.key` names.
+pub fn relocate(path: &Path, old: &Path, new: &Path) -> anyhow::Result<Vec<String>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut doc: DocumentMut = text.parse()?;
+    let old = old.to_string_lossy();
+    let mut changed = Vec::new();
+    for &(table, key) in DATA_LOCATIONS {
+        let Some(t) = doc.get_mut(table).and_then(Item::as_table_like_mut) else {
+            continue;
+        };
+        let Some(current) = t.get(key).and_then(Item::as_str).map(str::to_owned) else {
+            continue;
+        };
+        let relative = key != "url" && Path::new(&current).is_relative();
+        let replacement = if key == "url" {
+            moved_sqlite_url(&current, &old, new)
+        } else {
+            moved(&current, &old, new)
+                .or_else(|| (relative && key == "data_dir").then(|| new.to_path_buf()))
+                .map(|p| p.to_string_lossy().into_owned())
+        };
+        match replacement {
+            Some(r) => {
+                if let Some(v) = t.get_mut(key).and_then(Item::as_value_mut) {
+                    let decor = v.decor().clone();
+                    *v = toml_edit::Value::from(r);
+                    *v.decor_mut() = decor;
+                }
+            }
+            None if relative => {
+                t.remove(key);
+            }
+            None => continue,
+        }
+        changed.push(format!("{table}.{key}"));
+    }
+    if !changed.is_empty() {
+        let tmp = path.with_extension("toml.partial");
+        std::fs::write(&tmp, doc.to_string())?;
+        std::fs::rename(&tmp, path)?;
+    }
+    Ok(changed)
+}
+
 /// Settings forced by `REELIX_*` / `RUST_LOG` environment variables or command-line flags.
 pub fn overridden(cfg: &Config) -> Vec<String> {
     let mut out = Vec::new();
@@ -192,6 +298,64 @@ mod tests {
                 ..values()
             })
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn relocate_moves_data_paths_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let old = dir.path().join("old").join("data");
+        let new = dir.path().join("new");
+        let o = old.to_string_lossy().replace('\\', "/");
+        // An absolute path outside the old data folder (Windows needs a drive letter).
+        let elsewhere = if cfg!(windows) {
+            "C:/srv/backups"
+        } else {
+            "/srv/backups"
+        };
+        let text = format!(
+            "# keep me\n[server]\nport = 7711\n\n[database]\nurl = \"sqlite://{o}/reelix.db?mode=rwc\"\n\n\
+             [paths]\ndata_dir = \"./data\"\nlog_dir = '{o}/logs' # logs\nbackup_dir = \"{elsewhere}\"\n\
+             web_dir = \"{o}/../web\"\n\n[security]\nsecret_key_file = \"data/secret.key\"\n"
+        );
+        std::fs::write(&path, text).unwrap();
+        let changed = relocate(&path, &old, &new).unwrap();
+        assert_eq!(
+            changed,
+            [
+                "paths.data_dir",
+                "paths.log_dir",
+                "security.secret_key_file",
+                "database.url"
+            ]
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let doc: DocumentMut = text.parse().unwrap();
+        assert!(text.starts_with("# keep me"), "{text}");
+        assert!(text.contains("# logs"), "{text}");
+        assert_eq!(doc["server"]["port"].as_integer(), Some(7711));
+        assert_eq!(doc["paths"]["data_dir"].as_str(), Some(&*new.to_string_lossy()));
+        assert_eq!(
+            doc["paths"]["log_dir"].as_str(),
+            Some(&*new.join("logs").to_string_lossy())
+        );
+        // Outside the old data folder: untouched.
+        assert_eq!(doc["paths"]["backup_dir"].as_str(), Some(elsewhere));
+        assert!(doc["paths"]["web_dir"].as_str().unwrap().ends_with("../web"));
+        // Relative: dropped, so the default (<data_dir>/secret.key) applies.
+        assert!(doc["security"].get("secret_key_file").is_none());
+        let n = new.to_string_lossy().replace('\\', "/");
+        assert_eq!(
+            doc["database"]["url"].as_str(),
+            Some(&*format!("sqlite://{n}/reelix.db?mode=rwc"))
+        );
+        // Nothing left to change; no file: nothing to do.
+        assert!(relocate(&path, &old, &new).unwrap().is_empty());
+        assert!(
+            relocate(&dir.path().join("none.toml"), &old, &new)
+                .unwrap()
+                .is_empty()
         );
     }
 
