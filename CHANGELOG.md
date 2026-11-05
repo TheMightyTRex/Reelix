@@ -6,6 +6,35 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-05
+
+### Added
+- **Radio**, a new media type for radio shows and podcasts, played through Audiobookshelf (#21).
+  - **Follow shows:** follow every episode, only new ones, or none. Reelix keeps each show's series and episodes, with numbers, titles, first broadcast and length; episodes without a number are numbered in broadcast order.
+  - **Sources:** podcast feeds, BBC programmes and BBC Sounds search, Apple Podcasts, Podcast Index (with your API key) and the Internet Archive. Search follows your country and language.
+    - The BBC endpoints are public but undocumented, so requests are spaced out and cached. If the data changes you get a clear message, and nothing saved is lost.
+  - **Audiobookshelf:** Reelix reads your Audiobookshelf podcast library and matches files to episodes:
+    - by the source's id,
+    - then by `S20E03` or the season and episode in Audiobookshelf,
+    - then by a title only one file and one episode share.
+    - You can set or clear a match by hand. A Review page lists podcasts and files that don't match anything.
+  - **Finding and filing episodes:** wanted episodes are searched on your indexers (Audio/Other) with the usual quality, delay and release profiles, and finished downloads are filed into the podcast library.
+    - Files are named `{Show}/{Show} - S20E03 - Title`, with radio naming settings.
+    - Tags are written on Reelix's copy only. Audio is never re-encoded, existing files are never overwritten, and torrents still seeding are left untouched.
+    - Then Audiobookshelf is asked to scan.
+  - **Artwork and station logos:** downloaded when a show is refreshed. SVG logos are cleaned before they're shown.
+  - **Pages:** Radio shows (with an A–Z list), show pages with a series picker and episode table, an episode panel for matching and searching, Add show (search or paste a link), Stations, Review, and Radio settings.
+  - **Activity and history:** radio episodes appear in the queue, history and blocklist.
+  - **Tasks:** refresh shows (12 h), sync feeds (1 h), read the Audiobookshelf library (15 min) and search for missing episodes (6 h).
+  - **API:** everything is under `/api/v1/radio`. `POST /api/v1/command` is new, with `RefreshRadioShow`, `RescanRadioLibrary` and `RadioMissingSearch`.
+- `THIRD_PARTY_NOTICES.md`, which ships with every download. The BBC provider is adapted from Storyarr (MIT).
+
+### Changed
+- Root folders can have the kind **Radio**.
+
+### Fixed
+- Restoring a backup on Windows waits up to ten seconds for a locked database file, instead of two.
+
 ## [0.7.1] - 2026-11-04
 
 ### Fixed
