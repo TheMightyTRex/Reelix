@@ -10,6 +10,9 @@
 //! and `/episodes/byfeedid?id=&max=` for its episodes, which map like a feed's items (season →
 //! series, trailers and bonus episodes → specials). A `podcastindex.org/podcast/{id}` link
 //! previews.
+//!
+//! Discover list `trending`: `/podcasts/trending?max=50&lang=` (the settings' language),
+//! cached 30 minutes.
 
 use std::sync::RwLock;
 use std::time::Duration;
@@ -21,8 +24,8 @@ use serde_json::Value;
 use sha1::{Digest, Sha1};
 
 use crate::provider::{
-    EpisodeData, ProviderError, RadioProvider, SearchPrefs, SeriesData, ShowData, ShowFetch, ShowHit,
-    async_trait,
+    DISCOVER_LIMIT, DISCOVER_TTL, DiscoverList, EpisodeData, ProviderError, RadioProvider, SearchPrefs,
+    SeriesData, ShowData, ShowFetch, ShowHit, async_trait,
 };
 use crate::providers::http::{JsonReader, str_at, u32_at, url_at};
 use crate::providers::rss::plain_text;
@@ -80,6 +83,15 @@ impl PodcastIndexProvider {
     }
 
     async fn get(&self, path_and_query: &str) -> Result<std::sync::Arc<Value>, ProviderError> {
+        self.get_for(path_and_query, CACHE_TTL).await
+    }
+
+    /// A signed GET cached for `ttl`.
+    async fn get_for(
+        &self,
+        path_and_query: &str,
+        ttl: Duration,
+    ) -> Result<std::sync::Arc<Value>, ProviderError> {
         let c = self.credentials()?;
         let date = Utc::now().timestamp().to_string();
         let mut h = HeaderMap::new();
@@ -96,7 +108,9 @@ impl PodcastIndexProvider {
             reqwest::header::AUTHORIZATION,
             value(&signature(&c.key, &c.secret, &date))?,
         );
-        self.api.get(&format!("{}{path_and_query}", self.base), h).await
+        self.api
+            .get_for(&format!("{}{path_and_query}", self.base), h, ttl)
+            .await
     }
 }
 
@@ -156,6 +170,15 @@ fn hit(f: &Value) -> Option<ShowHit> {
         episode_count: u32_at(f, "episodeCount"),
         show_id: None,
     })
+}
+
+/// Feeds of `/podcasts/trending` (or a search), as hits.
+pub fn feed_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
+    let feeds = data
+        .get("feeds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ProviderError::Parse("Podcast Index sent an unexpected answer".into()))?;
+    Ok(feeds.iter().filter_map(hit).take(DISCOVER_LIMIT).collect())
 }
 
 /// Show + episodes from `/podcasts/byfeedid` and `/episodes/byfeedid`.
@@ -260,8 +283,31 @@ impl RadioProvider for PodcastIndexProvider {
         self.credentials.read().is_ok_and(|c| c.is_some())
     }
 
+    fn discover_lists(&self) -> Vec<DiscoverList> {
+        vec![DiscoverList::row("trending", "Trending podcasts")]
+    }
+
+    async fn discover(&self, list: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
+        if list != "trending" {
+            return Err(ProviderError::NotFound(format!(
+                "Podcast Index has no Discover list {list}"
+            )));
+        }
+        let mut pq = format!("/podcasts/trending?max={DISCOVER_LIMIT}");
+        if let Some(lang) = prefs
+            .language
+            .as_deref()
+            .filter(|l| l.bytes().all(|b| b.is_ascii_alphabetic()))
+        {
+            pq.push_str(&format!("&lang={lang}"));
+        }
+        let data = self.get_for(&pq, DISCOVER_TTL).await?;
+        feed_hits(&data)
+    }
+
     async fn search(&self, query: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
         let q: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
+
         let data = self
             .get(&format!("/search/byterm?q={q}&max={SEARCH_LIMIT}"))
             .await?;

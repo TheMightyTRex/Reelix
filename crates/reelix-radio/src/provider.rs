@@ -59,6 +59,40 @@ pub struct ShowFetch {
     pub quick: bool,
 }
 
+/// A curated list a provider offers for Discover (a chart, trending shows, a category).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoverList {
+    /// Unique within the provider (`top`, `genre-1303`, `category-comedy`).
+    pub id: String,
+    pub name: String,
+    /// A category (shown as a chip) rather than a row of its own.
+    pub category: bool,
+}
+
+impl DiscoverList {
+    pub fn row(id: &str, name: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            category: false,
+        }
+    }
+
+    pub fn category(id: &str, name: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            category: true,
+        }
+    }
+}
+
+/// How long Discover lists are cached by the providers.
+pub const DISCOVER_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Most shows in one Discover list.
+pub const DISCOVER_LIMIT: usize = 50;
+
 /// The broadcaster's service a show belongs to.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StationData {
@@ -188,6 +222,22 @@ pub trait RadioProvider: Send + Sync + 'static {
         )))
     }
 
+    /// Curated lists for Discover ([`discover`](Self::discover)); empty = none.
+    fn discover_lists(&self) -> Vec<DiscoverList> {
+        Vec::new()
+    }
+
+    /// The shows of the list `list` (an id from [`discover_lists`](Self::discover_lists)),
+    /// best first, at most [`DISCOVER_LIMIT`]. Hits may carry ids the provider resolves only
+    /// when the show is opened or added (e.g. an Apple id, not yet its feed). Cached for
+    /// [`DISCOVER_TTL`].
+    async fn discover(&self, list: &str, _prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
+        Err(ProviderError::NotFound(format!(
+            "{} has no Discover list {list}",
+            self.name()
+        )))
+    }
+
     /// The show behind `link` when it is one of this provider's links (`Ok(None)` otherwise,
     /// so the next provider is asked). Must save nothing. The returned data is also used to
     /// add the show without a second read.
@@ -235,20 +285,36 @@ impl ProviderRegistry {
     /// for that country first, then the ones for everywhere; providers for another country or
     /// language are left out (no preference set = all, in registry order).
     pub fn for_search(&self, enabled: &[String], prefs: &SearchPrefs) -> Vec<Arc<dyn RadioProvider>> {
-        let fits = |list: &[&str], want: Option<&String>| {
-            list.is_empty() || want.is_none_or(|w| list.iter().any(|x| x.eq_ignore_ascii_case(w)))
-        };
         let mut out: Vec<_> = self
-            .enabled(enabled)
+            .for_prefs(enabled, prefs)
             .into_iter()
             .filter(|p| p.supports_search())
-            .filter(|p| {
-                fits(p.countries(), prefs.country.as_ref()) && fits(p.languages(), prefs.language.as_ref())
-            })
             .collect();
         // Stable: country-specific providers that fit go first.
         out.sort_by_key(|p| p.countries().is_empty());
         out
+    }
+
+    /// Enabled providers with Discover lists, for the settings' country and language (as
+    /// [`for_search`](Self::for_search)), in registry order.
+    pub fn for_discover(&self, enabled: &[String], prefs: &SearchPrefs) -> Vec<Arc<dyn RadioProvider>> {
+        self.for_prefs(enabled, prefs)
+            .into_iter()
+            .filter(|p| !p.discover_lists().is_empty())
+            .collect()
+    }
+
+    /// Enabled providers not limited to another country or language than `prefs`.
+    fn for_prefs(&self, enabled: &[String], prefs: &SearchPrefs) -> Vec<Arc<dyn RadioProvider>> {
+        let fits = |list: &[&str], want: Option<&String>| {
+            list.is_empty() || want.is_none_or(|w| list.iter().any(|x| x.eq_ignore_ascii_case(w)))
+        };
+        self.enabled(enabled)
+            .into_iter()
+            .filter(|p| {
+                fits(p.countries(), prefs.country.as_ref()) && fits(p.languages(), prefs.language.as_ref())
+            })
+            .collect()
     }
 
     /// Hands the current settings to every provider ([`RadioProvider::configure`]).

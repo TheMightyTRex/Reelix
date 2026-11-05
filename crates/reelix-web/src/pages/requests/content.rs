@@ -1,5 +1,6 @@
-//! Book and album requests on `/requests` (`GET /requests/media`): author/artist, formats,
-//! approve / decline / retry / delete and a format editor for pending book requests.
+//! Book, album and radio show requests on `/requests` (`GET /requests/media`):
+//! author/artist/station, formats, approve / decline / retry / delete and a format editor for
+//! pending book requests.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -28,6 +29,7 @@ fn library_href(r: &ContentRequestDto) -> Option<String> {
     match r.kind {
         ContentRequestKind::Book => r.author_id.map(|a| format!("/books/authors/{a}")),
         ContentRequestKind::Music => r.artist_id.map(|a| format!("/music/artists/{a}")),
+        ContentRequestKind::Radio => r.radio_show_id.map(|s| format!("/radio/shows/{s}")),
     }
 }
 
@@ -77,6 +79,7 @@ pub fn ContentRequestTable(
         let k = match kind.get().as_str() {
             "book" => "book",
             "music" => "music",
+            "radio" => "radio",
             _ => "all",
         };
         let mut q = format!(
@@ -164,14 +167,15 @@ pub fn ContentRequestTable(
         });
     };
 
-    let rows = move || match list.get() {
+    let rows = move || {
+        match list.get() {
         None => view! { <Skeleton lines=6 /> }.into_any(),
         Some(Err(e)) => {
             view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.refetch()) /> }.into_any()
         }
         Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="requests" title="No book or album requests"
-                description="Find books and albums on Discover and press Request — they show up here." />
+            <EmptyState icon="requests" title="No book, album or radio requests"
+                description="Find books, albums and radio shows on Discover and press Request — they show up here." />
         }
         .into_any(),
         Some(Ok(p)) => {
@@ -180,7 +184,7 @@ pub fn ContentRequestTable(
             view! {
                 <div class="table-wrap">
                     <table class="table request-table">
-                        <caption class="visually-hidden">"Book and album requests"</caption>
+                        <caption class="visually-hidden">"Book, album and radio requests"</caption>
                         <thead>
                             <tr>
                                 <th scope="col">"Title"</th>
@@ -257,6 +261,7 @@ pub fn ContentRequestTable(
             }
             .into_any()
         }
+    }
     };
 
     let drawer_title =
@@ -279,7 +284,11 @@ pub fn ContentRequestTable(
                 </div>
                 <dl class="kv">
                     {r.subtitle.clone().map(|s| view! {
-                        <div class="kv-row"><dt>{match r.kind { ContentRequestKind::Book => "Author", ContentRequestKind::Music => "Artist" }}</dt><dd>{s}</dd></div>
+                        <div class="kv-row"><dt>{match r.kind {
+                            ContentRequestKind::Book => "Author",
+                            ContentRequestKind::Music => "Artist",
+                            ContentRequestKind::Radio => "Station",
+                        }}</dt><dd>{s}</dd></div>
                     })}
                     {r.year.map(|y| view! { <div class="kv-row"><dt>"Year"</dt><dd>{y}</dd></div> })}
                     <div class="kv-row"><dt>"Requested by"</dt><dd><UserChip user=r.requested_by.clone() /></dd></div>
@@ -337,7 +346,8 @@ pub fn ContentRequestTable(
         <ConfirmDialog
             open=delete_open
             title="Delete request"
-            message=Signal::derive(|| "Delete this request? Books and albums already added to the library stay there.".to_string())
+            message=Signal::derive(|| "Delete this request? Books, albums and shows already added to the library stay there.".to_string())
+
             confirm_label="Delete"
             on_confirm=Callback::new(move |()| run(Pending::Delete))
         />

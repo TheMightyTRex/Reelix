@@ -258,6 +258,20 @@ pub fn artwork_url(show: &RadioShowDto) -> Option<String> {
     })
 }
 
+/// Artwork of a search / Discover hit when the page may load it: the image hosts the page's
+/// Content-Security-Policy allows (`IMG_HOSTS` in `reelix-server/src/web.rs`: the BBC, Apple
+/// and the Internet Archive). Other hosts get the placeholder (no image proxy).
+pub fn hit_artwork(url: Option<&str>) -> Option<String> {
+    let url = url?.trim();
+    let host = url.strip_prefix("https://")?.split(['/', '?', '#']).next()?;
+    let host = host.to_ascii_lowercase();
+    let allowed = host == "ichef.bbci.co.uk"
+        || host.ends_with(".mzstatic.com")
+        || host == "archive.org"
+        || host.ends_with(".archive.org");
+    (allowed && !host.contains('@') && !host.contains(':')).then(|| url.to_owned())
+}
+
 /// Served logo of a station (`GET /radio/stations/{id}/logo`).
 pub fn logo_url(station_id: i64) -> String {
     api::api_url(&format!("/radio/stations/{station_id}/logo"))
@@ -422,5 +436,18 @@ mod tests {
         assert_eq!(filing_series(RadioSeriesKind::Specials, Some(4)), 0);
         assert_eq!(filing_series(RadioSeriesKind::Series, None), 1);
         assert_eq!(opt_id(0), None);
+    }
+
+    #[test]
+    fn hit_artwork_follows_the_csp() {
+        let ok = |u: &str| hit_artwork(Some(u)).is_some();
+        assert!(ok("https://ichef.bbci.co.uk/images/ic/640x640/p0abc.jpg"));
+        assert!(ok("https://is1-ssl.mzstatic.com/image/thumb/a.jpg/600x600bb.jpg"));
+        assert!(ok("https://archive.org/services/img/x"));
+        assert!(!ok("http://ichef.bbci.co.uk/x.jpg"));
+        assert!(!ok("https://img.example.com/x.jpg"));
+        assert!(!ok("https://evilmzstatic.com/x.jpg"));
+        assert!(!ok("https://user@ichef.bbci.co.uk/x.jpg"));
+        assert_eq!(hit_artwork(None), None);
     }
 }

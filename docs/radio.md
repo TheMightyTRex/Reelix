@@ -25,6 +25,7 @@ This page describes what exists and where the remaining parts plug in.
 | `src/svg.rs` | SVG cleaner for logos and artwork |
 | `src/xml.rs` | Small quick-xml tree (entity handling, depth limit 64) |
 | `src/shows.rs` | Add, edit, delete, list, get; episodes; stations; search; preview; `recompute_statuses` |
+| `src/discover.rs` | Discover lists (`discover_lists`, `discover`), `preview_show`, `followed_shows` (see (e)) |
 | `src/refresh.rs` | `refresh_show`, `refresh_shows`, merging provider data, broadcast-order numbering, settling |
 | `src/status.rs` | Pure status rules (`monitored_by_follow`, `episode_status`, `is_settled`, `filing_series_number`) |
 | `src/matching.rs` | Hand-set file links (`set_episode_file`, `clear_episode_file`), automatic matching (`match_library`, `source_ids`) |
@@ -67,6 +68,11 @@ broadcasts. It also rebuilds `root_folders` to accept `media_kind = 'radio'`.
 - `radio_episode_files`: one row per episode file of the podcast library: `abs_item_id` +
   `abs_episode_id` (unique), `item_title`, `title`, `season`, `episode`, `guid`,
   `enclosure_url`, `published_at`, `duration_secs`, `path`, `size`, `seen_at`.
+- `radio_show_aliases` (migration `0016_radio_requests.sql`): `provider` + `external_id`
+  (primary key) → `show_id` (cascade): other ids a show was added or opened under (an Apple id
+  handed to `rss`, a BBC series pid that resolved to its brand), so Discover and search mark
+  those hits as followed. Written by `add_show` (also when it answers "already in the library")
+  and by `preview_show` when the previewed show turns out to be followed.
 
 Nothing is deleted when a source drops a series or episode: it gets `source_removed_at`
 (cleared when it comes back). Deleting a show deletes its series and episodes, never the
@@ -106,6 +112,8 @@ pub trait RadioProvider: Send + Sync + 'static {
     async fn search(&self, query: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError>;
     async fn preview(&self, link: &str) -> Result<Option<ShowData>, ProviderError>;
     async fn show(&self, external_id: &str, fetch: &ShowFetch) -> Result<ShowData, ProviderError>;
+    fn discover_lists(&self) -> Vec<DiscoverList> { Vec::new() }   // DiscoverList { id, name, category }
+    async fn discover(&self, list: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError>;
 }
 ```
 
@@ -142,7 +150,8 @@ Registered in `jobs.rs` and listed under System → Tasks.
 ## API
 
 All under `/api/v1`. Reads and writes need `MANAGE_LIBRARY` (as music); settings and
-root-folder changes need `ADMIN`.
+root-folder changes need `ADMIN`. Discover's radio routes (any signed-in user) are in (e).
+
 
 | Method and path | What |
 |---|---|
@@ -307,7 +316,9 @@ reaching the source), body size limit.
 
 Image hosts of search hits allowed by the page CSP (`crates/reelix-server/src/web.rs`):
 `ichef.bbci.co.uk`, `*.mzstatic.com`, `archive.org`. Other hosts (Podcast Index, feeds) show a
-placeholder in search results; saved shows use the downloaded copy.
+placeholder in search results and on Discover (`hit_artwork` in
+`crates/reelix-web/src/components/radio.rs` mirrors the list; there is no image proxy); saved
+shows use the downloaded copy.
 
 Tests: `tests/providers.rs` with trimmed real responses in `tests/fixtures/providers/`
 (Podcast Index fixtures are written to its documented format).
@@ -440,6 +451,73 @@ toggles per episode and per series, and in the episode panel "Search", "Interact
 `POST /releases/grab`) and the filed file. The shows page has "Search all missing"
 (`RadioMissingSearch`). The naming templates are on Settings → Naming. Radio is not on the
 Wanted page or the calendar (which list movies and TV episodes only, like books and music).
+
+### (e) Discover and requests
+
+Built. Radio is a fourth kind on Discover (`ContentRequestKind::Radio`, request
+`media_kind = 'radio'`), next to books and music, with the same request flow.
+
+**Provider lists** (`RadioProvider::discover_lists` / `discover`, defaulted to none; hits at
+most `DISCOVER_LIMIT` = 50, cached `DISCOVER_TTL` = 30 min through each provider's `JsonReader`
+with `get_for`, so the providers' pacing and rate-limit handling apply):
+
+| Provider | Rows | Categories | Source |
+|---|---|---|---|
+| `apple` | `top` (Top podcasts) | `genre-{id}`: Arts, Business, Comedy, Education, Fiction, Government, Health & Fitness, History, Kids & Family, Leisure, Music, News, Religion & Spirituality, Science, Society & Culture, Sports, Technology, True Crime, TV & Film | `rss.marketingtools.apple.com/api/v2/{cc}/podcasts/top/50/podcasts.json` (no categories there), categories from the older `itunes.apple.com/{cc}/rss/toppodcasts/limit=50/genre={id}/json` (served as `text/javascript`; `entry` is an object for a single hit and missing for none); `cc` = settings country, else `us` |
+| `bbc` | `popular` (Popular on BBC Sounds) | `category-{id}`: Comedy, Drama, Documentaries, Science & Technology, True Crime, News, Sport | `rms.api.bbc.co.uk/v2/programmes/playable?sort=popular&limit=100[&category=]` (undocumented, like search): the 100 most played episodes reduced to their programmes (brand or series pid), artwork from the episode image |
+| `podcastindex` | `trending` (Trending podcasts) | — | `/podcasts/trending?max=50&lang={settings language}` (only when configured) |
+
+Lists follow the settings like search (`ProviderRegistry::for_discover`): enabled and configured
+providers only, the BBC only for `GB` or no country (and `en`/`cy`/`gd` or no language). Apple
+chart hits carry `provider: "apple"` and the Apple id, not the feed: the feed is looked up only
+when a show is opened (`preview_show`) or added (`AppleProvider::show` with an id), never for a
+whole chart. Storyarr's BBC adapter has no lists; the BBC endpoint was found on the same public
+API as BBC Sounds search.
+
+**Service** (`src/discover.rs`): `discover_lists()` → `RadioDiscoverDto {rows, categories}` with
+ids `{provider}-{list}`; `discover(row)` (unknown or unavailable rows are `NotFound`);
+`preview_show(provider, external_id)` (the provider's quick read, newest 10 episodes, nothing
+saved but an alias); `followed_shows(keys)`. Hits are marked followed (`show_id`) by provider +
+id, by alias, or by feed URL (a Podcast Index or Apple-search hit for a feed that is followed;
+compared without scheme, case or trailing `/`).
+
+**API** (any signed-in user; mirrors `/discover/content/book`, `/search/books`, `/media/book`):
+
+| Method and path | What |
+|---|---|
+| `GET /discover/genres/radio` | `RadioDiscoverDto`: rows and categories (`{id, name, provider, provider_name}`) |
+| `GET /discover/content/radio/{row}` | `ContentRowDto` of `ContentItemDto` (`kind: radio`, `foreign_id` = `{provider}:{external_id}`, `subtitle` = station or author, `cover` = artwork, `availability: available` + `library_id` = show id when followed, the visible request); `hide_available` applies |
+| `GET /search/radio?q=` | `RadioSearchPageDto {results}` from `RadioService::search` (a link is previewed) |
+| `GET /media/radio/{provider}/{external_id}` | `ContentDetailDto` with `radio` = `RadioShowPreviewDto` (station, links, newest episodes), requests and `request_ability` (`Already followed`, `Already requested`, quota, or no REQUEST_RADIO); `external_id` percent-encoded (feed URLs) |
+| `POST /requests/media` | `{kind: "radio", foreign_id}`; listed, approved, declined, retried and deleted with the book/album requests (`GET /requests/media?kind=radio`) |
+
+**Requests** (`crates/reelix-requests/src/content.rs`): permissions `REQUEST_RADIO` (1 << 20) and
+`AUTO_APPROVE_RADIO` (1 << 21), both in the power-user role. Request settings: `radio`
+(`RequestDefaultsDto`: audiobook quality profile, radio root folder — none = the radio settings'
+library folder — and tags), `auto_approve_radio`, and a global quota `radio_quota_limit` /
+`radio_quota_days` (`QuotaDto.radio`; no per-user override yet). A followed show cannot be
+requested (409), nor a show with an active request. Approval calls
+`LibraryGateway::add_radio` → `RadioService::add_show` with the requested provider + id and
+`follow: None` (the radio settings' `default_follow`), monitored; an already followed show
+(also under its feed) counts as added. The request stores `radio_show_id` and becomes Available
+at once (a followed show is in the library); with `search_on_approve` the show's wanted
+episodes are searched. Notifications use `ContentKind::Radio`. Migration
+`0016_radio_requests.sql` rebuilds `requests` (as 0010 did) to allow `media_kind = 'radio'` and
+adds `radio_show_id`. Status sync also listens to `radio_show` changes.
+
+**Web UI**: Discover gets a Radio tab (REQUEST_RADIO or MANAGE_LIBRARY) and Search a Radio tab
+(`?type=radio`), in `crates/reelix-web/src/pages/discover/radio.rs`: one row per list, the
+categories as chips per source (a chosen one opens as a grid), cards with the square artwork
+letterboxed (placeholder for hosts the CSP does not allow), and a show dialog with synopsis,
+station, links and the newest episodes. Library managers get **Follow** (`POST /radio/shows`,
+adds directly) or **Open show** once followed; requesters get **Request** with their quota.
+Settings → Requests has a Radio card (defaults), the auto-approve toggle and the radio quota;
+the Requests page lists radio requests (Radio filter, link to the show for library managers).
+
+Tests: `crates/reelix-radio/tests/discover.rs` (trimmed real Apple and BBC responses, Podcast
+Index in its documented format; list selection; marking by id, alias and feed),
+`crates/reelix-requests/tests/radio.rs`, `crates/reelix-api/tests/requests.rs`
+(`radio_discover_and_requests_for_requesters`).
 
 Not built yet: manual import of an arbitrary folder for a radio episode (retrying a queue item
 works), a profile check at filing time (the release was already scored), and telling radio

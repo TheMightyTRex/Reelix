@@ -1,4 +1,5 @@
-//! SQL for book / album requests (`requests` rows with `media_kind` `book` or `music`).
+//! SQL for book / album / radio requests (`requests` rows with `media_kind` `book`, `music` or
+//! `radio`).
 
 use reelix_api_types::requests::{ContentRequestKind, RequestStatus};
 use reelix_core::BookFormat;
@@ -42,6 +43,7 @@ pub struct ContentRow {
     pub author_id: Option<i64>,
     pub album_id: Option<i64>,
     pub artist_id: Option<i64>,
+    pub radio_show_id: Option<i64>,
     pub source: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -50,11 +52,12 @@ pub struct ContentRow {
 }
 
 impl ContentRow {
-    /// Library id of the requested item (book / album).
+    /// Library id of the requested item (book / album / radio show).
     pub fn library_id(&self) -> Option<i64> {
         match self.kind {
             ContentRequestKind::Book => self.book_id,
             ContentRequestKind::Music => self.album_id,
+            ContentRequestKind::Radio => self.radio_show_id,
         }
     }
 }
@@ -99,6 +102,7 @@ fn map(r: &SqliteRow) -> Result<ContentRow> {
         author_id: r.try_get("author_id")?,
         album_id: r.try_get("album_id")?,
         artist_id: r.try_get("artist_id")?,
+        radio_show_id: r.try_get("radio_show_id")?,
         source: r.try_get("source")?,
         created_at: r.try_get("created_at")?,
         updated_at: r.try_get("updated_at")?,
@@ -107,7 +111,7 @@ fn map(r: &SqliteRow) -> Result<ContentRow> {
     })
 }
 
-/// Filters for listing book/album requests.
+/// Filters for listing book/album/radio requests.
 #[derive(Debug, Clone, Default)]
 pub struct ContentFilter {
     pub statuses: Vec<RequestStatus>,
@@ -118,7 +122,7 @@ pub struct ContentFilter {
 
 impl ContentFilter {
     fn push(&self, q: &mut QueryBuilder<'_, Sqlite>) {
-        q.push(" WHERE media_kind IN ('book', 'music')");
+        q.push(" WHERE media_kind IN ('book', 'music', 'radio')");
         if !self.statuses.is_empty() {
             q.push(" AND status IN (");
             let mut sep = q.separated(", ");
@@ -174,10 +178,11 @@ impl ContentRepo<'_> {
     }
 
     pub async fn get(&self, id: i64) -> Result<Option<ContentRow>> {
-        let row = sqlx::query("SELECT * FROM requests WHERE id = ? AND media_kind IN ('book', 'music')")
-            .bind(id)
-            .fetch_optional(self.0.pool())
-            .await?;
+        let row =
+            sqlx::query("SELECT * FROM requests WHERE id = ? AND media_kind IN ('book', 'music', 'radio')")
+                .bind(id)
+                .fetch_optional(self.0.pool())
+                .await?;
         row.as_ref().map(map).transpose()
     }
 
@@ -218,7 +223,7 @@ impl ContentRepo<'_> {
         Ok((rows.iter().map(map).collect::<Result<_>>()?, total as u64))
     }
 
-    /// `(status, media_kind, n)` of book/music requests, optionally of one user.
+    /// `(status, media_kind, n)` of book/music/radio requests, optionally of one user.
     pub async fn counts(&self, user_id: Option<i64>) -> Result<Vec<(String, String, i64)>> {
         let mut q = QueryBuilder::<Sqlite>::new("SELECT status, media_kind, COUNT(*) AS n FROM requests");
         ContentFilter {
@@ -238,8 +243,8 @@ impl ContentRepo<'_> {
         sqlx::query(
             "UPDATE requests SET book_formats = ?, status = ?, profile_id = ?, root_folder_id = ?, tags = ?,
                 modified_by = ?, decline_reason = ?, failure_reason = ?, book_id = ?, author_id = ?, album_id = ?,
-                artist_id = ?, approved_at = ?, available_at = ?, updated_at = ?
-             WHERE id = ? AND media_kind IN ('book', 'music')",
+                artist_id = ?, radio_show_id = ?, approved_at = ?, available_at = ?, updated_at = ?
+             WHERE id = ? AND media_kind IN ('book', 'music', 'radio')",
         )
         .bind(json(&r.formats))
         .bind(r.status.as_str())
@@ -253,6 +258,7 @@ impl ContentRepo<'_> {
         .bind(r.author_id)
         .bind(r.album_id)
         .bind(r.artist_id)
+        .bind(r.radio_show_id)
         .bind(r.approved_at)
         .bind(r.available_at)
         .bind(now_ms())
@@ -263,7 +269,7 @@ impl ContentRepo<'_> {
     }
 
     pub async fn delete(&self, id: i64) -> Result<bool> {
-        let r = sqlx::query("DELETE FROM requests WHERE id = ? AND media_kind IN ('book', 'music')")
+        let r = sqlx::query("DELETE FROM requests WHERE id = ? AND media_kind IN ('book', 'music', 'radio')")
             .bind(id)
             .execute(self.0.pool())
             .await?;

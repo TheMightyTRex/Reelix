@@ -1,6 +1,7 @@
 //! A small cached, paced JSON reader shared by the providers.
 //!
-//! - Responses are cached in memory per URL for `ttl` (bounded to [`MAX_ENTRIES`]).
+//! - Responses are cached in memory per URL for `ttl` (bounded to [`MAX_ENTRIES`]);
+//!   [`JsonReader::get_for`] reads with another cache time (e.g. Discover lists).
 //! - Requests are spaced at least `interval` apart.
 //! - `429 Too Many Requests` honours `Retry-After`: a short wait (≤ [`MAX_INLINE_WAIT`]) is
 //!   slept once and retried; a longer one fails with [`ProviderError::RateLimited`] and
@@ -64,7 +65,18 @@ impl JsonReader {
     /// GETs `url` as JSON (cached). `headers` are added to the request (not part of the cache
     /// key). `404`/`410` → [`ProviderError::NotFound`].
     pub async fn get(&self, url: &str, headers: HeaderMap) -> Result<Arc<serde_json::Value>, ProviderError> {
-        if let Some(v) = self.cached(url) {
+        self.get_for(url, headers, self.ttl).await
+    }
+
+    /// [`get`](Self::get) with its own cache time `ttl` for this URL (same pacing, rate-limit
+    /// handling and size limit).
+    pub async fn get_for(
+        &self,
+        url: &str,
+        headers: HeaderMap,
+        ttl: Duration,
+    ) -> Result<Arc<serde_json::Value>, ProviderError> {
+        if let Some(v) = self.cached(url, ttl) {
             return Ok(v);
         }
         let mut retried = false;
@@ -125,7 +137,9 @@ impl JsonReader {
                 ProviderError::Parse(format!("{} sent something that is not JSON ({e})", self.source))
             })?;
             let v = Arc::new(v);
-            self.store(url, v.clone());
+            if !ttl.is_zero() {
+                self.store(url, v.clone());
+            }
             return Ok(v);
         }
     }
@@ -134,17 +148,15 @@ impl JsonReader {
         ProviderError::Network(format!("{}: {}", self.source, e.without_url()))
     }
 
-    fn cached(&self, url: &str) -> Option<Arc<serde_json::Value>> {
+    fn cached(&self, url: &str, ttl: Duration) -> Option<Arc<serde_json::Value>> {
         let cache = self.cache.lock().ok()?;
         let (at, v) = cache.get(url)?;
-        (at.elapsed() < self.ttl).then(|| v.clone())
+        (at.elapsed() < ttl).then(|| v.clone())
     }
 
     fn store(&self, url: &str, v: Arc<serde_json::Value>) {
-        if self.ttl.is_zero() {
-            return;
-        }
         let Ok(mut cache) = self.cache.lock() else { return };
+
         if cache.len() >= MAX_ENTRIES {
             let ttl = self.ttl;
             cache.retain(|_, (at, _)| at.elapsed() < ttl);

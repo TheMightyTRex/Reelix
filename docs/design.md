@@ -976,6 +976,7 @@ Permissions are **bitflags**. Roles are presets that you can customize per user.
 | CREATE_ISSUES | ✓ | ✓ | ✓ | ✓ |
 | VIEW_CALENDAR / VIEW_QUEUE | ✓ | ✓ | opt | opt |
 | REQUEST_BOOK / REQUEST_MUSIC | ✓ | ✓ | ✓ | opt |
+| REQUEST_RADIO / AUTO_APPROVE_RADIO | ✓ | ✓ | ✓ | opt |
 
 "opt" means off in the preset, but it can be ticked per user. VIEW_CALENDAR opens the calendar, and VIEW_QUEUE opens a read-only download queue. Managing queue items still needs MANAGE_LIBRARY.
 

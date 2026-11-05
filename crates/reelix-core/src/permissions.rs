@@ -26,6 +26,8 @@ bitflags! {
         const REQUEST_MUSIC      = 1 << 17;
         const AUTO_APPROVE_BOOK  = 1 << 18;
         const AUTO_APPROVE_MUSIC = 1 << 19;
+        const REQUEST_RADIO      = 1 << 20;
+        const AUTO_APPROVE_RADIO = 1 << 21;
     }
 }
 
@@ -51,7 +53,9 @@ impl Permissions {
         .union(Self::REQUEST_BOOK)
         .union(Self::REQUEST_MUSIC)
         .union(Self::AUTO_APPROVE_BOOK)
-        .union(Self::AUTO_APPROVE_MUSIC);
+        .union(Self::AUTO_APPROVE_MUSIC)
+        .union(Self::REQUEST_RADIO)
+        .union(Self::AUTO_APPROVE_RADIO);
 
     /// Role preset: basic requester.
     pub const ROLE_USER: Self = Self::REQUEST_MOVIE
@@ -127,6 +131,15 @@ mod tests {
             | Permissions::AUTO_APPROVE_MUSIC;
         assert!(!Permissions::ROLE_USER.intersects(content));
         assert!(Permissions::ROLE_POWER_USER.contains(content));
+    }
+
+    #[test]
+    fn radio_bits_are_stable() {
+        assert_eq!(Permissions::REQUEST_RADIO.bits(), 1 << 20);
+        assert_eq!(Permissions::AUTO_APPROVE_RADIO.bits(), 1 << 21);
+        let radio = Permissions::REQUEST_RADIO | Permissions::AUTO_APPROVE_RADIO;
+        assert!(!Permissions::ROLE_USER.intersects(radio));
+        assert!(Permissions::ROLE_POWER_USER.contains(radio));
     }
 
     #[test]

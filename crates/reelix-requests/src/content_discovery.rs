@@ -1,16 +1,18 @@
-//! Book (Open Library) and music (MusicBrainz) search and request views, overlaid with
-//! library availability and request state.
+//! Book (Open Library), music (MusicBrainz) and radio (the enabled radio sources) search,
+//! Discover rows and request views, overlaid with library availability and request state.
 
 use std::collections::HashMap;
 
 use reelix_api_types::requests::{
     ArtistItemDto, AvailabilityStatus, BookSearchPageDto, ContentDetailDto, ContentItemDto,
-    ContentRequestAbilityDto, ContentRequestKind, ContentRowDto, MusicSearchPageDto, UserBriefDto,
+    ContentRequestAbilityDto, ContentRequestKind, ContentRowDto, MusicSearchPageDto, RadioDiscoverDto,
+    RadioSearchPageDto, UserBriefDto,
 };
 use reelix_core::{BookFormat, Permissions};
 
 use crate::content::{
-    advanced_allowed, content_permission, default_formats, kind_word, requested_formats, to_brief,
+    advanced_allowed, check_radio_link, content_permission, default_formats, kind_word, not_allowed,
+    requested_formats, to_brief,
 };
 use crate::content_repo::ContentRow;
 use crate::discovery::status_rank;
@@ -36,11 +38,21 @@ impl RequestService {
         hits: Vec<ContentHit>,
     ) -> Result<Vec<ContentItemDto>> {
         let ids: Vec<String> = hits.iter().map(|h| h.foreign_id.clone()).collect();
-        let avail = self
+        let mut avail = self
             .library
             .content_availability(kind, &ids)
             .await
             .map_err(|e| Error::Upstream(format!("library: {e}")))?;
+        // Items the source already matched to the library (radio shows by feed).
+        for h in &hits {
+            if let Some(id) = h.in_library {
+                avail.entry(h.foreign_id.clone()).or_insert(Availability {
+                    status: AvailabilityStatus::Available,
+                    library_id: Some(id),
+                    ..Availability::default()
+                });
+            }
+        }
         let requests = self.content_requests_by_id(actor, kind, &ids, false).await?;
         let users = requests.values().flatten().map(|r| r.user_id).collect::<Vec<_>>();
         let briefs = self.users_repo().briefs(users).await?;
@@ -96,21 +108,51 @@ impl RequestService {
         })
     }
 
-    /// `GET /discover/content/{kind}/{row}`: a Discover row of books or albums with
-    /// availability. Hides available items when the request settings say so.
+    /// `GET /search/radio?q=`: radio shows from the enabled radio sources, with follow and
+    /// request state.
+    pub async fn search_radio(&self, actor: &Actor, q: &str) -> Result<RadioSearchPageDto> {
+        let q = q.trim();
+        if q.is_empty() {
+            return Ok(RadioSearchPageDto { results: Vec::new() });
+        }
+        check_radio_link(actor, q).await?;
+        let hits = self.library.lookup_radio(q).await.map_err(upstream)?;
+        let hits = hits.iter().map(ContentHit::radio).collect();
+        Ok(RadioSearchPageDto {
+            results: self.content_items(actor, ContentRequestKind::Radio, hits).await?,
+        })
+    }
+
+    /// `GET /discover/genres/radio`: the radio Discover rows and categories of the enabled
+    /// sources.
+    pub async fn radio_lists(&self) -> Result<RadioDiscoverDto> {
+        self.library.radio_lists().await.map_err(upstream)
+    }
+
+    /// `GET /discover/content/{kind}/{row}`: a Discover row of books, albums or radio shows
+    /// with availability. Hides available items when the request settings say so.
     pub async fn discover_content(
         &self,
         actor: &Actor,
         kind: ContentRequestKind,
         row: &str,
     ) -> Result<ContentRowDto> {
-        if !kind.discover_rows().iter().any(|(id, _)| *id == row) {
-            return Err(Error::NotFound(format!(
-                "unknown {} discover row: {row}",
-                kind.as_str()
-            )));
-        }
-        let hits = self.library.discover_content(kind, row).await.map_err(upstream)?;
+        let hits = if kind == ContentRequestKind::Radio {
+            let lists = self.radio_lists().await?;
+            if !lists.rows.iter().chain(&lists.categories).any(|l| l.id == row) {
+                return Err(Error::NotFound(format!("unknown radio discover row: {row}")));
+            }
+            let hits = self.library.radio_discover(row).await.map_err(upstream)?;
+            hits.iter().map(ContentHit::radio).collect()
+        } else {
+            if !kind.discover_rows().iter().any(|(id, _)| *id == row) {
+                return Err(Error::NotFound(format!(
+                    "unknown {} discover row: {row}",
+                    kind.as_str()
+                )));
+            }
+            self.library.discover_content(kind, row).await.map_err(upstream)?
+        };
         let mut results = self.content_items(actor, kind, hits).await?;
         if self.request_settings().await?.hide_available {
             results.retain(|i| i.availability != AvailabilityStatus::Available);
@@ -118,7 +160,8 @@ impl RequestService {
         Ok(ContentRowDto { results })
     }
 
-    /// `GET /media/book/{workId}` / `GET /media/album/{releaseGroupId}`: the request view.
+    /// `GET /media/book/{workId}` / `GET /media/album/{releaseGroupId}` /
+    /// `GET /media/radio/{provider}/{externalId}`: the request view.
     pub async fn content_detail(
         &self,
         actor: &Actor,
@@ -126,11 +169,9 @@ impl RequestService {
         id: &str,
     ) -> Result<ContentDetailDto> {
         let id = id.trim();
-        let hit = self
-            .library
-            .content(kind, id)
-            .await
-            .map_err(upstream)?
+        let (hit, radio) = self
+            .lookup_content(actor, kind, id)
+            .await?
             .ok_or_else(|| Error::NotFound(format!("{} not found", kind_word(kind))))?;
         let overview = hit.overview.clone();
         let foreign_id = hit.foreign_id.clone();
@@ -164,19 +205,20 @@ impl RequestService {
                     .filter(|f| !taken.contains(f))
                     .collect()
             }
-            ContentRequestKind::Music => Vec::new(),
+            ContentRequestKind::Music | ContentRequestKind::Radio => Vec::new(),
         };
         let mut reason = None;
         if !actor.permissions.has(content_permission(kind)) {
-            reason = Some(match kind {
-                ContentRequestKind::Book => "You are not allowed to request books".to_string(),
-                ContentRequestKind::Music => "You are not allowed to request music".to_string(),
-            });
+            let r = not_allowed(kind);
+            reason = Some(r[..1].to_uppercase() + &r[1..]);
         } else if item.availability == AvailabilityStatus::Available {
-            reason = Some("Already available".into());
+            reason = Some(match kind {
+                ContentRequestKind::Radio => "Already followed".into(),
+                _ => "Already available".into(),
+            });
         } else if match kind {
             ContentRequestKind::Book => formats.is_empty(),
-            ContentRequestKind::Music => !active.is_empty(),
+            ContentRequestKind::Music | ContentRequestKind::Radio => !active.is_empty(),
         } {
             reason = Some("Already requested".into());
         } else if !actor.permissions.has(Permissions::MANAGE_REQUESTS) {
@@ -185,6 +227,7 @@ impl RequestService {
             let usage = match kind {
                 ContentRequestKind::Book => &q.book,
                 ContentRequestKind::Music => &q.music,
+                ContentRequestKind::Radio => &q.radio,
             };
             if usage.restricted {
                 reason = Some(format!(
@@ -202,7 +245,7 @@ impl RequestService {
                     .collect();
                 if d.is_empty() { formats.clone() } else { d }
             }
-            ContentRequestKind::Music => Vec::new(),
+            ContentRequestKind::Music | ContentRequestKind::Radio => Vec::new(),
         };
         Ok(ContentDetailDto {
             item,
@@ -215,6 +258,7 @@ impl RequestService {
                 default_formats,
                 reason,
             },
+            radio,
         })
     }
 }

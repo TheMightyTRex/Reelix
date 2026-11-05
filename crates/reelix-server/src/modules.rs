@@ -198,6 +198,7 @@ impl Modules {
                             deps.http.clone(),
                             Default::default(),
                         ),
+                        radio: radio.clone(),
                     }),
                     media_servers: Arc::new(media_servers),
                     metadata: Arc::new(metadata),

@@ -33,6 +33,7 @@ impl RequestService {
             || s.tv_quota_days == 0
             || s.book_quota_days == 0
             || s.music_quota_days == 0
+            || s.radio_quota_days == 0
         {
             return Err(Error::Validation("quota days must be at least 1".into()));
         }

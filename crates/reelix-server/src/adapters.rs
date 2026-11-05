@@ -12,14 +12,20 @@ use reelix_api_types::library::{
     SearchRequest, SeasonMonitorRequest, SeriesType,
 };
 use reelix_api_types::music::{AddAlbumRequest as LibAddAlbum, AlbumSearchRequest, AlbumType};
-use reelix_api_types::requests::{AvailabilityStatus, ContentRequestKind, NamedIdDto, RootFolderOptionDto};
+use reelix_api_types::radio::{
+    AddRadioShowRequest, RadioSearchRequest, RadioShowHitDto, RadioShowPreviewDto,
+};
+use reelix_api_types::requests::{
+    AvailabilityStatus, ContentRequestKind, NamedIdDto, RadioDiscoverDto, RootFolderOptionDto,
+    split_radio_foreign_id,
+};
 use reelix_core::{BookFormat, ContentKind, MediaKind};
 use reelix_db::Db;
 use reelix_library::{Availability as LibAvailability, AvailabilityStatus as LibStatus, LibraryService};
 use reelix_parser::QualityFamily;
 use reelix_requests::gateway::{
-    AddAlbumRequest, AddBookRequest, AddMovieRequest, AddSeriesRequest, ArtistHit, Availability,
-    ContentAdded, ContentHit, LibraryGateway,
+    AddAlbumRequest, AddBookRequest, AddMovieRequest, AddRadioRequest, AddSeriesRequest, ArtistHit,
+    Availability, ContentAdded, ContentHit, LibraryGateway,
 };
 
 /// [`LibraryGateway`] backed by the real [`LibraryService`].
@@ -34,6 +40,19 @@ pub struct LibraryAdapter {
     pub open_library: reelix_metadata::OpenLibrary,
     /// Music Discover rows.
     pub listenbrainz: reelix_metadata::ListenBrainz,
+    /// Radio Discover, search, previews and follows.
+    pub radio: Arc<reelix_radio::RadioService>,
+}
+
+/// A radio error as an upstream failure (`None` for an unknown show, id or source).
+fn radio_missing(e: &reelix_radio::RadioError) -> bool {
+    use reelix_radio::{ProviderError, RadioError};
+    matches!(
+        e,
+        RadioError::NotFound(_)
+            | RadioError::Validation(_)
+            | RadioError::Provider(ProviderError::NotFound(_))
+    )
 }
 
 fn status(s: LibStatus) -> AvailabilityStatus {
@@ -101,6 +120,7 @@ impl LibraryAdapter {
     async fn content_roots(&self, kind: ContentKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
         let roots = match kind {
             ContentKind::Music => self.music.root_folders().await.map_err(|e| anyhow!("{e}"))?,
+            ContentKind::Radio => self.radio.root_folders().await.map_err(|e| anyhow!("{e}"))?,
             _ => self.books.root_folders().await.map_err(|e| anyhow!("{e}"))?,
         };
         Ok(roots
@@ -342,6 +362,32 @@ impl LibraryGateway for LibraryAdapter {
         kind: ContentRequestKind,
         ids: &[String],
     ) -> anyhow::Result<HashMap<String, Availability>> {
+        if kind == ContentRequestKind::Radio {
+            // A followed show is in the library (there is nothing to download for it as such).
+            let keys: Vec<(String, String)> = ids
+                .iter()
+                .filter_map(|id| split_radio_foreign_id(id))
+                .map(|(p, e)| (p.to_owned(), e.to_owned()))
+                .collect();
+            let followed = self
+                .radio
+                .followed_shows(&keys)
+                .await
+                .map_err(|e| anyhow!("{e}"))?;
+            return Ok(followed
+                .into_iter()
+                .map(|((p, e), id)| {
+                    (
+                        reelix_api_types::requests::radio_foreign_id(&p, &e),
+                        Availability {
+                            status: AvailabilityStatus::Available,
+                            library_id: Some(id),
+                            ..Availability::default()
+                        },
+                    )
+                })
+                .collect());
+        }
         let (map, column) = match kind {
             ContentRequestKind::Book => (
                 self.books.availability(ids).await.map_err(|e| anyhow!("{e}"))?,
@@ -351,6 +397,7 @@ impl LibraryGateway for LibraryAdapter {
                 self.music.availability(ids).await.map_err(|e| anyhow!("{e}"))?,
                 "album_id",
             ),
+            ContentRequestKind::Radio => unreachable!("handled above"),
         };
         let mut out: HashMap<String, Availability> =
             map.into_iter().map(|(id, a)| (id, availability(a))).collect();
@@ -384,6 +431,7 @@ impl LibraryGateway for LibraryAdapter {
                 cover: h.cover,
                 album_type: None,
                 overview: None,
+                in_library: None,
             })
             .collect())
     }
@@ -401,6 +449,7 @@ impl LibraryGateway for LibraryAdapter {
                 cover: h.cover,
                 album_type: Some(album_type_name(h.album_type).to_string()),
                 overview: None,
+                in_library: None,
             })
             .collect())
     }
@@ -426,6 +475,7 @@ impl LibraryGateway for LibraryAdapter {
                         cover: w.cover_url,
                         album_type: None,
                         overview: None,
+                        in_library: None,
                     })
                     .collect())
             }
@@ -455,10 +505,75 @@ impl LibraryGateway for LibraryAdapter {
                         cover: a.cover_url,
                         album_type: a.album_type,
                         overview: None,
+                        in_library: None,
                     })
                     .collect())
             }
+            ContentRequestKind::Radio => Ok(self
+                .radio_discover(row)
+                .await?
+                .iter()
+                .map(ContentHit::radio)
+                .collect()),
         }
+    }
+
+    async fn radio_lists(&self) -> anyhow::Result<RadioDiscoverDto> {
+        self.radio.discover_lists().await.map_err(|e| anyhow!("{e}"))
+    }
+
+    async fn radio_discover(&self, row: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
+        self.radio.discover(row).await.map_err(|e| anyhow!("{e}"))
+    }
+
+    async fn lookup_radio(&self, term: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
+        self.radio.search(term, None).await.map_err(|e| anyhow!("{e}"))
+    }
+
+    async fn radio_preview(
+        &self,
+        provider: &str,
+        external_id: &str,
+    ) -> anyhow::Result<Option<RadioShowPreviewDto>> {
+        match self.radio.preview_show(provider, external_id).await {
+            Ok(p) => Ok(Some(p)),
+            Err(e) if radio_missing(&e) => Ok(None),
+            Err(e) => Err(anyhow!("{e}")),
+        }
+    }
+
+    /// Follows the show with the radio settings' default follow choice; an already followed
+    /// show (also under another id, e.g. its feed) is returned as it is.
+    async fn add_radio(&self, req: AddRadioRequest) -> anyhow::Result<ContentAdded> {
+        let key = (req.provider.clone(), req.external_id.clone());
+        let added = self
+            .radio
+            .add_show(AddRadioShowRequest {
+                provider: Some(req.provider),
+                external_id: Some(req.external_id),
+                link: None,
+                follow: None,
+                monitored: true,
+                root_folder_id: req.root_folder_id,
+                quality_profile_id: req.quality_profile_id,
+                tags: req.tags,
+            })
+            .await;
+        let id = match added {
+            Ok(show) => show.id,
+            Err(reelix_radio::RadioError::Conflict(msg)) => self
+                .radio
+                .followed_shows(std::slice::from_ref(&key))
+                .await
+                .map_err(|e| anyhow!("{e}"))?
+                .remove(&key)
+                .ok_or_else(|| anyhow!("{msg}"))?,
+            Err(e) => return Err(anyhow!("{e}")),
+        };
+        Ok(ContentAdded {
+            item_id: id,
+            parent_id: None,
+        })
     }
 
     async fn lookup_artists(&self, term: &str) -> anyhow::Result<Vec<ArtistHit>> {
@@ -521,6 +636,16 @@ impl LibraryGateway for LibraryAdapter {
                     Err(e) if is_not_found(&e.to_string()) => Ok(None),
                     Err(e) => Err(e),
                 }
+            }
+            ContentRequestKind::Radio => {
+                let Some((provider, external_id)) = split_radio_foreign_id(id) else {
+                    return Ok(None);
+                };
+                Ok(self.radio_preview(provider, external_id).await?.map(|p| {
+                    let mut hit = ContentHit::radio(&p.show);
+                    hit.foreign_id = id.to_owned();
+                    hit
+                }))
             }
         }
     }
@@ -675,6 +800,16 @@ impl LibraryGateway for LibraryAdapter {
                     .await
                     .map_err(|e| anyhow!("{e}"))?;
             }
+            ContentRequestKind::Radio => {
+                // The shows' wanted episodes (none when the follow choice is "from now on").
+                self.radio
+                    .request_search(RadioSearchRequest {
+                        kind: ContentSearchKind::Parent,
+                        ids: ids.to_vec(),
+                    })
+                    .await
+                    .map_err(|e| anyhow!("{e}"))?;
+            }
         }
         Ok(())
     }
@@ -682,7 +817,7 @@ impl LibraryGateway for LibraryAdapter {
     async fn content_profiles(&self, kind: ContentKind) -> anyhow::Result<Vec<NamedIdDto>> {
         if !matches!(
             kind,
-            ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Music
+            ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Music | ContentKind::Radio
         ) {
             return Ok(Vec::new());
         }
@@ -704,7 +839,7 @@ impl LibraryGateway for LibraryAdapter {
     async fn content_root_folders(&self, kind: ContentKind) -> anyhow::Result<Vec<RootFolderOptionDto>> {
         if !matches!(
             kind,
-            ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Music
+            ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Music | ContentKind::Radio
         ) {
             return Ok(Vec::new());
         }

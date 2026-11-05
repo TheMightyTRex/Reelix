@@ -1,8 +1,10 @@
 //! `/discover` — the requester home: hero carousel, feed rows, genres, networks and studios —
-//! and `/discover/{feed}` ("see all" grids with paging). `/discover?tab=books|music` shows the
-//! book / music search (users with REQUEST_BOOK / REQUEST_MUSIC).
+//! and `/discover/{feed}` ("see all" grids with paging). `/discover?tab=books|music|radio`
+//! shows the book / music / radio search and rows (users with REQUEST_BOOK / REQUEST_MUSIC;
+//! radio for REQUEST_RADIO or MANAGE_LIBRARY, who follow shows directly).
 
 pub mod content;
+pub mod radio;
 
 use std::time::Duration;
 
@@ -86,7 +88,8 @@ fn feed_url(feed: &str, page: u32) -> String {
     format!("/discover/{feed}?page={page}")
 }
 
-/// Movies & TV / Books / Music tabs; books and music only for users who may request them.
+/// Movies & TV / Books / Music / Radio tabs; books, music and radio only for users who may
+/// request (or, for radio, follow) them.
 #[component]
 pub fn DiscoverPage() -> impl IntoView {
     let auth = AuthState::expect();
@@ -94,12 +97,13 @@ pub fn DiscoverPage() -> impl IntoView {
     let tab = Memo::new(move |_| query.with(|q| q.get("tab").unwrap_or_default()));
     let books = move || auth.has(Permissions::REQUEST_BOOK);
     let music = move || auth.has(Permissions::REQUEST_MUSIC);
+    let radio = move || auth.has_any(Permissions::REQUEST_RADIO | Permissions::MANAGE_LIBRARY);
     let tabs = move || {
-        (books() || music()).then(|| {
+        (books() || music() || radio()).then(|| {
             let current = tab.get();
             let item = |value: &'static str, label: &'static str, icon: &'static str| {
-                let active =
-                    current == value || (value.is_empty() && !matches!(current.as_str(), "books" | "music"));
+                let active = current == value
+                    || (value.is_empty() && !matches!(current.as_str(), "books" | "music" | "radio"));
                 let href = if value.is_empty() {
                     "/discover".to_string()
                 } else {
@@ -117,6 +121,7 @@ pub fn DiscoverPage() -> impl IntoView {
                     {item("", "Movies & TV", "film")}
                     {books().then(|| item("books", "Books", "books"))}
                     {music().then(|| item("music", "Music", "music"))}
+                    {radio().then(|| item("radio", "Radio", "radio"))}
                 </nav>
             }
         })
@@ -126,6 +131,10 @@ pub fn DiscoverPage() -> impl IntoView {
         "music" if music() => {
             view! { <content::ContentDiscover kind=ContentRequestKind::Music /> }.into_any()
         }
+        "radio" if radio() => {
+            view! { <content::ContentDiscover kind=ContentRequestKind::Radio /> }.into_any()
+        }
+
         _ => view! { <MoviesTvDiscover /> }.into_any(),
     };
     view! {
