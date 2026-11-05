@@ -75,7 +75,7 @@ pub fn schema() -> ProviderSchema {
 }
 
 /// Columns requested from `d.multicall2`, in order.
-pub const COLUMNS: [&str; 13] = [
+pub const COLUMNS: [&str; 14] = [
     "d.hash=",
     "d.name=",
     "d.custom1=",
@@ -89,6 +89,7 @@ pub const COLUMNS: [&str; 13] = [
     "d.hashing=",
     "d.base_path=",
     "d.message=",
+    "d.timestamp.finished=",
 ];
 
 /// One `d.multicall2` row.
@@ -108,6 +109,8 @@ pub struct RtTorrent {
     pub hashing: bool,
     pub base_path: String,
     pub message: String,
+    /// When the download finished (Unix seconds), 0 while it is not finished.
+    pub finished: i64,
 }
 
 impl RtTorrent {
@@ -128,6 +131,7 @@ impl RtTorrent {
             hashing: n(10) != 0,
             base_path: s(11),
             message: s(12),
+            finished: n(13),
         })
     }
 }
@@ -168,6 +172,9 @@ pub fn to_item(t: RtTorrent) -> DownloadItem {
     item.output_path = Some(t.base_path.clone()).filter(|p| !p.is_empty());
     item.message = Some(t.message.clone()).filter(|m| !m.is_empty());
     item.seed_ratio = Some(t.ratio as f64 / 1000.0);
+    // Without this, a finished torrent looks never-completed to the monitor, so it is adopted again once
+    // its tracked row is pruned after 30 days.
+    item.completed_at = (t.complete && t.finished > 0).then_some(t.finished);
     // rTorrent stops (closes) torrents itself once its ratio group limit is reached.
     let done = t.complete && !t.is_active;
     item.can_be_removed = done;
@@ -444,6 +451,7 @@ mod tests {
             hashing,
             base_path: "/d/n".into(),
             message: msg.into(),
+            finished: if complete { 1_700_000_000 } else { 0 },
         }
     }
 
@@ -460,7 +468,17 @@ mod tests {
         );
         let item = to_item(t(true, false, false, false, ""));
         assert!(item.can_be_removed);
+        assert_eq!(item.completed_at, Some(1_700_000_000));
+        assert_eq!(to_item(t(false, true, true, false, "")).completed_at, None);
         assert_eq!(item.seed_ratio, Some(1.5));
         assert_eq!(url_decode("tv%20shows"), "tv shows");
+    }
+
+    #[test]
+    fn rows_without_the_finished_column_still_parse() {
+        let row: Vec<XValue> = ["AB", "n", "tv"].iter().map(|v| XValue::from(*v)).collect();
+        let t = RtTorrent::from_row(&row).unwrap();
+        assert_eq!(t.finished, 0);
+        assert_eq!(to_item(t).completed_at, None);
     }
 }
