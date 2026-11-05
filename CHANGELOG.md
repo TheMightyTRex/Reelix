@@ -6,6 +6,17 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-05
+
+### Added
+- **Radio on Discover:** radio programmes and podcasts now have their own tab on Discover and Search, next to books and music.
+  - **Rows:** Apple Podcasts top charts and 19 categories for your country; on BBC Sounds, Popular and seven categories (UK only); and Podcast Index trending, once it's set up.
+  - **Show view:** synopsis, station and the newest episodes. Shows you already follow are marked.
+  - **Follow or Request:** library managers can follow a show straight away. Other users request it like a book or album, with radio permissions, auto-approve, default profile, root folder and tags, and a radio quota. Approving a request follows the show with your default follow choice.
+
+### Security
+- Podcast links read for Discover and requests can only reach public addresses. Private addresses are refused when connecting and on every redirect, so a public link can't lead the server into your network.
+
 ## [0.8.1] - 2026-11-05
 
 ### Fixed
