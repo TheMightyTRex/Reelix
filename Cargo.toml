@@ -105,7 +105,7 @@ tokio-util = "0.7"
 toml = "1.1"
 toml_edit = "0.22"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["trace", "fs", "set-header", "compression-gzip", "timeout"] }
+tower-http = { version = "0.7", features = ["trace", "fs", "set-header", "compression-gzip", "timeout"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
