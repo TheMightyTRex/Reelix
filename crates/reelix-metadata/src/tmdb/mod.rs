@@ -77,8 +77,10 @@ impl Default for TmdbOptions {
             language: "en-US".into(),
             region: None,
             include_adult: false,
-            rate_limit: 40,
-            rate_period: Duration::from_secs(10),
+            // TMDB dropped its 40-per-10s limit in 2019 and now tolerates roughly 50 requests
+            // per second per IP; stay well under that. 429s are still retried with back-off.
+            rate_limit: 20,
+            rate_period: Duration::from_secs(1),
             retry: RetryPolicy::default(),
             details_ttl: Duration::from_secs(6 * 3600),
             feed_ttl: Duration::from_secs(30 * 60),
