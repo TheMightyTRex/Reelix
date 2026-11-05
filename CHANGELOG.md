@@ -8,6 +8,14 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [0.8.3] - 2026-11-05
 
+### Added
+- **Soulseek support through [slskd](https://github.com/slskd/slskd)**, as an indexer and a download client, for music, books, audiobooks and radio. See `docs/soulseek.md`.
+  - **Search:** Reelix searches slskd and turns each peer's folder into one release (for example a whole album), named and tagged with its format, such as FLAC 24-96, MP3 320 or M4B. Releases are scored by your quality profiles and custom formats.
+  - **Peers:** you can skip peers with no free upload slot, a long queue or a slow connection. Among otherwise equal results, a free slot ranks first.
+  - **Download and import:** grabbing a release queues its files in slskd, and progress shows in the queue. Finished folders are imported from slskd's downloads folder, with remote path mappings for Docker.
+  - **Delay profiles and blocklist:** delay profiles gain a Soulseek switch and delay. A failed download blocklists that peer's folder only, so the same album from another peer can still be grabbed.
+  - **Setup:** adding the slskd download client also adds the matching indexer.
+
 ### Changed
 - **Infinite scrolling.** These pages now load more as you scroll, instead of using page buttons or "Show more":
   - library pages: Movies, Series, Music artists, Books authors and Radio shows
