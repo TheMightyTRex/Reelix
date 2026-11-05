@@ -565,8 +565,8 @@ begin
     Exit;
   end;
   if RunReelix(InstalledExe, 'config relocate --from "' + Src + '" --data-dir "' + Data + '"', Err) <> 0 then
-    SuppressibleMsgBox('config.toml could not be updated for the new data folder:' + #13#10#13#10 + Err +
-      #13#10#13#10 + 'Check the paths in ' + Data + '\config.toml.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('config.toml could not be updated for the new data folder:' + #13#10#13#10 +
+      Err + #13#10#13#10 + 'Check the paths in ' + Data + '\config.toml.', mbError, MB_OK, IDOK);
   PreparedSummary := 'The data of the old Reelix (' + Src + ') was copied to ' + Data + '. The old folder ' +
     'was left as it is; delete it once everything works here.';
 end;
