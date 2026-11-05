@@ -623,3 +623,58 @@ async fn plex_pin_flow() {
     assert_eq!(st.token.as_deref(), Some("tok"));
     assert_eq!(st.servers[0].uris[0], "http://10.0.0.2:32400");
 }
+
+#[tokio::test]
+async fn slskd_client_adds_its_indexer_once_with_the_secret_kept() {
+    let e = env().await;
+    let input = |name: &str, add: bool| ProviderInput {
+        implementation: "slskd".into(),
+        name: name.into(),
+        enabled: true,
+        priority: 1,
+        tags: vec![],
+        settings: json!({"host": "192.168.1.20", "port": 5030, "api_key": "slsk-key",
+                         "downloads_dir": "/app/downloads", "add_indexer": add}),
+    };
+    // Private LAN addresses are fine for download clients (and so for the slskd indexer).
+    let client = e
+        .svc
+        .create(ProviderKind::DownloadClient, &input("slskd", true))
+        .await
+        .unwrap();
+    let dto = e.svc.to_dto(&client);
+    assert_eq!(dto.protocol, Some(reelix_core::Protocol::Soulseek));
+    assert_eq!(dto.settings["api_key"], SECRET_MASK);
+    let indexers = e.svc.list(ProviderKind::Indexer).await.unwrap();
+    assert_eq!(indexers.len(), 1);
+    let ix = &indexers[0];
+    assert_eq!((ix.implementation.as_str(), ix.name.as_str()), ("slskd", "slskd"));
+    assert_eq!(ix.setting_str("base_url"), Some("http://192.168.1.20:5030"));
+    // Stored encrypted, decrypted on read, masked in the API.
+    assert_eq!(ix.setting_str("api_key"), Some("slsk-key"));
+    assert_eq!(e.svc.to_dto(ix).settings["api_key"], SECRET_MASK);
+    assert_eq!(e.svc.to_dto(ix).protocol, Some(reelix_core::Protocol::Soulseek));
+    assert_eq!(e.svc.indexers().len(), 1);
+    assert_eq!(
+        e.svc.download_clients_for(reelix_core::Protocol::Soulseek).len(),
+        1
+    );
+    let raw: Vec<String> = sqlx::query_scalar("SELECT settings FROM providers")
+        .fetch_all(e.db.pool())
+        .await
+        .unwrap();
+    assert!(
+        raw.len() == 2 && raw.iter().all(|s| !s.contains("slsk-key")),
+        "{raw:?}"
+    );
+
+    // A second client for the same address doesn't duplicate it; opting out adds nothing.
+    e.svc
+        .create(ProviderKind::DownloadClient, &input("slskd 2", true))
+        .await
+        .unwrap();
+    let mut other = input("other", false);
+    other.settings["host"] = json!("10.0.0.9");
+    e.svc.create(ProviderKind::DownloadClient, &other).await.unwrap();
+    assert_eq!(e.svc.list(ProviderKind::Indexer).await.unwrap().len(), 1);
+}

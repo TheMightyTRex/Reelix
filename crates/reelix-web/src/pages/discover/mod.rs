@@ -1,8 +1,10 @@
 //! `/discover` — the requester home: hero carousel, feed rows, genres, networks and studios —
-//! and `/discover/{feed}` ("see all" grids with paging). `/discover?tab=books|music` shows the
-//! book / music search (users with REQUEST_BOOK / REQUEST_MUSIC).
+//! and `/discover/{feed}` ("see all" grids with paging). `/discover?tab=books|music|radio`
+//! shows the book / music / radio search and rows (users with REQUEST_BOOK / REQUEST_MUSIC;
+//! radio for REQUEST_RADIO or MANAGE_LIBRARY, who follow shows directly).
 
 pub mod content;
+pub mod radio;
 
 use std::time::Duration;
 
@@ -13,6 +15,7 @@ use reelix_api_types::Permissions;
 use reelix_api_types::requests::{ContentRequestKind, DiscoverItemDto, DiscoverPageDto, GenreDto};
 
 use crate::api;
+use crate::components::infinite::InfiniteSentinel;
 use crate::components::media_card::{MediaBadge, MediaCard, MediaCardSkeleton, MediaGrid, MediaRow};
 use crate::components::request_status::{item_badge, kind_label, media_href};
 use crate::components::{EmptyState, ErrorBox, Icon};
@@ -86,7 +89,8 @@ fn feed_url(feed: &str, page: u32) -> String {
     format!("/discover/{feed}?page={page}")
 }
 
-/// Movies & TV / Books / Music tabs; books and music only for users who may request them.
+/// Movies & TV / Books / Music / Radio tabs; books, music and radio only for users who may
+/// request (or, for radio, follow) them.
 #[component]
 pub fn DiscoverPage() -> impl IntoView {
     let auth = AuthState::expect();
@@ -94,12 +98,13 @@ pub fn DiscoverPage() -> impl IntoView {
     let tab = Memo::new(move |_| query.with(|q| q.get("tab").unwrap_or_default()));
     let books = move || auth.has(Permissions::REQUEST_BOOK);
     let music = move || auth.has(Permissions::REQUEST_MUSIC);
+    let radio = move || auth.has_any(Permissions::REQUEST_RADIO | Permissions::MANAGE_LIBRARY);
     let tabs = move || {
-        (books() || music()).then(|| {
+        (books() || music() || radio()).then(|| {
             let current = tab.get();
             let item = |value: &'static str, label: &'static str, icon: &'static str| {
-                let active =
-                    current == value || (value.is_empty() && !matches!(current.as_str(), "books" | "music"));
+                let active = current == value
+                    || (value.is_empty() && !matches!(current.as_str(), "books" | "music" | "radio"));
                 let href = if value.is_empty() {
                     "/discover".to_string()
                 } else {
@@ -117,6 +122,7 @@ pub fn DiscoverPage() -> impl IntoView {
                     {item("", "Movies & TV", "film")}
                     {books().then(|| item("books", "Books", "books"))}
                     {music().then(|| item("music", "Music", "music"))}
+                    {radio().then(|| item("radio", "Radio", "radio"))}
                 </nav>
             }
         })
@@ -126,6 +132,10 @@ pub fn DiscoverPage() -> impl IntoView {
         "music" if music() => {
             view! { <content::ContentDiscover kind=ContentRequestKind::Music /> }.into_any()
         }
+        "radio" if radio() => {
+            view! { <content::ContentDiscover kind=ContentRequestKind::Radio /> }.into_any()
+        }
+
         _ => view! { <MoviesTvDiscover /> }.into_any(),
     };
     view! {
@@ -468,13 +478,13 @@ pub fn DiscoverFeedPage() -> impl IntoView {
         {move || (!loading.get() && error.get().is_none() && items.with(Vec::is_empty)).then(|| view! {
             <EmptyState icon="discover" title="Nothing here" description="This feed has no titles right now." />
         })}
-        <div class="load-more">
-            <Show when=move || page.get() < total_pages.get() && !items.with(Vec::is_empty)>
-                <button type="button" class="btn btn-secondary" disabled=move || loading.get()
-                    on:click=move |_| load(page.get_untracked() + 1)>
-                    {move || if loading.get() { "Loading…" } else { "Load more" }}
-                </button>
-            </Show>
-        </div>
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| load(page.get_untracked() + 1))
+            enabled=Signal::derive(move || {
+                page.get() < total_pages.get() && !items.with(Vec::is_empty) && error.with(Option::is_none)
+            })
+            loading=loading
+            loaded=Signal::derive(move || items.with(Vec::len))
+        />
     }
 }

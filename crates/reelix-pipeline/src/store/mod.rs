@@ -7,6 +7,7 @@ pub mod pending;
 pub mod tracked;
 
 use chrono::{DateTime, Utc};
+use reelix_core::soulseek::SoulseekRelease;
 use reelix_core::{BookFormat, Protocol};
 use reelix_parser::{Language, QualityModel};
 use serde::{Deserialize, Serialize};
@@ -45,14 +46,29 @@ pub struct GrabbedRelease {
     pub indexer_flags: Vec<String>,
     pub seed_ratio: Option<f64>,
     pub seed_time_minutes: Option<u32>,
+    /// Soulseek: the peer's folder the slskd client enqueues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soulseek: Option<SoulseekRelease>,
 }
 
-/// Book / album reference of a pipeline row (columns from `0010_media_shared.sql`).
+impl GrabbedRelease {
+    /// Identity used for blocklisting: the info hash, or the Soulseek `slsk:{user}/{dir}` key.
+    pub fn release_key(&self) -> Option<String> {
+        self.info_hash
+            .clone()
+            .or_else(|| self.soulseek.as_ref().map(SoulseekRelease::key))
+    }
+}
+
+/// Book / album / radio episode reference of a pipeline row (columns from
+/// `0010_media_shared.sql` and `0015_radio_filing.sql`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ContentRef {
     pub book_id: Option<i64>,
     pub book_format: Option<BookFormat>,
     pub album_id: Option<i64>,
+    #[serde(default)]
+    pub radio_episode_id: Option<i64>,
 }
 
 impl ContentRef {
@@ -61,6 +77,7 @@ impl ContentRef {
             book_id: Some(id),
             book_format: Some(format),
             album_id: None,
+            radio_episode_id: None,
         }
     }
 
@@ -71,9 +88,16 @@ impl ContentRef {
         }
     }
 
-    /// Neither a book nor an album.
+    pub fn radio_episode(id: i64) -> Self {
+        Self {
+            radio_episode_id: Some(id),
+            ..Self::default()
+        }
+    }
+
+    /// Neither a book, an album nor a radio episode.
     pub fn is_empty(&self) -> bool {
-        self.book_id.is_none() && self.album_id.is_none()
+        self.book_id.is_none() && self.album_id.is_none() && self.radio_episode_id.is_none()
     }
 
     /// The book and its format (a missing format reads as ebook).
@@ -90,11 +114,13 @@ impl ContentRef {
         book_id: Option<i64>,
         book_format: Option<&str>,
         album_id: Option<i64>,
+        radio_episode_id: Option<i64>,
     ) -> Self {
         Self {
             book_id,
             book_format: book_format.and_then(BookFormat::parse),
             album_id,
+            radio_episode_id,
         }
     }
 }
@@ -108,16 +134,9 @@ pub(crate) fn from_json<T: serde::de::DeserializeOwned + Default>(s: &str) -> T 
 }
 
 pub(crate) fn protocol_str(p: Protocol) -> &'static str {
-    match p {
-        Protocol::Torrent => "torrent",
-        Protocol::Usenet => "usenet",
-    }
+    p.as_str()
 }
 
 pub(crate) fn parse_protocol(s: &str) -> Option<Protocol> {
-    match s {
-        "torrent" => Some(Protocol::Torrent),
-        "usenet" => Some(Protocol::Usenet),
-        _ => None,
-    }
+    Protocol::parse(s)
 }

@@ -149,13 +149,18 @@ impl Blackhole {
         let (schema, imp) = match protocol {
             Protocol::Torrent => (torrent_schema(), TORRENT_IMPLEMENTATION),
             Protocol::Usenet => (usenet_schema(), USENET_IMPLEMENTATION),
+            Protocol::Soulseek => {
+                return Err(ClientError::InvalidSettings(
+                    "there is no Soulseek blackhole; use the slskd client".into(),
+                ));
+            }
         };
         let s: BlackholeSettings = common::decode_settings(&schema, settings)?;
         Ok(Self {
             protocol,
             http: match protocol {
                 Protocol::Torrent => torrent::no_redirect_client(),
-                Protocol::Usenet => ctx.http.clone(),
+                Protocol::Usenet | Protocol::Soulseek => ctx.http.clone(),
             },
             info: s.common.info(imp),
             settings: s,
@@ -265,9 +270,12 @@ impl DownloadClient for Blackhole {
     }
 
     /// `books`/`music` when the matching watch folder is set; otherwise the main watch folder.
+    /// Radio episodes go with books (spoken-word audio, played in Audiobookshelf).
     fn category_for_kind(&self, kind: ContentKind) -> Option<String> {
         let (folder, cat) = match kind {
-            ContentKind::Ebook | ContentKind::Audiobook => (&self.settings.book_folder, BOOK_CATEGORY),
+            ContentKind::Ebook | ContentKind::Audiobook | ContentKind::Radio => {
+                (&self.settings.book_folder, BOOK_CATEGORY)
+            }
             ContentKind::Music => (&self.settings.music_folder, MUSIC_CATEGORY),
             ContentKind::Movie | ContentKind::Series => return None,
         };
@@ -299,6 +307,11 @@ impl DownloadClient for Blackhole {
                     self.write_new(dir, &stem, &ext, uri.as_bytes()).await?;
                 }
             },
+            Protocol::Soulseek => {
+                return Err(ClientError::InvalidPayload(
+                    "a blackhole cannot take a Soulseek release".into(),
+                ));
+            }
             Protocol::Usenet => {
                 let bytes = match release {
                     ReleasePayload::NzbFile { bytes, .. } => bytes.clone(),

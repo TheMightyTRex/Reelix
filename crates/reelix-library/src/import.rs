@@ -21,7 +21,7 @@ use crate::root_folders::unmapped_folders;
 use crate::{LibraryService, content_roots};
 
 /// Items added at once by [`LibraryService::library_import`] (metadata lookups dominate).
-const IMPORT_CONCURRENCY: usize = 4;
+const IMPORT_CONCURRENCY: usize = 8;
 /// Folders scanned and looked up at once by [`LibraryService::import_scan`].
 const SCAN_CONCURRENCY: usize = 8;
 /// Folders per [`LibraryService::import_match`] request.

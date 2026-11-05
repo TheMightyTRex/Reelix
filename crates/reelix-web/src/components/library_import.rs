@@ -4,7 +4,7 @@ use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use reelix_api_types::library::{
-    ImportCandidateDto, LibraryImportItem, LibraryImportMatchRequest, LibraryImportRequest,
+    ImportCandidateDto, ImportErrorDto, LibraryImportItem, LibraryImportMatchRequest, LibraryImportRequest,
     LibraryImportResult, LookupResult, MediaKind, MinimumAvailability, SeriesMonitor, SeriesType,
 };
 
@@ -35,6 +35,8 @@ struct Row {
 
 /// Folders sent per `POST /libraryimport/match` (the server accepts up to 25).
 const MATCH_BATCH: usize = 20;
+/// Folders added per `POST /libraryimport` request.
+const IMPORT_BATCH: usize = 25;
 
 impl Row {
     fn new(c: ImportCandidateDto) -> Self {
@@ -98,6 +100,8 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
     let series_type = RwSignal::new(SeriesType::Standard);
     let search_on_add = RwSignal::new(false);
     let busy = RwSignal::new(false);
+    // (done, total) while selected folders are being imported in batches.
+    let importing = RwSignal::new(None::<(usize, usize)>);
     let result = RwSignal::new(None::<LibraryImportResult>);
 
     // Bumped on every scan, so a stale result (or a match batch from an older scan) is ignored.
@@ -210,24 +214,46 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
             toasts.error("Select at least one matched folder.");
             return;
         }
-        let req = LibraryImportRequest {
-            root_folder_id: scan_root.get_untracked(),
-            items,
-            search_on_add: search_on_add.get_untracked(),
-        };
+        let (root_folder_id, search) = (scan_root.get_untracked(), search_on_add.get_untracked());
         busy.set(true);
         spawn_local(async move {
-            match api::post::<_, LibraryImportResult>("/libraryimport", &req).await {
-                Ok(r) => {
-                    toasts.success(format!(
-                        "Imported {} item(s). Their files are being scanned in the background.",
-                        r.added.len()
-                    ));
-                    result.set(Some(r));
-                    scan_gen.update(|g| *g += 1);
+            // Small batches keep every request short (a reverse proxy may cut long ones off).
+            let total = items.len();
+            let mut all = LibraryImportResult::default();
+            importing.set(Some((0, total)));
+            for chunk in items.chunks(IMPORT_BATCH) {
+                let req = LibraryImportRequest {
+                    root_folder_id,
+                    items: chunk.to_vec(),
+                    search_on_add: search,
+                };
+                match api::post::<_, LibraryImportResult>("/libraryimport", &req).await {
+                    Ok(r) => {
+                        all.added.extend(r.added);
+                        all.errors.extend(r.errors);
+                    }
+                    Err(e) => all.errors.extend(chunk.iter().map(|i| ImportErrorDto {
+                        path: i.path.clone(),
+                        message: e.to_string(),
+                    })),
                 }
-                Err(e) => toasts.error(format!("Import failed: {e}")),
+                importing.update(|p| *p = p.map(|(done, t)| (done + chunk.len(), t)));
             }
+            importing.set(None);
+            if all.errors.is_empty() {
+                toasts.success(format!(
+                    "Imported {} item(s). Their files are being scanned in the background.",
+                    all.added.len()
+                ));
+            } else {
+                toasts.error(format!(
+                    "Imported {} item(s); {} folder(s) could not be imported.",
+                    all.added.len(),
+                    all.errors.len()
+                ));
+            }
+            result.set(Some(all));
+            scan_gen.update(|g| *g += 1);
             busy.set(false);
         });
     };
@@ -433,10 +459,12 @@ pub fn ImportLibraryPage(kind: MediaKind) -> impl IntoView {
         </div>
         <Show when=move || current().flatten().is_some_and(|r| r.is_ok_and(|l| !l.is_empty()))>
             <div class="bulk-bar">
-                <span class="bulk-count">{move || match selected_count() {
+                <span class="bulk-count">{move || if let Some((done, total)) = importing.get() {
+                    format!("Importing… {done} of {total}")
+                } else { match selected_count() {
                     0 => "Nothing selected: choose a match for a folder (or use Search) to import it".to_owned(),
                     n => format!("{n} ready to import"),
-                }}</span>
+                }}}</span>
                 <div class="bulk-actions">
                     <button type="button" class="btn btn-primary" disabled=move || busy.get() || selected_count() == 0 on:click=import>
                         {move || if busy.get() { view! { <Spinner /> }.into_any() } else { view! { <Icon name="download" /> }.into_any() }}

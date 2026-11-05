@@ -33,6 +33,7 @@ reelix-jobs.workspace = true
 reelix-library.workspace = true
 reelix-migrate.workspace = true
 reelix-music.workspace = true
+reelix-radio.workspace = true
 reelix-pipeline.workspace = true
 reelix-requests.workspace = true
 reelix-indexers.workspace = true

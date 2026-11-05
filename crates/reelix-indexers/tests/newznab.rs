@@ -327,7 +327,7 @@ async fn build_validation_and_ssrf_guard() {
     let s = schemas();
     assert_eq!(
         s.iter().map(|s| s.implementation.as_str()).collect::<Vec<_>>(),
-        ["torznab", "newznab"]
+        ["torznab", "newznab", "slskd"]
     );
     let nz = &s[1];
     assert_eq!(nz.secret_fields().collect::<Vec<_>>(), ["api_key"]);

@@ -83,6 +83,9 @@ fn markup(name: &str) -> &'static str {
         "music" => {
             r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#
         }
+        "radio" => {
+            r#"<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M7 8l10-5"/><circle cx="8.5" cy="14" r="2.5"/><path d="M14 12h4M14 16h4"/>"#
+        }
         _ => r#"<circle cx="12" cy="12" r="8"/>"#,
     }
 }

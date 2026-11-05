@@ -1,0 +1,52 @@
+{
+ "children": {
+  "page": 1,
+  "total": 2,
+  "limit": 50,
+  "offset": 0,
+  "programmes": [
+   {
+    "type": "episode",
+    "pid": "m002jscp",
+    "media_type": "audio",
+    "title": "6. Do you believe in soul mates?",
+    "short_synopsis": "Paul Merton and Julian Clary return to play Just a Minute.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": 6,
+    "expected_child_count": null,
+    "first_broadcast_date": "2025-09-22T18:30:00+01:00",
+    "has_medium_or_long_synopsis": true,
+    "has_related_links": false,
+    "has_clips": false,
+    "has_segment_events": true,
+    "segments_title": "Featured items",
+    "actual_start": "2025-09-22T19:00:00+01:00",
+    "is_available_mediaset_pc_sd": true,
+    "is_legacy_media": false
+   },
+   {
+    "type": "episode",
+    "pid": "m002jgpk",
+    "media_type": "audio",
+    "title": "5. Whoopsie-daisy",
+    "short_synopsis": "After over ten years away from the game, Stephen Mangan is back to play Just a Minute.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": 5,
+    "expected_child_count": null,
+    "first_broadcast_date": "2025-09-15T18:30:00+01:00",
+    "has_medium_or_long_synopsis": true,
+    "has_related_links": false,
+    "has_clips": false,
+    "has_segment_events": true,
+    "segments_title": "Featured items",
+    "actual_start": "2025-09-15T19:00:00+01:00",
+    "is_available_mediaset_pc_sd": true,
+    "is_legacy_media": false
+   }
+  ]
+ }
+}

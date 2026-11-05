@@ -77,6 +77,7 @@ pub fn release_dto(e: &Eval, t: &Target, rank: u32, now: DateTime<Utc>) -> Relea
         book_id: t.content().book_id,
         book_format: t.book_format(),
         album_id: t.content().album_id,
+        soulseek: i.soulseek.clone(),
     }
 }
 
@@ -88,6 +89,7 @@ pub struct MediaRefs {
     episodes: HashMap<i64, EpisodeRefDto>,
     books: HashMap<i64, MediaRefDto>,
     albums: HashMap<i64, MediaRefDto>,
+    radio: HashMap<i64, MediaRefDto>,
 }
 
 impl MediaRefs {
@@ -98,8 +100,11 @@ impl MediaRefs {
             .cloned()
     }
 
-    /// The book (with the row's format) or album of a content reference.
+    /// The book (with the row's format), album or radio episode of a content reference.
     pub fn content(&self, c: &ContentRef) -> Option<MediaRefDto> {
+        if let Some(id) = c.radio_episode_id {
+            return self.radio.get(&id).cloned();
+        }
         if let Some(id) = c.book_id {
             return self.books.get(&id).cloned().map(|mut m| {
                 m.book_format = c.book_format;
@@ -125,6 +130,7 @@ pub fn book_ref(b: &reelix_api_types::books::BookDto) -> MediaRefDto {
         year: b.year,
         subtitle: Some(b.author_name.clone()),
         book_format: None,
+        show_id: None,
     }
 }
 
@@ -138,17 +144,45 @@ pub fn album_ref(a: &reelix_api_types::music::AlbumDto) -> MediaRefDto {
         year: a.release_date.map(|d| d.year()),
         subtitle: Some(a.artist_name.clone()),
         book_format: None,
+        show_id: None,
     }
 }
 
-/// Distinct book and album ids of content references.
-pub fn content_ids(items: impl Iterator<Item = ContentRef>) -> (Vec<i64>, Vec<i64>) {
-    let (mut books, mut albums) = (Vec::new(), Vec::new());
+/// Radio episode reference (`kind` `radio_episode`, `S20E03 - Title`, show as subtitle).
+pub async fn radio_ref(svc: &reelix_radio::RadioService, episode_id: i64) -> Option<MediaRefDto> {
+    use chrono::Datelike;
+    let e = svc.get_episode(episode_id).await.ok()?;
+    let show = svc.get_show(e.show_id).await.ok()?;
+    let series = reelix_radio::status::filing_series_number(e.series_kind, e.series_number);
+    let title = match e.number {
+        Some(n) if e.title.trim().is_empty() => format!("S{series:02}E{n:02}"),
+        Some(n) => format!("S{series:02}E{n:02} - {}", e.title.trim()),
+        None => e.title.clone(),
+    };
+    Some(MediaRefDto {
+        kind: "radio_episode".into(),
+        id: e.id,
+        title,
+        year: e.first_broadcast.map(|d| d.year()),
+        subtitle: Some(show.title),
+        book_format: None,
+        show_id: Some(show.id),
+    })
+}
+
+/// Distinct book, album and radio episode ids of content references.
+pub fn content_ids(items: impl Iterator<Item = ContentRef>) -> (Vec<i64>, Vec<i64>, Vec<i64>) {
+    let (mut books, mut albums, mut radio) = (Vec::new(), Vec::new(), Vec::new());
     for c in items {
         books.extend(c.book_id);
         albums.extend(c.album_id);
+        radio.extend(c.radio_episode_id);
     }
-    (uniq(books.into_iter()), uniq(albums.into_iter()))
+    (
+        uniq(books.into_iter()),
+        uniq(albums.into_iter()),
+        uniq(radio.into_iter()),
+    )
 }
 
 fn uniq(it: impl Iterator<Item = i64>) -> Vec<i64> {
@@ -179,6 +213,7 @@ impl SearchService {
                         year: x.year,
                         subtitle: None,
                         book_format: None,
+                        show_id: None,
                     },
                 );
             }
@@ -194,6 +229,7 @@ impl SearchService {
                         year: x.year,
                         subtitle: None,
                         book_format: None,
+                        show_id: None,
                     },
                 );
             }
@@ -206,10 +242,18 @@ impl SearchService {
         Ok(refs)
     }
 
-    /// Adds book / album references (titles with author / artist) to `refs`. Unknown ids
+    /// Adds book / album / radio episode references (titles with author / artist / show) to
+    /// `refs`. Unknown ids
     /// (deleted media) are skipped.
     pub(crate) async fn content_refs(&self, refs: &mut MediaRefs, items: impl Iterator<Item = ContentRef>) {
-        let (books, albums) = content_ids(items);
+        let (books, albums, radio) = content_ids(items);
+        if let Some(svc) = self.radio.get() {
+            for id in radio {
+                if let Some(r) = radio_ref(svc, id).await {
+                    refs.radio.insert(id, r);
+                }
+            }
+        }
         if let Some(svc) = self.books.get() {
             for id in books {
                 if let Ok(b) = svc.get_book(id).await {

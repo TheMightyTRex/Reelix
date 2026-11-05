@@ -4,7 +4,7 @@
 use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use reelix_api_types::library::LibraryImportMatchRequest;
+use reelix_api_types::library::{ImportErrorDto, LibraryImportMatchRequest};
 use reelix_api_types::music::{
     ArtistLookupDto, ArtistMonitor, LibraryImportResult, MusicImportCandidateDto, MusicImportItem,
     MusicLibraryImportRequest,
@@ -33,6 +33,8 @@ struct Row {
 
 /// Folders sent per `POST /musicimport/match` (the server accepts up to 25; at MusicBrainz's
 /// one request a second a batch takes about 10 s).
+/// Folders added per import request.
+const IMPORT_BATCH: usize = 25;
 const MATCH_BATCH: usize = 10;
 
 /// Best default: the first suggestion that is not in the library yet.
@@ -166,6 +168,8 @@ pub fn ImportArtistsPage() -> impl IntoView {
     let rows = RwSignal::new(None::<Result<Vec<Row>, api::ApiError>>);
     let scanning = RwSignal::new(false);
     let busy = RwSignal::new(false);
+    // (done, total) while selected folders are being imported in batches.
+    let importing = RwSignal::new(None::<(usize, usize)>);
     let result = RwSignal::new(None::<LibraryImportResult>);
     // Bumped on every scan (and import), so a stale scan or match batch is ignored.
     let scan_gen = RwSignal::new(0u32);
@@ -236,22 +240,44 @@ pub fn ImportArtistsPage() -> impl IntoView {
             toasts.error("Select at least one folder with a matched artist.");
             return;
         }
-        let req = MusicLibraryImportRequest {
-            root_folder_id: root.get_untracked(),
-            items,
-        };
+        let root_folder_id = root.get_untracked();
         busy.set(true);
         spawn_local(async move {
-            match api::post::<_, LibraryImportResult>("/musicimport", &req).await {
-                Ok(r) => {
-                    toasts.success(format!("Added {} artist(s).", r.added.len()));
-                    result.set(Some(r));
-                    scan_gen.update(|g| *g += 1);
-                    matching.set(None);
-                    rows.set(None);
+            // Small batches keep every request short (a reverse proxy may cut long ones off).
+            let total = items.len();
+            let mut all = LibraryImportResult::default();
+            importing.set(Some((0, total)));
+            for chunk in items.chunks(IMPORT_BATCH) {
+                let req = MusicLibraryImportRequest {
+                    root_folder_id,
+                    items: chunk.to_vec(),
+                };
+                match api::post::<_, LibraryImportResult>("/musicimport", &req).await {
+                    Ok(r) => {
+                        all.added.extend(r.added);
+                        all.errors.extend(r.errors);
+                    }
+                    Err(e) => all.errors.extend(chunk.iter().map(|i| ImportErrorDto {
+                        path: i.path.clone(),
+                        message: e.to_string(),
+                    })),
                 }
-                Err(e) => toasts.error(format!("Import failed: {e}")),
+                importing.update(|p| *p = p.map(|(done, t)| (done + chunk.len(), t)));
             }
+            importing.set(None);
+            if all.errors.is_empty() {
+                toasts.success(format!("Added {} artist(s).", all.added.len()));
+            } else {
+                toasts.error(format!(
+                    "Imported {}; {} folder(s) could not be imported.",
+                    all.added.len(),
+                    all.errors.len()
+                ));
+            }
+            result.set(Some(all));
+            scan_gen.update(|g| *g += 1);
+            matching.set(None);
+            rows.set(None);
             busy.set(false);
         });
     };
@@ -373,10 +399,10 @@ pub fn ImportArtistsPage() -> impl IntoView {
                         </table>
                     </div>
                     <div class="modal-footer">
-                        <span class="muted">{move || match selected_count() {
+                        <span class="muted">{move || if let Some((done, total)) = importing.get() { format!("Importing… {done} of {total}") } else { match selected_count() {
                             0 => "Nothing selected: choose an artist for a folder (or use Search) to import it".to_owned(),
                             n => format!("{n} ready to import"),
-                        }}</span>
+                        }}}</span>
                         <button type="submit" class="btn btn-primary" disabled=move || busy.get() || selected_count() == 0>
                             {move || if busy.get() { view! { <Spinner /> }.into_any() } else { view! { <Icon name="plus" /> }.into_any() }}
                             "Import selected"

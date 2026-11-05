@@ -1,5 +1,6 @@
-//! Book and album requests on `/requests` (`GET /requests/media`): author/artist, formats,
-//! approve / decline / retry / delete and a format editor for pending book requests.
+//! Book, album and radio show requests on `/requests` (`GET /requests/media`):
+//! author/artist/station, formats, approve / decline / retry / delete and a format editor for
+//! pending book requests.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -11,8 +12,9 @@ use reelix_api_types::requests::{
 };
 use reelix_core::BookFormat;
 
-use super::{PAGE_SIZE, Pager};
+use super::PAGE_SIZE;
 use crate::api;
+use crate::components::infinite::{InfiniteSentinel, PagedList};
 use crate::components::media_card::tmdb_image;
 use crate::components::request_drawer::Drawer;
 use crate::components::request_status::{
@@ -28,6 +30,7 @@ fn library_href(r: &ContentRequestDto) -> Option<String> {
     match r.kind {
         ContentRequestKind::Book => r.author_id.map(|a| format!("/books/authors/{a}")),
         ContentRequestKind::Music => r.artist_id.map(|a| format!("/music/artists/{a}")),
+        ContentRequestKind::Radio => r.radio_show_id.map(|s| format!("/radio/shows/{s}")),
     }
 }
 
@@ -57,7 +60,6 @@ pub fn ContentRequestTable(
     kind: RwSignal<String>,
     sort: RwSignal<String>,
     user_id: RwSignal<String>,
-    page: RwSignal<u32>,
     /// Called after any change (to refresh the status counts).
     on_change: Callback<()>,
 ) -> impl IntoView {
@@ -73,35 +75,49 @@ pub fn ContentRequestTable(
     let delete_open = RwSignal::new(false);
     let edit_open = RwSignal::new(false);
 
-    let list = LocalResource::new(move || {
-        let k = match kind.get().as_str() {
-            "book" => "book",
-            "music" => "music",
-            _ => "all",
-        };
-        let mut q = format!(
-            "/requests/media?kind={k}&status={}&sort={}&page={}&page_size={PAGE_SIZE}",
-            status.get(),
-            sort.get(),
-            page.get()
-        );
-        let u = user_id.get();
-        if !u.is_empty() {
-            q.push_str(&format!("&user_id={u}"));
-        }
-        async move { api::get::<ContentRequestPageDto>(&q).await }
+    let list = PagedList::new(
+        PAGE_SIZE,
+        |r: &ContentRequestDto| r.id,
+        move |page, size| {
+            let k = match kind.get_untracked().as_str() {
+                "book" => "book",
+                "music" => "music",
+                "radio" => "radio",
+                _ => "all",
+            };
+            let mut q = format!(
+                "/requests/media?kind={k}&status={}&sort={}&page={page}&page_size={size}",
+                status.get_untracked(),
+                sort.get_untracked(),
+            );
+            let u = user_id.get_untracked();
+            if !u.is_empty() {
+                q.push_str(&format!("&user_id={u}"));
+            }
+            async move {
+                api::get::<ContentRequestPageDto>(&q)
+                    .await
+                    .map(|p| (p.items, p.total))
+            }
+        },
+    );
+    // A new filter starts over from the first rows.
+    Effect::new(move |_| {
+        let _ = (status.get(), sort.get(), kind.get(), user_id.get());
+        list.reset();
     });
     let refresh = move || {
-        list.refetch();
+        list.refresh();
         on_change.run(());
     };
-    refetch_on_change(&["request"], move || list.refetch());
+    refetch_on_change(&["request"], move || list.refresh());
     Effect::new(move |_| {
-        if let Some(Ok(p)) = list.get()
-            && let Some(cur) = drawer_item.get_untracked()
-            && let Some(fresh) = p.items.iter().find(|r| r.id == cur.id)
-        {
-            drawer_item.set(Some(fresh.clone()));
+        let fresh = list.items.with(|items| {
+            let cur = drawer_item.get_untracked()?;
+            items.iter().find(|r| r.id == cur.id && **r != cur).cloned()
+        });
+        if let Some(fresh) = fresh {
+            drawer_item.set(Some(fresh));
         }
     });
 
@@ -164,23 +180,28 @@ pub fn ContentRequestTable(
         });
     };
 
-    let rows = move || match list.get() {
-        None => view! { <Skeleton lines=6 /> }.into_any(),
-        Some(Err(e)) => {
-            view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.refetch()) /> }.into_any()
+    let rows = move || {
+        if !list.ready.get() {
+            return view! { <Skeleton lines=6 /> }.into_any();
         }
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="requests" title="No book or album requests"
-                description="Find books and albums on Discover and press Request — they show up here." />
+        let items = list.items.get();
+        if items.is_empty() {
+            return match list.error.get() {
+                Some(e) => view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.reset()) /> }.into_any(),
+                None => view! {
+                    <EmptyState icon="requests" title="No book, album or radio requests"
+                        description="Find books, albums and radio shows on Discover and press Request — they show up here." />
+                }
+                .into_any(),
+            };
         }
-        .into_any(),
-        Some(Ok(p)) => {
+        {
             let manage = can_manage();
             let users = show_user();
             view! {
                 <div class="table-wrap">
                     <table class="table request-table">
-                        <caption class="visually-hidden">"Book and album requests"</caption>
+                        <caption class="visually-hidden">"Book, album and radio requests"</caption>
                         <thead>
                             <tr>
                                 <th scope="col">"Title"</th>
@@ -191,7 +212,7 @@ pub fn ContentRequestTable(
                             </tr>
                         </thead>
                         <tbody>
-                            {p.items.into_iter().map(|r| {
+                            {items.into_iter().map(|r| {
                                 let id = r.id;
                                 let row = StoredValue::new(r.clone());
                                 let thumb = tmdb_image(r.poster.as_deref(), "w92");
@@ -253,7 +274,7 @@ pub fn ContentRequestTable(
                         </tbody>
                     </table>
                 </div>
-                <Pager total=p.total page=page />
+                {move || list.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.retry()) /> })}
             }
             .into_any()
         }
@@ -279,7 +300,11 @@ pub fn ContentRequestTable(
                 </div>
                 <dl class="kv">
                     {r.subtitle.clone().map(|s| view! {
-                        <div class="kv-row"><dt>{match r.kind { ContentRequestKind::Book => "Author", ContentRequestKind::Music => "Artist" }}</dt><dd>{s}</dd></div>
+                        <div class="kv-row"><dt>{match r.kind {
+                            ContentRequestKind::Book => "Author",
+                            ContentRequestKind::Music => "Artist",
+                            ContentRequestKind::Radio => "Station",
+                        }}</dt><dd>{s}</dd></div>
                     })}
                     {r.year.map(|y| view! { <div class="kv-row"><dt>"Year"</dt><dd>{y}</dd></div> })}
                     <div class="kv-row"><dt>"Requested by"</dt><dd><UserChip user=r.requested_by.clone() /></dd></div>
@@ -314,7 +339,18 @@ pub fn ContentRequestTable(
     };
 
     view! {
-        <div class="card"><div class="card-body flush">{rows}</div></div>
+        <div class="card">
+            <div class="card-body flush">
+                {rows}
+                <InfiniteSentinel
+                    on_visible=Callback::new(move |()| list.load_more())
+                    enabled=Signal::derive(move || list.can_load_more())
+                    loading=list.loading
+                    loaded=Signal::derive(move || list.loaded())
+                    total=list.total
+                />
+            </div>
+        </div>
         <Drawer open=drawer_open title=drawer_title>
             {drawer_body}
         </Drawer>
@@ -337,7 +373,8 @@ pub fn ContentRequestTable(
         <ConfirmDialog
             open=delete_open
             title="Delete request"
-            message=Signal::derive(|| "Delete this request? Books and albums already added to the library stay there.".to_string())
+            message=Signal::derive(|| "Delete this request? Books, albums and shows already added to the library stay there.".to_string())
+
             confirm_label="Delete"
             on_confirm=Callback::new(move |()| run(Pending::Delete))
         />

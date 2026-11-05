@@ -1,4 +1,5 @@
-//! Download client adapters: qBittorrent, Transmission, Deluge, rTorrent, SABnzbd, NZBGet, blackhole.
+//! Download client adapters: qBittorrent, Transmission, Deluge, rTorrent, SABnzbd, NZBGet, slskd,
+//! blackhole.
 //!
 //! Every adapter implements [`DownloadClient`], declares a [`ProviderSchema`] (see [`schemas`])
 //! and is constructed from a validated settings object through [`build`]. Adapters only ever
@@ -13,6 +14,7 @@ pub mod nzbget;
 pub mod qbittorrent;
 pub mod rtorrent;
 pub mod sabnzbd;
+pub mod slskd;
 pub mod torrent;
 pub mod transmission;
 pub mod xmlrpc;
@@ -48,7 +50,7 @@ impl BuildContext {
 /// A download client (README "Key Traits").
 #[async_trait]
 pub trait DownloadClient: Send + Sync {
-    /// Torrent or Usenet.
+    /// Torrent, Usenet or Soulseek.
     fn protocol(&self) -> Protocol;
 
     /// Name, priority, removal flags and tags from the settings.
@@ -109,7 +111,7 @@ pub trait DownloadClient: Send + Sync {
 }
 
 /// Implementation ids accepted by [`build`].
-pub const IMPLEMENTATIONS: [&str; 8] = [
+pub const IMPLEMENTATIONS: [&str; 9] = [
     sabnzbd::IMPLEMENTATION,
     nzbget::IMPLEMENTATION,
     qbittorrent::IMPLEMENTATION,
@@ -118,6 +120,7 @@ pub const IMPLEMENTATIONS: [&str; 8] = [
     rtorrent::IMPLEMENTATION,
     blackhole::TORRENT_IMPLEMENTATION,
     blackhole::USENET_IMPLEMENTATION,
+    slskd::IMPLEMENTATION,
 ];
 
 /// One settings schema per implementation.
@@ -131,6 +134,7 @@ pub fn schemas() -> Vec<ProviderSchema> {
         rtorrent::schema(),
         blackhole::torrent_schema(),
         blackhole::usenet_schema(),
+        slskd::schema(),
     ]
 }
 
@@ -150,6 +154,7 @@ pub fn protocol_of(implementation: &str) -> Option<Protocol> {
         | deluge::IMPLEMENTATION
         | rtorrent::IMPLEMENTATION
         | blackhole::TORRENT_IMPLEMENTATION => Some(Protocol::Torrent),
+        slskd::IMPLEMENTATION => Some(Protocol::Soulseek),
         _ => None,
     }
 }
@@ -177,6 +182,7 @@ pub fn build(
             settings,
             ctx,
         )?),
+        slskd::IMPLEMENTATION => Box::new(slskd::Slskd::from_settings(settings, ctx)?),
         other => return Err(ClientError::UnknownImplementation(other.into())),
     })
 }

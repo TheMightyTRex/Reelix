@@ -1,5 +1,5 @@
 //! `/settings/naming` — file and folder naming templates with a token cheat-sheet and live preview,
-//! followed by the book and music templates.
+//! followed by the book, music and radio templates.
 
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use crate::components::library_forms::EnumSelect;
 use crate::components::{Card, ErrorBox, Icon, PageHeader, Skeleton, Spinner};
 use crate::pages::books::BookNamingCard;
 use crate::pages::music::MusicNamingCard;
+use crate::pages::radio::RadioNamingCard;
 use crate::pages::system::require_admin;
 use crate::state::Toasts;
 
@@ -376,5 +377,6 @@ pub fn NamingPage() -> impl IntoView {
         </div>
         <BookNamingCard />
         <MusicNamingCard />
+        <RadioNamingCard />
     }
 }

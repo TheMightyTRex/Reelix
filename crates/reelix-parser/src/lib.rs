@@ -24,6 +24,7 @@ pub mod model;
 pub mod music;
 mod parser;
 mod path;
+pub mod radio;
 mod tags;
 mod title;
 
@@ -32,4 +33,5 @@ pub use model::*;
 pub use music::{MusicSource, ParsedMusic, music_quality, parse_music};
 pub use parser::parse;
 pub use path::parse_path;
+pub use radio::{ParsedRadio, parse_radio, radio_codec, radio_quality};
 pub use title::clean_title;

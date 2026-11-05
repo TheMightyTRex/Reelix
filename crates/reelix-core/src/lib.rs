@@ -6,6 +6,7 @@ pub mod events;
 pub mod jobs;
 pub mod permissions;
 pub mod provider;
+pub mod soulseek;
 pub mod user;
 
 pub use events::{Audience, DomainEvent};
@@ -17,6 +18,34 @@ pub use permissions::Permissions;
 pub enum Protocol {
     Torrent,
     Usenet,
+    /// Peer-to-peer file sharing through an slskd daemon ([`soulseek`]).
+    Soulseek,
+}
+
+impl Protocol {
+    pub const ALL: [Protocol; 3] = [Self::Usenet, Self::Torrent, Self::Soulseek];
+
+    /// DB / wire string: `torrent`, `usenet`, `soulseek`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Torrent => "torrent",
+            Self::Usenet => "usenet",
+            Self::Soulseek => "soulseek",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.as_str() == s)
+    }
+
+    /// Display name: `Torrent`, `Usenet`, `Soulseek`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Torrent => "Torrent",
+            Self::Usenet => "Usenet",
+            Self::Soulseek => "Soulseek",
+        }
+    }
 }
 
 /// Movie or series.
@@ -27,8 +56,9 @@ pub enum MediaKind {
     Series,
 }
 
-/// Every kind of content Reelix manages. Superset of [`MediaKind`] for the places books and
-/// music share with movies/TV (root folders, download categories, media servers, notifications).
+/// Every kind of content Reelix manages. Superset of [`MediaKind`] for the places books,
+/// music and radio share with movies/TV (root folders, download categories, media servers,
+/// notifications).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentKind {
@@ -37,18 +67,22 @@ pub enum ContentKind {
     Ebook,
     Audiobook,
     Music,
+    /// Radio shows and podcasts (`reelix-radio`), played through an Audiobookshelf podcast
+    /// library.
+    Radio,
 }
 
 impl ContentKind {
-    pub const ALL: [ContentKind; 5] = [
+    pub const ALL: [ContentKind; 6] = [
         Self::Movie,
         Self::Series,
         Self::Ebook,
         Self::Audiobook,
         Self::Music,
+        Self::Radio,
     ];
 
-    /// DB / wire string: `movie`, `series`, `ebook`, `audiobook`, `music`.
+    /// DB / wire string: `movie`, `series`, `ebook`, `audiobook`, `music`, `radio`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Movie => "movie",
@@ -56,6 +90,7 @@ impl ContentKind {
             Self::Ebook => "ebook",
             Self::Audiobook => "audiobook",
             Self::Music => "music",
+            Self::Radio => "radio",
         }
     }
 
@@ -68,7 +103,7 @@ impl ContentKind {
         match self {
             Self::Movie => Some(MediaKind::Movie),
             Self::Series => Some(MediaKind::Series),
-            Self::Ebook | Self::Audiobook | Self::Music => None,
+            Self::Ebook | Self::Audiobook | Self::Music | Self::Radio => None,
         }
     }
 
@@ -81,7 +116,7 @@ impl ContentKind {
         match self {
             Self::Ebook => Some(BookFormat::Ebook),
             Self::Audiobook => Some(BookFormat::Audiobook),
-            Self::Movie | Self::Series | Self::Music => None,
+            Self::Movie | Self::Series | Self::Music | Self::Radio => None,
         }
     }
 }

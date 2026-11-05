@@ -16,7 +16,8 @@ use reelix_import::matching::{
 use reelix_indexers::ReleaseInfo;
 use reelix_indexers::categories::content_kind_of;
 use reelix_music::AlbumTarget;
-use reelix_parser::{ParsedBook, ParsedMusic, ParsedRelease, QualityFamily, ReleaseKind};
+use reelix_parser::{ParsedBook, ParsedMusic, ParsedRadio, ParsedRelease, QualityFamily, ReleaseKind};
+use reelix_radio::RadioTarget;
 
 use super::context::Target;
 
@@ -30,7 +31,17 @@ pub fn decision_flag(f: reelix_indexers::IndexerFlag) -> IndexerFlag {
         I::Internal => IndexerFlag::Internal,
         I::Scene => IndexerFlag::Scene,
         I::Nuked => IndexerFlag::Nuked,
+        I::FreeUploadSlot => IndexerFlag::FreeUploadSlot,
     }
+}
+
+/// Blocklist identity of a result: its info hash, or the Soulseek `slsk:{user}/{dir}` key.
+pub fn release_key(r: &ReleaseInfo) -> Option<String> {
+    r.info_hash.clone().or_else(|| {
+        r.soulseek
+            .as_ref()
+            .map(reelix_core::soulseek::SoulseekRelease::key)
+    })
 }
 
 /// Flag name as stored in [`crate::GrabbedRelease::indexer_flags`].
@@ -51,11 +62,13 @@ pub fn candidate(r: &ReleaseInfo, priority: i32) -> ReleaseCandidate {
 }
 
 /// A candidate parsed for the target's content: book releases with the book parser (quality of
-/// the format's family), album releases with the music parser, everything else as [`candidate`].
+/// the format's family), album releases with the music parser, radio releases with the radio
+/// parser (audiobook qualities), everything else as [`candidate`].
 pub fn candidate_for(r: &ReleaseInfo, priority: i32, t: &Target) -> ReleaseCandidate {
     let base = match t {
         Target::Book(b) => ReleaseCandidate::for_book(&r.title, r.protocol, b.format),
         Target::Album(_) => ReleaseCandidate::for_album(&r.title, r.protocol),
+        Target::Radio(_) => ReleaseCandidate::for_radio(&r.title, r.protocol),
         _ => return candidate(r, priority),
     };
     fill(base, r, priority)
@@ -68,6 +81,10 @@ fn fill(mut c: ReleaseCandidate, r: &ReleaseInfo, priority: i32) -> ReleaseCandi
     c.indexer_priority = priority;
     c.seeders = r.seeders;
     c.peers = r.peers;
+    if let Some(s) = &r.soulseek {
+        c.queue_length = Some(s.queue_length);
+        c.upload_speed = Some(s.upload_speed);
+    }
     c.publish_date = r.publish_date;
     c.indexer_flags = r.indexer_flags.iter().copied().map(decision_flag).collect();
     if r.download_volume_factor == 0.0 && !c.indexer_flags.contains(&IndexerFlag::Freeleech) {
@@ -324,6 +341,7 @@ fn kind_label(k: ContentKind) -> &'static str {
         ContentKind::Ebook => "an ebook",
         ContentKind::Audiobook => "an audiobook",
         ContentKind::Music => "a music",
+        ContentKind::Radio => "a radio",
     }
 }
 
@@ -449,4 +467,22 @@ pub fn map_to_album(r: &ReleaseInfo, parsed: &ParsedMusic, t: &AlbumTarget) -> R
         return Err(format!("Wrong album: {found:?} is not {:?}", t.album.title));
     }
     Ok(())
+}
+
+/// Whether a radio release is episode `t`: not in a movie or book category, then the show and
+/// the episode (numbers, broadcast date or title; see [`RadioTarget::check_release`]).
+pub fn map_to_radio(r: &ReleaseInfo, parsed: &ParsedRadio, t: &RadioTarget) -> Result<(), String> {
+    if let Some(k) = release_kind(r).filter(|k| matches!(k, ContentKind::Movie | ContentKind::Ebook)) {
+        return Err(format!("Release is in {} category", kind_label(k)));
+    }
+    t.check_release(parsed)
+}
+
+/// Whether a release's categories may hold radio (Audio/Other, Audio/Audiobook, or none).
+pub fn may_be_radio(r: &ReleaseInfo) -> bool {
+    use reelix_indexers::categories::{AUDIO_AUDIOBOOK, AUDIO_OTHER};
+    r.categories.is_empty()
+        || r.categories
+            .iter()
+            .any(|c| matches!(*c, AUDIO_OTHER | AUDIO_AUDIOBOOK))
 }

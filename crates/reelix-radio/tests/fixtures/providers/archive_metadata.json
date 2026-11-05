@@ -1,0 +1,113 @@
+{
+ "created": 1793828691,
+ "files": [
+  {
+   "name": "__ia_thumb.jpg",
+   "source": "original",
+   "size": "3425",
+   "format": "Item Tile"
+  },
+  {
+   "name": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948.afpk",
+   "source": "derivative",
+   "format": "Columbia Peaks",
+   "original": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948.mp3",
+   "size": "582656"
+  },
+  {
+   "name": "Jeff_Regan_49-10-15_The_Lady_With_The_Lute.flac",
+   "source": "original",
+   "format": "Flac",
+   "length": "29:41",
+   "title": "The Lady With The Lute",
+   "track": "2"
+  },
+  {
+   "name": "Jeff_Regan_49-10-15_The_Lady_With_The_Lute.mp3",
+   "source": "derivative",
+   "format": "VBR MP3",
+   "original": "Jeff_Regan_49-10-15_The_Lady_With_The_Lute.flac",
+   "length": "1781.2",
+   "title": "The Lady With The Lute",
+   "track": "2"
+  },
+  {
+   "name": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948.mp3",
+   "source": "original",
+   "size": "14460330",
+   "format": "VBR MP3",
+   "length": "3613.99",
+   "title": "The_Man_Who_Fought_Back_(11-27-48)_and_The_Prodigal_Daughter_(07-17-48)",
+   "track": "1"
+  },
+  {
+   "name": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948.png",
+   "source": "derivative",
+   "format": "PNG",
+   "original": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948.mp3",
+   "size": "40032"
+  },
+  {
+   "name": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948_spectrogram.png",
+   "source": "derivative",
+   "format": "Spectrogram",
+   "original": "n3zqcq4yzurcy7z-Jeff_Regan_-_1948.mp3",
+   "size": "238563"
+  },
+  {
+   "name": "shf58jdhqzopvquyh9ijaob0prcp2diycy4zxqfz_archive.torrent",
+   "source": "metadata",
+   "size": "3232",
+   "format": "Archive BitTorrent"
+  },
+  {
+   "name": "shf58jdhqzopvquyh9ijaob0prcp2diycy4zxqfz_files.xml",
+   "source": "original",
+   "format": "Metadata"
+  },
+  {
+   "name": "shf58jdhqzopvquyh9ijaob0prcp2diycy4zxqfz_meta.sqlite",
+   "source": "original",
+   "size": "28672",
+   "format": "Metadata"
+  },
+  {
+   "name": "shf58jdhqzopvquyh9ijaob0prcp2diycy4zxqfz_meta.xml",
+   "source": "original",
+   "size": "3829",
+   "format": "Metadata"
+  }
+ ],
+ "files_count": 9,
+ "item_last_updated": 1654248456,
+ "item_size": 15360739,
+ "metadata": {
+  "identifier": "shf58jdhqzopvquyh9ijaob0prcp2diycy4zxqfz",
+  "creator": "Boxcars711 Old Time Radio",
+  "date": "2009-03-15",
+  "description": "Jeff Regan Investigator was one of the three detective shows Jack Webb did before Dragnet (see also Pat Novak For Hire and Johnny Modero: Pier 23). It debuted on CBS in July 1948. Webb played JEFF REGAN, a tough private eye working in a Los Angeles investigation firm run by Anthony J. Lyon. Regan in",
+  "guid": "3f1639be0f0899439cb891899ad60bcd",
+  "mediatype": "audio",
+  "rssfeed": "https://boxcars711.libsyn.com/rss",
+  "scanner": "Internet Archive Python library 1.9.6",
+  "sessionid": "n3zqcq4yzurcy7z-",
+  "subject": [
+   "Podcast",
+   "Westerns",
+   "adventure",
+   "comedy",
+   "detective"
+  ],
+  "title": "Jeff Regan - 2 Episodes From 1948",
+  "uploadsoftware": "LifePod-Beta",
+  "collection": [
+   "podcasts_mirror_bobarchives",
+   "podcasts_mirror"
+  ],
+  "uploader": "bobarchives123@gmail.com",
+  "publicdate": "2021-06-25 22:11:30",
+  "addeddate": "2021-06-25 22:11:30",
+  "curation": "[curator]validator@archive.org[/curator][date]20210625221727[/date][comment]checked for malware[/comment]",
+  "access-restricted-item": "true"
+ }
+}

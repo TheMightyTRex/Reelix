@@ -645,19 +645,13 @@ fn DelayProfilesCard() -> impl IntoView {
         });
     };
 
-    let proto = |p: Protocol| {
-        if p == Protocol::Usenet {
-            "Usenet"
-        } else {
-            "Torrent"
-        }
-    };
+    let proto = |p: Protocol| p.label();
     let list = move || {
         match delays.get() {
         None => view! { <Skeleton lines=2 /> }.into_any(),
         Some(Err(e)) => view! { <ErrorBox error=e /> }.into_any(),
         Some(Ok(list)) => view! {
-            <DataTable caption="Delay profiles" headers=vec!["Preferred", "Usenet delay", "Torrent delay", "Bypass", "Tags", ""]>
+            <DataTable caption="Delay profiles" headers=vec!["Preferred", "Usenet delay", "Torrent delay", "Soulseek delay", "Bypass", "Tags", ""]>
                 {list.into_iter().map(|p| {
                     let e = p.clone();
                     let id = p.id;
@@ -667,6 +661,7 @@ fn DelayProfilesCard() -> impl IntoView {
                             <td class="cell-strong">{proto(p.preferred_protocol)}</td>
                             <td>{if p.enable_usenet { format!("{} min", p.usenet_delay) } else { "disabled".into() }}</td>
                             <td>{if p.enable_torrent { format!("{} min", p.torrent_delay) } else { "disabled".into() }}</td>
+                            <td>{if p.enable_soulseek { format!("{} min", p.soulseek_delay) } else { "disabled".into() }}</td>
                             <td>{if p.bypass_if_highest_quality { "Highest quality" } else { "—" }}</td>
                             <td>{if is_default { "Default (all)".to_string() } else { join_tags(&p.tags) }}</td>
                             <td class="cell-actions">
@@ -697,6 +692,7 @@ fn DelayProfilesCard() -> impl IntoView {
     };
     let (usenet_val, usenet_set) = num(|d| d.usenet_delay, |d, v| d.usenet_delay = v);
     let (torrent_val, torrent_set) = num(|d| d.torrent_delay, |d, v| d.torrent_delay = v);
+    let (soulseek_val, soulseek_set) = num(|d| d.soulseek_delay, |d, v| d.soulseek_delay = v);
     let check = move |get: fn(&DelayProfile) -> bool, set: fn(&mut DelayProfile, bool)| {
         (
             move || get(&draft.get()),
@@ -708,6 +704,7 @@ fn DelayProfilesCard() -> impl IntoView {
     };
     let (u_on, u_set) = check(|d| d.enable_usenet, |d, v| d.enable_usenet = v);
     let (t_on, t_set) = check(|d| d.enable_torrent, |d, v| d.enable_torrent = v);
+    let (s_on, s_set) = check(|d| d.enable_soulseek, |d, v| d.enable_soulseek = v);
     let (b_on, b_set) = check(
         |d| d.bypass_if_highest_quality,
         |d, v| d.bypass_if_highest_quality = v,
@@ -732,15 +729,17 @@ fn DelayProfilesCard() -> impl IntoView {
                 <div class="field-row">
                     <label class="checkbox"><input type="checkbox" prop:checked=u_on on:change=u_set />"Enable Usenet"</label>
                     <label class="checkbox"><input type="checkbox" prop:checked=t_on on:change=t_set />"Enable Torrent"</label>
+                    <label class="checkbox"><input type="checkbox" prop:checked=s_on on:change=s_set />"Enable Soulseek"</label>
                 </div>
                 <div class="field">
                     <label for="dp-pref">"Preferred protocol"</label>
                     <select id="dp-pref" class="input" on:change=move |e| {
-                        let p = if event_target_value(&e) == "torrent" { Protocol::Torrent } else { Protocol::Usenet };
+                        let p = Protocol::parse(&event_target_value(&e)).unwrap_or(Protocol::Usenet);
                         draft.update(|d| d.preferred_protocol = p);
                     }>
-                        <option value="usenet" selected=move || draft.get().preferred_protocol == Protocol::Usenet>"Usenet"</option>
-                        <option value="torrent" selected=move || draft.get().preferred_protocol == Protocol::Torrent>"Torrent"</option>
+                        {Protocol::ALL.into_iter().map(|p| view! {
+                            <option value=p.as_str() selected=move || draft.get().preferred_protocol == p>{p.label()}</option>
+                        }).collect_view()}
                     </select>
                 </div>
                 <div class="field-row">
@@ -751,6 +750,10 @@ fn DelayProfilesCard() -> impl IntoView {
                     <div class="field">
                         <label for="dp-t">"Torrent delay (minutes)"</label>
                         <input id="dp-t" class="input" type="number" min="0" prop:value=torrent_val on:change=torrent_set />
+                    </div>
+                    <div class="field">
+                        <label for="dp-s">"Soulseek delay (minutes)"</label>
+                        <input id="dp-s" class="input" type="number" min="0" prop:value=soulseek_val on:change=soulseek_set />
                     </div>
                 </div>
                 <label class="checkbox"><input type="checkbox" prop:checked=b_on on:change=b_set />"Bypass when the release is the profile's highest quality"</label>

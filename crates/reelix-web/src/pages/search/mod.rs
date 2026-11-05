@@ -1,5 +1,6 @@
-//! `/search?q=` — combined TMDB search results with availability; `&type=books|music`
-//! searches Open Library / MusicBrainz instead (REQUEST_BOOK / REQUEST_MUSIC).
+//! `/search?q=` — combined TMDB search results with availability; `&type=books|music|radio`
+//! searches Open Library / MusicBrainz / the radio sources instead (REQUEST_BOOK /
+//! REQUEST_MUSIC / REQUEST_RADIO or MANAGE_LIBRARY).
 
 use leptos::ev;
 use leptos::prelude::*;
@@ -10,6 +11,7 @@ use reelix_api_types::Permissions;
 use reelix_api_types::requests::{ContentRequestKind, DiscoverItemDto, PersonDto, SearchPageDto};
 
 use crate::api;
+use crate::components::infinite::InfiniteSentinel;
 use crate::components::media_card::{MediaCard, MediaCardSkeleton, MediaGrid};
 use crate::components::request_status::{item_badge, kind_label, media_href, url_encode};
 use crate::components::{EmptyState, ErrorBox, Icon};
@@ -32,6 +34,9 @@ pub fn SearchPage() -> impl IntoView {
         move |_| match query.with(|m| m.get("type").unwrap_or_default()).as_str() {
             "books" if auth.has(Permissions::REQUEST_BOOK) => Some(ContentRequestKind::Book),
             "music" if auth.has(Permissions::REQUEST_MUSIC) => Some(ContentRequestKind::Music),
+            "radio" if auth.has_any(Permissions::REQUEST_RADIO | Permissions::MANAGE_LIBRARY) => {
+                Some(ContentRequestKind::Radio)
+            }
             _ => None,
         },
     );
@@ -101,6 +106,7 @@ pub fn SearchPage() -> impl IntoView {
                 href.push_str(match k {
                     ContentRequestKind::Book => "&type=books",
                     ContentRequestKind::Music => "&type=music",
+                    ContentRequestKind::Radio => "&type=radio",
                 });
             }
             navigate(&href, Default::default());
@@ -136,7 +142,8 @@ pub fn SearchPage() -> impl IntoView {
         </form>
         {move || {
             let (books, music) = (auth.has(Permissions::REQUEST_BOOK), auth.has(Permissions::REQUEST_MUSIC));
-            (books || music).then(|| {
+            let radio = auth.has_any(Permissions::REQUEST_RADIO | Permissions::MANAGE_LIBRARY);
+            (books || music || radio).then(|| {
                 let text = q.get();
                 let cur = content.get();
                 let tab = move |kind: Option<ContentRequestKind>, label: &'static str| {
@@ -144,6 +151,7 @@ pub fn SearchPage() -> impl IntoView {
                         None => "",
                         Some(ContentRequestKind::Book) => "&type=books",
                         Some(ContentRequestKind::Music) => "&type=music",
+                        Some(ContentRequestKind::Radio) => "&type=radio",
                     };
                     let href = format!("{}{suffix}", search_href(&text));
                     let active = cur == kind;
@@ -157,6 +165,8 @@ pub fn SearchPage() -> impl IntoView {
                         {tab(None, "Movies & TV")}
                         {books.then(|| tab(Some(ContentRequestKind::Book), "Books"))}
                         {music.then(|| tab(Some(ContentRequestKind::Music), "Music"))}
+                        {radio.then(|| tab(Some(ContentRequestKind::Radio), "Radio"))}
+
                     </div>
                 }
             })
@@ -206,14 +216,15 @@ pub fn SearchPage() -> impl IntoView {
                 </MediaGrid>
             }.into_any()
         }}
-        <div class="load-more">
-            <Show when=move || page.get() < total_pages.get() && !items.with(Vec::is_empty)>
-                <button type="button" class="btn btn-secondary" disabled=move || loading.get()
-                    on:click=move |_| load(page.get_untracked() + 1)>
-                    {move || if loading.get() { "Loading…" } else { "Load more" }}
-                </button>
-            </Show>
-        </div>
+        <InfiniteSentinel
+            on_visible=Callback::new(move |()| load(page.get_untracked() + 1))
+            enabled=Signal::derive(move || {
+                page.get() < total_pages.get() && !items.with(Vec::is_empty) && error.with(Option::is_none)
+            })
+            loading=loading
+            loaded=Signal::derive(move || items.with(Vec::len))
+            total=Signal::derive(move || u64::from(total.get()))
+        />
         </Show>
     }
 }

@@ -284,7 +284,7 @@ stop_service
 
 # Replace the program files; install.json and anything else in the folder stay.
 mkdir -p "$prefix"
-for item in reelix web docs LICENSE.txt README.txt start-reelix.sh; do
+for item in reelix web docs LICENSE.txt THIRD_PARTY_NOTICES.md README.txt start-reelix.sh; do
     rm -rf "${prefix:?}/$item"
     if [ -e "$src/$item" ]; then
         cp -R "$src/$item" "$prefix/$item"

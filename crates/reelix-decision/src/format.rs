@@ -145,6 +145,8 @@ pub enum IndexerFlag {
     Golden,
     Approved,
     Nuked,
+    /// Soulseek: the peer has a free upload slot (the download starts right away).
+    FreeUploadSlot,
 }
 
 /// What a single condition tests.

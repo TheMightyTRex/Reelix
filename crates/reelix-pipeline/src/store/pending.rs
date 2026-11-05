@@ -33,6 +33,7 @@ struct Row {
     book_id: Option<i64>,
     book_format: Option<String>,
     album_id: Option<i64>,
+    radio_episode_id: Option<i64>,
 }
 
 impl TryFrom<Row> for PendingRelease {
@@ -48,12 +49,17 @@ impl TryFrom<Row> for PendingRelease {
             reason: r.reason,
             added: from_ms(r.added),
             release_at: from_ms(r.release_at),
-            content: ContentRef::from_columns(r.book_id, r.book_format.as_deref(), r.album_id),
+            content: ContentRef::from_columns(
+                r.book_id,
+                r.book_format.as_deref(),
+                r.album_id,
+                r.radio_episode_id,
+            ),
         })
     }
 }
 
-const COLS: &str = "id, movie_id, series_id, episode_ids, title, release, reason, added, release_at, book_id, book_format, album_id";
+const COLS: &str = "id, movie_id, series_id, episode_ids, title, release, reason, added, release_at, book_id, book_format, album_id, radio_episode_id";
 
 #[allow(clippy::too_many_arguments)]
 pub async fn insert(
@@ -82,7 +88,7 @@ pub async fn insert(
     Ok(id)
 }
 
-/// Inserts a delayed book / album release.
+/// Inserts a delayed book / album / radio episode release.
 pub async fn insert_content(
     db: &Db,
     content: &ContentRef,
@@ -92,7 +98,8 @@ pub async fn insert_content(
 ) -> Result<i64> {
     let id = sqlx::query_scalar(
         "INSERT INTO pending_releases (movie_id, series_id, episode_ids, title, release, reason, added, release_at, \
-         book_id, book_format, album_id) VALUES (NULL, NULL, '[]', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         book_id, book_format, album_id, radio_episode_id) \
+         VALUES (NULL, NULL, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&release.title)
     .bind(json(release))
@@ -102,6 +109,7 @@ pub async fn insert_content(
     .bind(content.book_id)
     .bind(content.format_str())
     .bind(content.album_id)
+    .bind(content.radio_episode_id)
     .fetch_one(db.pool())
     .await?;
     Ok(id)

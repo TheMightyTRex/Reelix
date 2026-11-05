@@ -10,6 +10,7 @@ use reelix_downloaders::{AddOptions, PayloadPreference, ReleasePayload};
 use reelix_indexers::IndexerError;
 use reelix_music::AlbumTarget;
 use reelix_notify::{EpisodeSummary, MediaSummary, NotificationEvent, ReleaseSummary};
+use reelix_radio::RadioTarget;
 
 use super::context::{Eval, IndexerInfo, Target};
 use super::mapping::flag_name;
@@ -28,6 +29,8 @@ pub struct GrabTarget {
     /// One format of a book.
     pub book: Option<Box<BookTarget>>,
     pub album: Option<Box<AlbumTarget>>,
+    /// One radio episode.
+    pub radio: Option<Box<RadioTarget>>,
 }
 
 impl GrabTarget {
@@ -50,6 +53,10 @@ impl GrabTarget {
                 album: Some(a.clone()),
                 ..Self::default()
             },
+            Target::Radio(r) => Self {
+                radio: Some(r.clone()),
+                ..Self::default()
+            },
         }
     }
 
@@ -60,13 +67,17 @@ impl GrabTarget {
             .or_else(|| self.series.as_ref().map(|s| s.tags.clone()))
             .or_else(|| self.book.as_ref().map(|b| b.tags.clone()))
             .or_else(|| self.album.as_ref().map(|a| a.tags.clone()))
+            .or_else(|| self.radio.as_ref().map(|r| r.tags.clone()))
             .unwrap_or_default()
     }
 
-    /// Book (format) / album reference.
+    /// Book (format) / album / radio episode reference.
     pub fn content(&self) -> ContentRef {
         if let Some(b) = &self.book {
             return ContentRef::book(b.book.id, b.format);
+        }
+        if let Some(r) = &self.radio {
+            return ContentRef::radio_episode(r.episode_id());
         }
         self.album
             .as_ref()
@@ -79,6 +90,7 @@ impl GrabTarget {
             .as_ref()
             .map(|b| b.format.content_kind())
             .or_else(|| self.album.as_ref().map(|_| ContentKind::Music))
+            .or_else(|| self.radio.as_ref().map(|_| ContentKind::Radio))
     }
 
     fn kind(&self) -> Option<MediaKind> {
@@ -100,6 +112,9 @@ impl GrabTarget {
         if let Some(a) = &self.album {
             return a.album.release_date.is_some_and(recent);
         }
+        if let Some(r) = &self.radio {
+            return r.episode.first_broadcast.is_some_and(|d| recent(d.date_naive()));
+        }
         match &self.movie {
             Some(m) => [m.in_cinemas, m.digital_release, m.physical_release]
                 .into_iter()
@@ -115,6 +130,9 @@ impl GrabTarget {
         }
         if let Some(a) = &self.album {
             return Some(album_summary(a));
+        }
+        if let Some(r) = &self.radio {
+            return Some(radio_summary(r));
         }
         if let Some(m) = &self.movie {
             let mut s = MediaSummary::new(MediaKind::Movie, &m.title);
@@ -183,6 +201,23 @@ pub(crate) fn album_summary(a: &AlbumTarget) -> MediaSummary {
     s
 }
 
+/// Notification summary of a radio episode (`Show - S20E03 - Title`).
+pub(crate) fn radio_summary(r: &RadioTarget) -> MediaSummary {
+    use chrono::Datelike;
+    let e = &r.episode;
+    let mut title = e.show_title.clone();
+    if let Some(label) = r.number_label() {
+        title.push_str(&format!(" - {label}"));
+    }
+    if !e.title.trim().is_empty() {
+        title.push_str(&format!(" - {}", e.title.trim()));
+    }
+    let mut s = MediaSummary::content(ContentKind::Radio, title);
+    s.id = Some(e.episode_id);
+    s.year = e.first_broadcast.map(|d| d.year());
+    s
+}
+
 /// Snapshot stored with tracked / pending rows.
 pub fn snapshot(e: &Eval, ix: Option<&IndexerInfo>) -> GrabbedRelease {
     let c = e.candidate();
@@ -218,6 +253,7 @@ pub fn snapshot(e: &Eval, ix: Option<&IndexerInfo>) -> GrabbedRelease {
         seed_time_minutes: ix
             .and_then(|x| x.seed_time_minutes)
             .or(i.minimum_seed_time.map(|s| s.div_ceil(60) as u32)),
+        soulseek: i.soulseek.clone(),
     }
 }
 
@@ -243,7 +279,7 @@ fn file_name(title: &str, ext: &str) -> String {
 }
 
 impl SearchService {
-    /// The book / album for a grab.
+    /// The book / album / radio episode for a grab.
     pub async fn grab_target_content(&self, c: &ContentRef) -> Result<GrabTarget> {
         let t = self.content_target(c).await?;
         Ok(GrabTarget::from_target(&t, &[]))
@@ -279,6 +315,16 @@ impl SearchService {
     }
 
     async fn payload(&self, rel: &GrabbedRelease, pref: PayloadPreference) -> Result<ReleasePayload> {
+        // A Soulseek release carries its own file list; there is nothing to fetch.
+        if rel.protocol == Protocol::Soulseek {
+            return rel
+                .soulseek
+                .clone()
+                .map(|s| ReleasePayload::Soulseek(Box::new(s)))
+                .ok_or_else(|| {
+                    SearchError::Validation("Soulseek release has no file list; search again".into())
+                });
+        }
         let url = rel.download_url.clone().filter(|u| !u.trim().is_empty());
         let Some(url) = url else {
             return rel
@@ -314,6 +360,7 @@ impl SearchService {
                     bytes,
                     name: file_name(&rel.title, "nzb"),
                 },
+                Protocol::Soulseek => unreachable!("handled above"),
             }),
             Err(IndexerError::MagnetRedirect(m)) => Ok(ReleasePayload::Magnet(m)),
             Err(e) => match &rel.magnet_url {
@@ -355,10 +402,7 @@ impl SearchService {
                 .ok_or_else(|| {
                     SearchError::Unavailable(format!(
                         "no enabled {} download client is available for this media",
-                        match rel.protocol {
-                            Protocol::Torrent => "torrent",
-                            Protocol::Usenet => "usenet",
-                        }
+                        rel.protocol.as_str()
                     ))
                 })?,
         };

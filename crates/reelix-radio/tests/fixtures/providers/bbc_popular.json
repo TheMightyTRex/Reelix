@@ -1,0 +1,272 @@
+{
+ "$schema": "https://rms.api.bbc.co.uk/docs/swagger.json#/definitions/PlayableItems",
+ "total": 6,
+ "limit": 100,
+ "offset": 0,
+ "data": [
+  {
+   "type": "playable_item",
+   "id": "p0pl3bxj",
+   "urn": "urn:bbc:radio:episode:m0033rzl",
+   "network": {
+    "id": "bbc_radio_five_live",
+    "key": "5live",
+    "short_title": "Radio 5 Live",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_five_live/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Elis James and John Robins",
+    "secondary": "#589 - Hazards (General) , Glis Glis Glee and Old Tricky Digits",
+    "tertiary": null,
+    "entity_title": "#589 - Hazards (General) , Glis Glis Glee and Old Tricky Digits"
+   },
+   "synopses": {
+    "short": "Elis and John get told off by political podcasters and legendary cricketers...",
+    "medium": "Elis and John get told off by political podcasters and legendary cricketers, as they lift the lid on a star-studded celeb Halloween party.",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0nc17qt.jpg",
+   "duration": {
+    "value": 3181,
+    "label": "53 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "m0005fdz",
+    "urn": "urn:bbc:radio:brand:m0005fdz",
+    "title": "Elis James and John Robins",
+    "synopses": {
+     "short": "Join Elis and John for your twice-weekly dose of big laughs and top quality #content.",
+     "medium": "Join Elis and John for your twice-weekly dose of big laughs and top quality #content.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "2026-11-03T00:00:00Z",
+    "label": "03 Nov 2026"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "m0033p8p",
+   "urn": "urn:bbc:radio:episode:m0033p8q",
+   "network": {
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "short_title": "Radio 4",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Room 101 with Paul Merton",
+    "secondary": "Series 4",
+    "tertiary": "Andi Osho",
+    "entity_title": "Andi Osho"
+   },
+   "synopses": {
+    "short": "Paul asks novelist and actress Andi Osho about her pet peeves and worst nightmares.",
+    "medium": "Andi Osho tells Paul Merton her pet peeves - including small talk, estate agents' tricks and hotel rooms.",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0pg8kx4.jpg",
+   "duration": {
+    "value": 1680,
+    "label": "28 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "m001x0mr",
+    "urn": "urn:bbc:radio:brand:m001x0mr",
+    "title": "Room 101 with Paul Merton",
+    "synopses": {
+     "short": "Paul Merton interviews a guest to find out what they would send to Room 101.",
+     "medium": "Returning in its original one-to-one incarnation, Paul Merton interviews a variety of guests from the world of comedy and entertainment to find out what they would send to Room 101.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "2026-11-02T00:00:00Z",
+    "label": "02 Nov 2026"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "b005fr8v",
+   "urn": "urn:bbc:radio:episode:b007jrl4",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Dad's Army",
+    "secondary": "Series 3",
+    "tertiary": "Is There Honey Still for Tea?",
+    "entity_title": "Is There Honey Still for Tea?"
+   },
+   "synopses": {
+    "short": "Godfrey's idyllic cottage is threatened with demolition.",
+    "medium": "A new aerodrome threatens Godfrey's idyllic cottage with demolition. Adapted from BBCTV with Arnold Ridley. From 1976.",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0m614nn.jpg",
+   "duration": {
+    "value": 1800,
+    "label": "30 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "b009v6h3",
+    "urn": "urn:bbc:radio:brand:b009v6h3",
+    "title": "Dad's Army",
+    "synopses": {
+     "short": "Classic sitcom about the exploits of a Second World War Home Guard platoon.",
+     "medium": "Classic sitcom about the exploits of a Second World War Home Guard platoon. Adapted from BBC TV",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "1976-08-31T00:00:00Z",
+    "label": "31 Aug 1976"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "p0pkjmlp",
+   "urn": "urn:bbc:radio:episode:p0pkjnwr",
+   "network": {
+    "id": "bbc_radio_five_live",
+    "key": "5live",
+    "short_title": "Radio 5 Live",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_five_live/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Elis James and John Robins",
+    "secondary": "#588 - One Hundred and Pourteen Charges",
+    "tertiary": null,
+    "entity_title": "#588 - One Hundred and Pourteen Charges"
+   },
+   "synopses": {
+    "short": "There's huge damage to the integrity of the Elis James and John Robins show.",
+    "medium": null,
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0nc17qt.jpg",
+   "duration": {
+    "value": 3871,
+    "label": "64 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "m0005fdz",
+    "urn": "urn:bbc:radio:brand:m0005fdz",
+    "title": "Elis James and John Robins",
+    "synopses": {
+     "short": "Join Elis and John for your twice-weekly dose of big laughs and top quality #content.",
+     "medium": "Join Elis and John for your twice-weekly dose of big laughs and top quality #content.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "2026-10-30T00:00:00Z",
+    "label": "30 Oct 2026"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "m0028syb",
+   "urn": "urn:bbc:radio:episode:m0028syd",
+   "network": {
+    "id": "bbc_radio_four",
+    "key": "radio4",
+    "short_title": "Radio 4",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "Heresy",
+    "secondary": "Series 13",
+    "tertiary": "Episode 4",
+    "entity_title": "Episode 4"
+   },
+   "synopses": {
+    "short": "Discussion programme which challenges established ideas and questions received wisdom.",
+    "medium": "Victoria Coren Mitchell challenges received wisdom with David Baddiel, Desiree Burch and Steph McGovern.",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0m2f66g.jpg",
+   "duration": {
+    "value": 1680,
+    "label": "28 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "b007mjjg",
+    "urn": "urn:bbc:radio:brand:b007mjjg",
+    "title": "Heresy",
+    "synopses": {
+     "short": "Victoria Coren Mitchell is joined by a panel which challenges established ideas.",
+     "medium": "Victoria Coren Mitchell is joined by a panel which challenges established ideas and questions received wisdom.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "2025-03-11T00:00:00Z",
+    "label": "11 Mar 2025"
+   }
+  },
+  {
+   "type": "playable_item",
+   "id": "m000llvq",
+   "urn": "urn:bbc:radio:episode:b007jq4g",
+   "network": {
+    "id": "bbc_radio_four_extra",
+    "key": "radio4extra",
+    "short_title": "Radio 4 Extra",
+    "logo_url": "https://sounds.files.bbci.co.uk/3.12.0/networks/bbc_radio_four_extra/{type}_{size}.{format}",
+    "network_type": "master_brand"
+   },
+   "titles": {
+    "primary": "After Henry",
+    "secondary": "Series 3",
+    "tertiary": "Intellectual Aspirations",
+    "entity_title": "Intellectual Aspirations"
+   },
+   "synopses": {
+    "short": "Graduate Julian's brainy parents make Clare feel inadequate.",
+    "medium": "Clare is seeing a graduate, but his brainy parents make her feel inadequate. Stars Prunella Scales and Gerry Cowper. From 1987.",
+    "long": null
+   },
+   "image_url": "https://ichef.bbci.co.uk/images/ic/{recipe}/p0gscjs7.jpg",
+   "duration": {
+    "value": 1800,
+    "label": "30 mins"
+   },
+   "container": {
+    "type": "brand",
+    "id": "b009v07q",
+    "urn": "urn:bbc:radio:brand:b009v07q",
+    "title": "After Henry",
+    "synopses": {
+     "short": "Prunella Scales stars in the sitcom about three generations of women in one family.",
+     "medium": "Prunella Scales stars in the sitcom about three generations of women in one family.",
+     "long": null
+    },
+    "activities": []
+   },
+   "release": {
+    "date": "1987-10-20T00:00:00Z",
+    "label": "20 Oct 1987"
+   }
+  }
+ ]
+}

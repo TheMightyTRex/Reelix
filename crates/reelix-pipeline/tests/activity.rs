@@ -247,6 +247,7 @@ fn release(title: &str, protocol: Protocol, quality: Quality) -> GrabbedRelease 
         indexer_flags: vec![],
         seed_ratio: None,
         seed_time_minutes: None,
+        soulseek: None,
     }
 }
 

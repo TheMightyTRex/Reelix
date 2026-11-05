@@ -101,6 +101,8 @@ pub const DEFAULT_AUDIOBOOK: &[u32] = &[AUDIO_AUDIOBOOK];
 pub const DEFAULT_BOOK: &[u32] = &[BOOKS, BOOKS_EBOOK, AUDIO_AUDIOBOOK];
 /// Default music categories (Audio, MP3, Lossless). Audio/Video and audiobooks are excluded.
 pub const DEFAULT_MUSIC: &[u32] = &[AUDIO, AUDIO_MP3, AUDIO_LOSSLESS];
+/// Default radio categories (Audio/Other: radio shows and podcasts have no category of their own).
+pub const DEFAULT_RADIO: &[u32] = &[AUDIO_OTHER];
 
 /// Default search categories for a content kind (`None` = format-less book search).
 pub fn defaults_for(kind: Option<ContentKind>) -> &'static [u32] {
@@ -111,6 +113,7 @@ pub fn defaults_for(kind: Option<ContentKind>) -> &'static [u32] {
         Some(ContentKind::Audiobook) => DEFAULT_AUDIOBOOK,
         None => DEFAULT_BOOK,
         Some(ContentKind::Music) => DEFAULT_MUSIC,
+        Some(ContentKind::Radio) => DEFAULT_RADIO,
     }
 }
 
@@ -121,6 +124,7 @@ pub fn excluded_for(kind: Option<ContentKind>) -> &'static [u32] {
         Some(ContentKind::Ebook) | None => &[BOOKS_MAGS],
         Some(ContentKind::Audiobook) => &[],
         Some(ContentKind::Music) => &[AUDIO_VIDEO, AUDIO_AUDIOBOOK],
+        Some(ContentKind::Radio) => &[AUDIO_VIDEO],
         Some(ContentKind::Movie | ContentKind::Series) => &[],
     }
 }

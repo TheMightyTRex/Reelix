@@ -11,6 +11,7 @@ fn every_implementation_builds_from_defaults() {
     for schema in schemas() {
         let settings = match schema.implementation.as_str() {
             "sabnzbd" => json!({ "api_key": "k" }),
+            "slskd" => json!({ "api_key": "k", "downloads_dir": "/app/downloads" }),
             "torrent_blackhole" | "usenet_blackhole" => {
                 json!({ "drop_folder": tmp.path(), "watch_folder": tmp.path() })
             }

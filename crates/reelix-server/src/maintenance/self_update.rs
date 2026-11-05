@@ -28,7 +28,15 @@ pub const START_SCRIPT: &str = if cfg!(windows) {
     "start-reelix.sh"
 };
 /// What an update replaces in the install directory, in this order.
-pub const ITEMS: [&str; 6] = [BINARY, "web", "docs", "LICENSE.txt", "README.txt", START_SCRIPT];
+pub const ITEMS: [&str; 7] = [
+    BINARY,
+    "web",
+    "docs",
+    "LICENSE.txt",
+    "THIRD_PARTY_NOTICES.md",
+    "README.txt",
+    START_SCRIPT,
+];
 /// Name of the checksum asset of a release.
 pub const SUMS_ASSET: &str = "SHA256SUMS";
 

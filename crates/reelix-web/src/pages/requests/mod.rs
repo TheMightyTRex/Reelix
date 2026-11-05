@@ -15,6 +15,7 @@ use reelix_api_types::requests::{
 use reelix_core::MediaKind;
 
 use crate::api;
+use crate::components::infinite::{InfiniteSentinel, PagedList};
 use crate::components::media_card::tmdb_image;
 use crate::components::request_drawer::Drawer;
 use crate::components::request_status::{
@@ -79,7 +80,6 @@ pub fn RequestsPage() -> impl IntoView {
     let kind = RwSignal::new(String::new());
     let user_id = RwSignal::new(String::new());
     let sort = RwSignal::new(String::from("created"));
-    let page = RwSignal::new(1u32);
     let selected = RwSignal::new(Vec::<i64>::new());
     let drawer_open = RwSignal::new(false);
     let drawer_item = RwSignal::new(None::<RequestDto>);
@@ -90,39 +90,47 @@ pub fn RequestsPage() -> impl IntoView {
     let decline_reason = RwSignal::new(String::new());
     let delete_open = RwSignal::new(false);
     let edit_open = RwSignal::new(false);
-    // Book / album requests are listed by their own table.
-    let content_mode = move || matches!(kind.get().as_str(), "media" | "book" | "music");
+    // Book / album / radio requests are listed by their own table.
+    let content_mode = move || matches!(kind.get().as_str(), "media" | "book" | "music" | "radio");
     let has_content = move || {
-        auth.has_any(Permissions::REQUEST_BOOK | Permissions::REQUEST_MUSIC | Permissions::VIEW_REQUESTS)
+        auth.has_any(
+            Permissions::REQUEST_BOOK
+                | Permissions::REQUEST_MUSIC
+                | Permissions::REQUEST_RADIO
+                | Permissions::VIEW_REQUESTS,
+        )
     };
 
-    let list = LocalResource::new(move || {
-        let skip = content_mode();
-        let mut q = format!(
-            "/requests?status={}&sort={}&page={}&page_size={PAGE_SIZE}",
-            status.get(),
-            sort.get(),
-            page.get()
-        );
-        let k = kind.get();
-        if !k.is_empty() {
-            q.push_str(&format!("&kind={k}"));
-        }
-        let u = user_id.get();
-        if !u.is_empty() {
-            q.push_str(&format!("&user_id={u}"));
-        }
-        async move {
-            if skip {
-                return Ok(RequestPageDto {
-                    items: Vec::new(),
-                    total: 0,
-                    page: 1,
-                    page_size: PAGE_SIZE,
-                });
+    let list = PagedList::new(
+        PAGE_SIZE,
+        |r: &RequestDto| r.id,
+        move |page, size| {
+            let skip = untrack(content_mode);
+            let mut q = format!(
+                "/requests?status={}&sort={}&page={page}&page_size={size}",
+                status.get_untracked(),
+                sort.get_untracked(),
+            );
+            let k = kind.get_untracked();
+            if !k.is_empty() {
+                q.push_str(&format!("&kind={k}"));
             }
-            api::get::<RequestPageDto>(&q).await
-        }
+            let u = user_id.get_untracked();
+            if !u.is_empty() {
+                q.push_str(&format!("&user_id={u}"));
+            }
+            async move {
+                if skip {
+                    return Ok((Vec::new(), 0));
+                }
+                api::get::<RequestPageDto>(&q).await.map(|p| (p.items, p.total))
+            }
+        },
+    );
+    // A new filter starts over from the first rows.
+    Effect::new(move |_| {
+        let _ = (status.get(), sort.get(), kind.get(), user_id.get());
+        list.reset();
     });
     let counts = LocalResource::new(|| api::get::<RequestCountsDto>("/requests/count"));
     let users = LocalResource::new(move || {
@@ -136,25 +144,23 @@ pub fn RequestsPage() -> impl IntoView {
         }
     });
     let refresh = move || {
-        list.refetch();
+        list.refresh();
         counts.refetch();
     };
     refetch_on_change(&["request"], refresh);
 
     // Keep the drawer showing fresh data after list reloads.
     Effect::new(move |_| {
-        if let Some(Ok(p)) = list.get()
-            && let Some(cur) = drawer_item.get_untracked()
-            && let Some(fresh) = p.items.iter().find(|r| r.id == cur.id)
-        {
-            drawer_item.set(Some(fresh.clone()));
+        let fresh = list.items.with(|items| {
+            let cur = drawer_item.get_untracked()?;
+            items.iter().find(|r| r.id == cur.id && **r != cur).cloned()
+        });
+        if let Some(fresh) = fresh {
+            drawer_item.set(Some(fresh));
         }
     });
 
-    let reset_page = move || {
-        page.set(1);
-        selected.set(Vec::new());
-    };
+    let clear_selection = move || selected.set(Vec::new());
 
     let approve = move |ids: Vec<i64>| {
         spawn_local(async move {
@@ -245,7 +251,7 @@ pub fn RequestsPage() -> impl IntoView {
                 view! {
                     <button type="button" role="tab" class="tab" class:active=move || status.get() == v
                         aria-selected=move || (status.get() == v).to_string()
-                        on:click=move |_| { status.set(v.to_string()); reset_page(); }>
+                        on:click=move |_| { status.set(v.to_string()); clear_selection(); }>
                         {*label}
                         {n.map(|n| view! { <span class="tab-count">{n}</span> })}
                     </button>
@@ -258,7 +264,7 @@ pub fn RequestsPage() -> impl IntoView {
         let us = users.get().flatten()?;
         Some(view! {
             <select class="input input-sm" aria-label="Requested by" prop:value=move || user_id.get()
-                on:change=move |e| { user_id.set(event_target_value(&e)); reset_page(); }>
+                on:change=move |e| { user_id.set(event_target_value(&e)); clear_selection(); }>
                 <option value="">"All users"</option>
                 {us.into_iter().map(|u| view! { <option value=u.id.to_string()>{u.display_name}</option> }).collect_view()}
             </select>
@@ -287,20 +293,29 @@ pub fn RequestsPage() -> impl IntoView {
         })
     };
 
-    let rows = move || match list.get() {
-        None => view! { <Skeleton lines=6 /> }.into_any(),
-        Some(Err(e)) => {
-            view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.refetch()) /> }.into_any()
+    let rows = move || {
+        if !list.ready.get() {
+            return view! { <Skeleton lines=6 /> }.into_any();
         }
-        Some(Ok(p)) if p.items.is_empty() => view! {
-            <EmptyState icon="requests" title="No requests"
-                description="Find something on Discover and press Request — it shows up here.">
-                <A href="/discover" attr:class="btn btn-primary">"Go to Discover"</A>
-            </EmptyState>
+        let items = list.items.get();
+        if items.is_empty() {
+            return match list.error.get() {
+                Some(e) => {
+                    view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.reset()) /> }.into_any()
+                }
+                None => view! {
+                    <EmptyState icon="requests" title="No requests"
+                        description="Find something on Discover and press Request — it shows up here.">
+                        <A href="/discover" attr:class="btn btn-primary">"Go to Discover"</A>
+                    </EmptyState>
+                }
+                .into_any(),
+            };
         }
-        .into_any(),
-        Some(Ok(p)) => {
-            let ids: Vec<i64> = p.items.iter().map(|r| r.id).collect();
+        {
+            let ids: Vec<i64> = items.iter().map(|r| r.id).collect();
+            // Select-all covers the rows loaded so far.
+            let all_label = format!("Select all {} loaded requests", ids.len());
             let all_ids = StoredValue::new(ids);
             let all_checked = move || {
                 let sel = selected.get();
@@ -316,7 +331,7 @@ pub fn RequestsPage() -> impl IntoView {
                             <tr>
                                 {manage.then(|| view! {
                                     <th scope="col" class="cell-check">
-                                        <input type="checkbox" aria-label="Select all on this page" prop:checked=all_checked
+                                        <input type="checkbox" aria-label=all_label.clone() title=all_label.clone() prop:checked=all_checked
                                             on:change=move |e| {
                                                 if event_target_checked(&e) {
                                                     selected.set(all_ids.get_value());
@@ -334,7 +349,7 @@ pub fn RequestsPage() -> impl IntoView {
                             </tr>
                         </thead>
                         <tbody>
-                            {p.items.into_iter().map(|r| {
+                            {items.into_iter().map(|r| {
                                 let id = r.id;
                                 let row = StoredValue::new(r.clone());
                                 let thumb = tmdb_image(r.poster.as_deref(), "w92");
@@ -417,7 +432,7 @@ pub fn RequestsPage() -> impl IntoView {
                         </tbody>
                     </table>
                 </div>
-                <Pager total=p.total page=page />
+                {move || list.error.get().map(|e| view! { <ErrorBox error=e on_retry=Callback::new(move |()| list.retry()) /> })}
             }
             .into_any()
         }
@@ -495,19 +510,21 @@ pub fn RequestsPage() -> impl IntoView {
         <div class="tabs" role="tablist" aria-label="Filter by status">{tabs}</div>
         <div class="toolbar">
             <select class="input input-sm" aria-label="Type" prop:value=move || kind.get()
-                on:change=move |e| { kind.set(event_target_value(&e)); reset_page(); }>
+                on:change=move |e| { kind.set(event_target_value(&e)); clear_selection(); }>
                 <option value="">"Movies & series"</option>
                 <option value="movie">"Movies"</option>
                 <option value="series">"Series"</option>
                 {move || has_content().then(|| view! {
-                    <option value="media">"Books & music"</option>
+                    <option value="media">"Books, music & radio"</option>
                     <option value="book">"Books"</option>
                     <option value="music">"Music"</option>
+                    <option value="radio">"Radio"</option>
+
                 })}
             </select>
             {user_filter}
             <select class="input input-sm" aria-label="Sort" prop:value=move || sort.get()
-                on:change=move |e| { sort.set(event_target_value(&e)); reset_page(); }>
+                on:change=move |e| { sort.set(event_target_value(&e)); clear_selection(); }>
                 <option value="created">"Newest first"</option>
                 <option value="updated">"Recently updated"</option>
                 <option value="title">"Title"</option>
@@ -516,11 +533,25 @@ pub fn RequestsPage() -> impl IntoView {
         {bulk_bar}
         {move || if content_mode() {
             view! {
-                <content::ContentRequestTable status=status kind=kind sort=sort user_id=user_id page=page
+                <content::ContentRequestTable status=status kind=kind sort=sort user_id=user_id
                     on_change=Callback::new(move |()| counts.refetch()) />
             }.into_any()
         } else {
-            view! { <div class="card"><div class="card-body flush">{rows()}</div></div> }.into_any()
+            view! {
+                <div class="card">
+                    <div class="card-body flush">
+                        {rows}
+                        <InfiniteSentinel
+                    on_visible=Callback::new(move |()| list.load_more())
+                    enabled=Signal::derive(move || list.can_load_more())
+                    loading=list.loading
+                    loaded=Signal::derive(move || list.loaded())
+                    total=list.total
+                />
+                    </div>
+                </div>
+            }
+            .into_any()
         }}
 
         <Drawer open=drawer_open title=drawer_title>
@@ -563,23 +594,6 @@ pub fn RequestsPage() -> impl IntoView {
             on_confirm=confirm_delete
         />
     }
-}
-
-/// Previous / next paging for `{ items, total, page, page_size }` lists.
-#[component]
-pub fn Pager(total: u64, page: RwSignal<u32>) -> impl IntoView {
-    let pages = total.div_ceil(u64::from(PAGE_SIZE)).max(1) as u32;
-    (pages > 1).then(|| {
-        view! {
-            <nav class="pager" aria-label="Pagination">
-                <button type="button" class="btn btn-sm btn-ghost" disabled=move || { page.get() <= 1 }
-                    on:click=move |_| page.update(|p| *p = p.saturating_sub(1).max(1))>"Previous"</button>
-                <span class="muted">{move || format!("Page {} of {pages} · {total} total", page.get())}</span>
-                <button type="button" class="btn btn-sm btn-ghost" disabled=move || { page.get() >= pages }
-                    on:click=move |_| page.update(|p| *p += 1)>"Next"</button>
-            </nav>
-        }
-    })
 }
 
 /// Edits a pending request: seasons (series), 4K and, for advanced requesters / managers,

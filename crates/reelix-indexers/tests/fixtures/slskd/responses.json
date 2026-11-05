@@ -1,0 +1,20 @@
+[
+  {"fileCount":4,"files":[
+    {"bitDepth":16,"code":1,"extension":"flac","filename":"@@abcde\\Music\\Radiohead\\1997 - OK Computer\\01 - Airbag.flac","length":284,"sampleRate":44100,"size":31457280,"isLocked":false},
+    {"bitDepth":16,"code":1,"extension":"","filename":"@@abcde\\Music\\Radiohead\\1997 - OK Computer\\02 - Paranoid Android.flac","length":383,"sampleRate":44100,"size":41943040,"isLocked":false},
+    {"code":1,"extension":"","filename":"@@abcde\\Music\\Radiohead\\1997 - OK Computer\\cover.jpg","size":204800,"isLocked":false},
+    {"bitRate":320,"code":1,"extension":"","filename":"@@abcde\\Music\\Radiohead\\Singles\\Lucky.mp3","isVariableBitRate":false,"length":259,"size":10485760,"isLocked":false}
+  ],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":0,"token":48213,"uploadSpeed":1048576,"username":"vinylhoarder"},
+  {"fileCount":2,"files":[
+    {"bitDepth":24,"code":1,"extension":"flac","filename":"D:\\Shared\\Radiohead - OK Computer (1997) [24-96]\\01 Airbag.flac","length":284,"sampleRate":96000,"size":98566144,"isLocked":false},
+    {"bitDepth":24,"code":1,"extension":"flac","filename":"D:\\Shared\\Radiohead - OK Computer (1997) [24-96]\\02 Paranoid Android.flac","length":383,"sampleRate":96000,"size":132120576,"isLocked":false}
+  ],"hasFreeUploadSlot":false,"lockedFileCount":0,"lockedFiles":[],"queueLength":12,"token":48213,"uploadSpeed":524288,"username":"audiophile_99"},
+  {"fileCount":2,"files":[
+    {"bitRate":320,"code":1,"extension":"mp3","filename":"music/Radiohead/OK Computer/01 Airbag.mp3","isVariableBitRate":false,"length":284,"size":11362304,"isLocked":false},
+    {"bitRate":320,"code":1,"extension":"mp3","filename":"music/Radiohead/OK Computer/02 Paranoid Android.mp3","isVariableBitRate":false,"length":383,"size":15335424,"isLocked":false}
+  ],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":200,"token":48213,"uploadSpeed":2097152,"username":"busy_peer"},
+  {"fileCount":2,"files":[
+    {"bitRate":245,"code":1,"extension":"mp3","filename":"@@xyzab\\Albums\\Radiohead - OK Computer [V0]\\01 - Airbag.mp3","isVariableBitRate":true,"length":284,"size":8912896,"isLocked":false},
+    {"bitRate":238,"code":1,"extension":"mp3","filename":"@@xyzab\\Albums\\Radiohead - OK Computer [V0]\\02 - Paranoid Android.mp3","isVariableBitRate":true,"length":383,"size":11534336,"isLocked":false}
+  ],"hasFreeUploadSlot":true,"lockedFileCount":0,"lockedFiles":[],"queueLength":3,"token":48213,"uploadSpeed":262144,"username":"v0fan"}
+]

@@ -1,0 +1,56 @@
+{
+ "children": {
+  "page": 1,
+  "total": 3,
+  "limit": 50,
+  "offset": 0,
+  "programmes": [
+   {
+    "type": "series",
+    "pid": "m002qrx3",
+    "media_type": null,
+    "title": "Series 96",
+    "short_synopsis": "Sue Perkins hosts Radio 4's longest running panel show, Just a Minute.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": 96,
+    "expected_child_count": 6,
+    "first_broadcast_date": "2026-02-02T18:30:00Z",
+    "has_medium_or_long_synopsis": true,
+    "has_related_links": false,
+    "has_clips": false
+   },
+   {
+    "type": "series",
+    "pid": "m002h9t4",
+    "media_type": null,
+    "title": "Series 95",
+    "short_synopsis": "Sue Perkins hosts Radio 4's longest running panel show, Just a Minute.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": 95,
+    "expected_child_count": 6,
+    "first_broadcast_date": "2025-08-18T18:30:00+01:00",
+    "has_medium_or_long_synopsis": true,
+    "has_related_links": false,
+    "has_clips": false
+   },
+   {
+    "type": "episode",
+    "pid": "b0b1xq4z",
+    "media_type": "audio",
+    "title": "Just a Minute at 50",
+    "short_synopsis": "An anniversary special.",
+    "image": {
+     "pid": "p0m1qz0x"
+    },
+    "position": null,
+    "expected_child_count": null,
+    "first_broadcast_date": "2017-12-22T18:30:00Z",
+    "has_medium_or_long_synopsis": true
+   }
+  ]
+ }
+}

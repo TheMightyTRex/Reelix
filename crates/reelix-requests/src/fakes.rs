@@ -5,7 +5,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use reelix_api_types::requests::{AvailabilityStatus, ContentRequestKind, NamedIdDto, RootFolderOptionDto};
+use reelix_api_types::radio::{RadioPreviewEpisodeDto, RadioShowHitDto, RadioShowPreviewDto};
+use reelix_api_types::requests::{
+    AvailabilityStatus, ContentRequestKind, NamedIdDto, RadioDiscoverDto, RadioDiscoverListDto,
+    RootFolderOptionDto, radio_foreign_id,
+};
 use reelix_core::{BookFormat, ContentKind, MediaKind};
 use reelix_mediaserver::plextv::PlexTv;
 use reelix_mediaserver::{
@@ -18,9 +22,9 @@ use reelix_metadata::{
 use reelix_notify::NotificationEvent;
 
 use crate::gateway::{
-    AddAlbumRequest, AddBookRequest, AddMovieRequest, AddSeriesRequest, ArtistHit, Availability,
-    ContentAdded, ContentHit, DiscoverySource, LibraryGateway, MediaServerDirectory, MediaServerEntry,
-    NotificationSink,
+    AddAlbumRequest, AddBookRequest, AddMovieRequest, AddRadioRequest, AddSeriesRequest, ArtistHit,
+    Availability, ContentAdded, ContentHit, DiscoverySource, LibraryGateway, MediaServerDirectory,
+    MediaServerEntry, NotificationSink,
 };
 
 // ------------------------------------------------------------------ library
@@ -48,6 +52,13 @@ pub struct LibraryState {
     pub added_books: Vec<AddBookRequest>,
     pub added_albums: Vec<AddAlbumRequest>,
     pub content_searches: Vec<(ContentRequestKind, Vec<i64>, Vec<BookFormat>)>,
+    /// Followed radio shows per `{provider}:{external_id}`.
+    pub radio: HashMap<String, Availability>,
+    /// Known radio shows (search matches titles; previews by provider + id).
+    pub radio_hits: Vec<RadioShowHitDto>,
+    /// Radio Discover rows: row id → hits (listed as rows by `radio_lists`).
+    pub radio_rows: HashMap<String, Vec<RadioShowHitDto>>,
+    pub added_radio: Vec<AddRadioRequest>,
     next_id: i64,
 }
 
@@ -74,7 +85,20 @@ impl FakeLibrary {
         match kind {
             ContentRequestKind::Book => s.books.insert(id.into(), a),
             ContentRequestKind::Music => s.albums.insert(id.into(), a),
+            ContentRequestKind::Radio => s.radio.insert(id.into(), a),
         };
+    }
+
+    /// Registers a radio show for search and previews, and in the Discover row `row`.
+    pub fn with_radio(self, row: Option<&str>, hit: RadioShowHitDto) -> Self {
+        {
+            let mut s = self.0.lock().unwrap();
+            if let Some(row) = row {
+                s.radio_rows.entry(row.to_owned()).or_default().push(hit.clone());
+            }
+            s.radio_hits.push(hit);
+        }
+        self
     }
 
     /// Registers a work / release group for lookups.
@@ -84,6 +108,7 @@ impl FakeLibrary {
             match kind {
                 ContentRequestKind::Book => s.book_hits.push(hit),
                 ContentRequestKind::Music => s.album_hits.push(hit),
+                ContentRequestKind::Radio => {}
             }
         }
         self
@@ -101,6 +126,26 @@ pub fn book(work_id: &str, title: &str, author: &str) -> ContentHit {
         cover: Some(format!("https://covers.openlibrary.org/w/{work_id}.jpg")),
         album_type: None,
         overview: Some(format!("{title} overview")),
+        in_library: None,
+    }
+}
+
+/// A radio show hit for [`FakeLibrary::with_radio`].
+pub fn radio_show(provider: &str, external_id: &str, title: &str) -> RadioShowHitDto {
+    RadioShowHitDto {
+        provider: provider.into(),
+        external_id: external_id.into(),
+        title: title.into(),
+        synopsis: Some(format!("{title} synopsis")),
+        author: None,
+        station_name: Some("Radio 4".into()),
+        artwork_url: Some(format!(
+            "https://ichef.bbci.co.uk/images/ic/640x640/{external_id}.jpg"
+        )),
+        web_url: None,
+        feed_url: None,
+        episode_count: None,
+        show_id: None,
     }
 }
 
@@ -115,6 +160,7 @@ pub fn album(rg_id: &str, title: &str, artist: &str) -> ContentHit {
         cover: None,
         album_type: Some("Album".into()),
         overview: None,
+        in_library: None,
     }
 }
 
@@ -198,6 +244,7 @@ impl LibraryGateway for FakeLibrary {
         let map = match kind {
             ContentRequestKind::Book => &s.books,
             ContentRequestKind::Music => &s.albums,
+            ContentRequestKind::Radio => &s.radio,
         };
         Ok(ids
             .iter()
@@ -239,8 +286,106 @@ impl LibraryGateway for FakeLibrary {
         let hits = match kind {
             ContentRequestKind::Book => &s.book_hits,
             ContentRequestKind::Music => &s.album_hits,
+            ContentRequestKind::Radio => return Ok(None),
         };
         Ok(hits.iter().find(|h| h.foreign_id == id).cloned())
+    }
+
+    async fn radio_lists(&self) -> anyhow::Result<RadioDiscoverDto> {
+        let s = self.0.lock().unwrap();
+        let mut rows: Vec<RadioDiscoverListDto> = s
+            .radio_rows
+            .keys()
+            .map(|id| RadioDiscoverListDto {
+                id: id.clone(),
+                name: id.clone(),
+                provider: id.split('-').next().unwrap_or_default().to_owned(),
+                provider_name: "Fake".into(),
+            })
+            .collect();
+        rows.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(RadioDiscoverDto {
+            rows,
+            categories: Vec::new(),
+        })
+    }
+
+    async fn radio_discover(&self, row: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
+        let s = self.0.lock().unwrap();
+        s.radio_rows
+            .get(row)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown radio discover row: {row}"))
+    }
+
+    async fn lookup_radio(&self, term: &str) -> anyhow::Result<Vec<RadioShowHitDto>> {
+        let t = term.to_lowercase();
+        Ok(self
+            .0
+            .lock()
+            .unwrap()
+            .radio_hits
+            .iter()
+            .filter(|h| h.title.to_lowercase().contains(&t))
+            .cloned()
+            .collect())
+    }
+
+    async fn radio_preview(
+        &self,
+        provider: &str,
+        external_id: &str,
+    ) -> anyhow::Result<Option<RadioShowPreviewDto>> {
+        let s = self.0.lock().unwrap();
+        let Some(mut show) = s
+            .radio_hits
+            .iter()
+            .find(|h| h.provider == provider && h.external_id == external_id)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        show.show_id = s
+            .radio
+            .get(&radio_foreign_id(provider, external_id))
+            .and_then(|a| a.library_id);
+        Ok(Some(RadioShowPreviewDto {
+            show,
+            first_broadcast: None,
+            series_count: 1,
+            episode_count: 1,
+            latest_episodes: vec![RadioPreviewEpisodeDto {
+                title: "Episode 1".into(),
+                series_number: Some(1),
+                number: Some(1),
+                first_broadcast: None,
+                duration_secs: Some(1800),
+            }],
+        }))
+    }
+
+    async fn add_radio(&self, req: AddRadioRequest) -> anyhow::Result<ContentAdded> {
+        let mut s = self.0.lock().unwrap();
+        if let Some(m) = &s.fail_adds {
+            anyhow::bail!("{m}");
+        }
+        s.next_id += 1;
+        let id = s.next_id;
+        let id = s
+            .radio
+            .entry(radio_foreign_id(&req.provider, &req.external_id))
+            .or_insert(Availability {
+                status: AvailabilityStatus::Available,
+                library_id: Some(id),
+                seasons: BTreeMap::new(),
+            })
+            .library_id
+            .unwrap_or(id);
+        s.added_radio.push(req);
+        Ok(ContentAdded {
+            item_id: id,
+            parent_id: None,
+        })
     }
 
     async fn add_book(&self, req: AddBookRequest) -> anyhow::Result<ContentAdded> {

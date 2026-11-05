@@ -113,6 +113,12 @@ pub fn App() -> impl IntoView {
                             <Route path=path!("music/albums/:id") view=pages::music::AlbumDetailPage />
                             <Route path=path!("settings/music") view=|| view! { <Redirect path="/settings/metadata" /> } />
                             <Route path=path!("settings/metadataprofiles") view=pages::music::MetadataProfilesPage />
+                            <Route path=path!("radio") view=pages::radio::RadioShowsPage />
+                            <Route path=path!("radio/add") view=pages::radio::AddRadioShowPage />
+                            <Route path=path!("radio/stations") view=pages::radio::RadioStationsPage />
+                            <Route path=path!("radio/review") view=pages::radio::RadioReviewPage />
+                            <Route path=path!("radio/shows/:id") view=pages::radio::RadioShowPage />
+                            <Route path=path!("settings/radio") view=pages::radio::RadioSettingsPage />
                             <Route path=path!("*any") view=pages::NotFound />
                         </ParentRoute>
                     </Routes>

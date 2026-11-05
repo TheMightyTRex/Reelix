@@ -427,6 +427,7 @@ fn release_dto(r: ReleaseInfo) -> ReleaseDto {
             .iter()
             .filter_map(|f| serde_json::to_value(f).ok()?.as_str().map(String::from))
             .collect(),
+        soulseek: r.soulseek,
     }
 }
 

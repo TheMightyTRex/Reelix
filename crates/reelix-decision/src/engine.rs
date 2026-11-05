@@ -30,6 +30,12 @@ pub struct ReleaseCandidate {
     pub indexer_priority: i32,
     pub seeders: Option<u32>,
     pub peers: Option<u32>,
+    /// Soulseek: uploads the peer has queued ahead of us.
+    #[serde(default)]
+    pub queue_length: Option<u32>,
+    /// Soulseek: the peer's upload speed (bytes/s).
+    #[serde(default)]
+    pub upload_speed: Option<u64>,
     pub publish_date: Option<DateTime<Utc>>,
     pub indexer_flags: Vec<IndexerFlag>,
     pub download_url: String,
@@ -52,6 +58,8 @@ impl ReleaseCandidate {
             indexer_priority: 25,
             seeders: None,
             peers: None,
+            queue_length: None,
+            upload_speed: None,
             publish_date: None,
             indexer_flags: Vec::new(),
             download_url: String::new(),
@@ -679,7 +687,8 @@ pub struct RankedRelease {
 }
 
 /// Sorts best-first: accepted ▸ quality rank (+ revision) ▸ custom-format score ▸ preferred
-/// protocol ▸ indexer priority ▸ seeders (torrent) / newest (usenet) ▸ smaller size.
+/// protocol ▸ indexer priority ▸ seeders (torrent) / newest (usenet) / free upload slot, shorter
+/// queue, faster peer (Soulseek) ▸ smaller size.
 pub fn prioritize(items: &mut [RankedRelease], preferred_protocol: Option<Protocol>) {
     items.sort_by(|a, b| compare(a, b, preferred_protocol));
 }
@@ -700,6 +709,13 @@ fn compare(a: &RankedRelease, b: &RankedRelease, preferred: Option<Protocol>) ->
         .then_with(|| match (ca.protocol, cb.protocol) {
             (Protocol::Torrent, Protocol::Torrent) => cb.seeders.unwrap_or(0).cmp(&ca.seeders.unwrap_or(0)),
             (Protocol::Usenet, Protocol::Usenet) => cb.publish_date.cmp(&ca.publish_date),
+            (Protocol::Soulseek, Protocol::Soulseek) => {
+                let free = |c: &ReleaseCandidate| c.indexer_flags.contains(&IndexerFlag::FreeUploadSlot);
+                free(cb)
+                    .cmp(&free(ca))
+                    .then_with(|| ca.queue_length.unwrap_or(0).cmp(&cb.queue_length.unwrap_or(0)))
+                    .then_with(|| cb.upload_speed.unwrap_or(0).cmp(&ca.upload_speed.unwrap_or(0)))
+            }
             _ => Ordering::Equal,
         })
         .then_with(|| size_bucket(ca).cmp(&size_bucket(cb)))
@@ -894,6 +910,80 @@ mod tests {
         ctx.search_kind = SearchKind::Interactive;
         c.publish_date = Some(now());
         assert!(evaluate(&c, &ctx).accepted);
+    }
+
+    #[test]
+    fn soulseek_protocol_and_delay() {
+        let p = hd1080();
+        let mut delay = DelayProfile {
+            soulseek_delay: 60,
+            torrent_delay: 0,
+            ..Default::default()
+        };
+        let mut c = ReleaseCandidate::new("Movie.2020.1080p.WEB-DL.x264-GRP", Protocol::Soulseek);
+        c.publish_date = Some(now() - Duration::minutes(10));
+        let mut ctx = DecisionContext::new(&p, now());
+        ctx.delay_profile = Some(&delay);
+        assert_eq!(specs(&evaluate(&c, &ctx)), vec!["delay"]);
+        // The torrent delay does not apply to Soulseek and vice versa.
+        let t = {
+            let mut t = c.clone();
+            t.protocol = Protocol::Torrent;
+            t
+        };
+        assert!(evaluate(&t, &ctx).accepted);
+        c.publish_date = Some(now() - Duration::minutes(61));
+        assert!(evaluate(&c, &ctx).accepted);
+        delay.enable_soulseek = false;
+        let mut ctx = DecisionContext::new(&p, now());
+        ctx.delay_profile = Some(&delay);
+        assert_eq!(specs(&evaluate(&c, &ctx)), vec!["protocol"]);
+        // Seeder / retention rules are torrent / usenet only.
+        ctx.delay_profile = None;
+        ctx.minimum_seeders = 5;
+        ctx.usenet_retention_days = Some(1);
+        c.publish_date = Some(now() - Duration::days(5));
+        assert!(evaluate(&c, &ctx).accepted);
+        // Profiles stored before Soulseek existed allow it.
+        let old: DelayProfile = serde_json::from_value(serde_json::json!({
+            "enable_usenet": true, "enable_torrent": true, "preferred_protocol": "usenet"
+        }))
+        .unwrap();
+        assert!(old.allows(Protocol::Soulseek) && old.delay_for(Protocol::Soulseek) == 0);
+    }
+
+    #[test]
+    fn soulseek_ranking_prefers_free_slot_then_short_queue() {
+        let p = hd1080();
+        let ctx = DecisionContext::new(&p, now());
+        let mk = |group: &str, free: bool, queue: u32, speed: u64| {
+            let mut c = ReleaseCandidate::new(
+                &format!("Movie.2020.1080p.WEB-DL.x264-{group}"),
+                Protocol::Soulseek,
+            );
+            if free {
+                c.indexer_flags.push(IndexerFlag::FreeUploadSlot);
+            }
+            c.queue_length = Some(queue);
+            c.upload_speed = Some(speed);
+            let decision = evaluate(&c, &ctx);
+            RankedRelease {
+                candidate: c,
+                decision,
+            }
+        };
+        let mut items = vec![
+            mk("BUSY", false, 0, 10_000_000),
+            mk("LONGQ", true, 50, 10_000_000),
+            mk("SLOW", true, 0, 1_000),
+            mk("FAST", true, 0, 5_000_000),
+        ];
+        prioritize(&mut items, None);
+        let groups: Vec<&str> = items
+            .iter()
+            .map(|i| i.candidate.parsed.release_group.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(groups, vec!["FAST", "SLOW", "LONGQ", "BUSY"]);
     }
 
     #[test]

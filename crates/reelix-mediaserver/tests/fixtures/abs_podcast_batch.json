@@ -1,0 +1,68 @@
+{
+  "libraryItems": [
+    {
+      "id": "li_archers",
+      "libraryId": "lib-pod",
+      "mediaType": "podcast",
+      "path": "/podcasts/The Archers",
+      "media": {
+        "metadata": { "title": "The Archers", "author": "BBC Radio 4", "feedUrl": "https://feeds.example/archers.rss" },
+        "episodes": [
+          {
+            "libraryItemId": "li_archers",
+            "id": "ep_a1",
+            "index": 1,
+            "season": "20",
+            "episode": "3",
+            "episodeType": "full",
+            "title": "Ambridge in Spring",
+            "guid": "urn:bbc:podcast:m001abcd",
+            "enclosure": { "url": "https://media.example/archers/m001abcd.mp3", "type": "audio/mpeg", "length": "1234" },
+            "publishedAt": 1704110400000,
+            "duration": 773.4,
+            "size": 9999,
+            "audioFile": {
+              "index": 1,
+              "ino": "123",
+              "duration": 773.4,
+              "metadata": {
+                "filename": "The Archers - S20E03 - Ambridge in Spring.mp3",
+                "ext": ".mp3",
+                "path": "/podcasts/The Archers/The Archers - S20E03 - Ambridge in Spring.mp3",
+                "relPath": "The Archers - S20E03 - Ambridge in Spring.mp3",
+                "size": 12345678
+              }
+            }
+          },
+          {
+            "libraryItemId": "li_archers",
+            "id": "ep_a2",
+            "season": "",
+            "episode": "",
+            "title": "Not downloaded yet",
+            "enclosure": { "url": "https://media.example/archers/2.mp3" },
+            "publishedAt": null,
+            "audioFile": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "li_quiz",
+      "mediaType": "podcast",
+      "media": {
+        "metadata": { "title": "  The News Quiz  " },
+        "episodes": [
+          {
+            "id": "ep_q1",
+            "season": 2,
+            "episode": 7,
+            "title": "Series 2, Episode 7",
+            "publishedAt": "1706788800000",
+            "audioFile": { "duration": 1800, "metadata": { "path": "/podcasts/News Quiz/q1.m4a" } }
+          }
+        ]
+      }
+    }
+  ]
+}

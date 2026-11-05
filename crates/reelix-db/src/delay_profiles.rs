@@ -12,9 +12,9 @@ pub struct DelayProfileRepo<'a> {
     pub(crate) db: &'a Db,
 }
 
-const COLS: &str = "id, enable_usenet, enable_torrent, preferred_protocol, usenet_delay, torrent_delay, \
-                    bypass_if_highest_quality, bypass_if_above_custom_format_score, minimum_custom_format_score, \
-                    tags, sort_order";
+const COLS: &str = "id, enable_usenet, enable_torrent, enable_soulseek, preferred_protocol, usenet_delay, \
+                    torrent_delay, soulseek_delay, bypass_if_highest_quality, bypass_if_above_custom_format_score, \
+                    minimum_custom_format_score, tags, sort_order";
 
 fn map(row: &SqliteRow) -> Result<DelayProfile> {
     let proto: String = row.try_get("preferred_protocol")?;
@@ -22,13 +22,12 @@ fn map(row: &SqliteRow) -> Result<DelayProfile> {
         id: row.try_get("id")?,
         enable_usenet: row.try_get("enable_usenet")?,
         enable_torrent: row.try_get("enable_torrent")?,
-        preferred_protocol: match proto.as_str() {
-            "usenet" => Protocol::Usenet,
-            "torrent" => Protocol::Torrent,
-            other => return Err(decode_err(format!("unknown protocol {other:?}"))),
-        },
+        enable_soulseek: row.try_get("enable_soulseek")?,
+        preferred_protocol: Protocol::parse(&proto)
+            .ok_or_else(|| decode_err(format!("unknown protocol {proto:?}")))?,
         usenet_delay: row.try_get::<i64, _>("usenet_delay")?.max(0) as u32,
         torrent_delay: row.try_get::<i64, _>("torrent_delay")?.max(0) as u32,
+        soulseek_delay: row.try_get::<i64, _>("soulseek_delay")?.max(0) as u32,
         bypass_if_highest_quality: row.try_get("bypass_if_highest_quality")?,
         bypass_if_above_custom_format_score: row.try_get("bypass_if_above_custom_format_score")?,
         minimum_custom_format_score: row.try_get("minimum_custom_format_score")?,
@@ -37,26 +36,21 @@ fn map(row: &SqliteRow) -> Result<DelayProfile> {
     })
 }
 
-fn proto_str(p: Protocol) -> &'static str {
-    match p {
-        Protocol::Usenet => "usenet",
-        Protocol::Torrent => "torrent",
-    }
-}
-
 async fn insert(conn: &mut sqlx::SqliteConnection, p: &DelayProfile) -> Result<i64> {
     let now = now_ms();
     let res = sqlx::query(
-        "INSERT INTO delay_profiles (enable_usenet, enable_torrent, preferred_protocol, usenet_delay, torrent_delay,
-             bypass_if_highest_quality, bypass_if_above_custom_format_score, minimum_custom_format_score, tags,
-             sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO delay_profiles (enable_usenet, enable_torrent, enable_soulseek, preferred_protocol, usenet_delay,
+             torrent_delay, soulseek_delay, bypass_if_highest_quality, bypass_if_above_custom_format_score,
+             minimum_custom_format_score, tags, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(p.enable_usenet)
     .bind(p.enable_torrent)
-    .bind(proto_str(p.preferred_protocol))
+    .bind(p.enable_soulseek)
+    .bind(p.preferred_protocol.as_str())
     .bind(p.usenet_delay as i64)
     .bind(p.torrent_delay as i64)
+    .bind(p.soulseek_delay as i64)
     .bind(p.bypass_if_highest_quality)
     .bind(p.bypass_if_above_custom_format_score)
     .bind(p.minimum_custom_format_score)
@@ -109,16 +103,19 @@ impl DelayProfileRepo<'_> {
 
     pub async fn update(&self, id: i64, p: &DelayProfile) -> Result<Option<DelayProfile>> {
         let res = sqlx::query(
-            "UPDATE delay_profiles SET enable_usenet = ?, enable_torrent = ?, preferred_protocol = ?, usenet_delay = ?,
-                 torrent_delay = ?, bypass_if_highest_quality = ?, bypass_if_above_custom_format_score = ?,
+            "UPDATE delay_profiles SET enable_usenet = ?, enable_torrent = ?, enable_soulseek = ?,
+                 preferred_protocol = ?, usenet_delay = ?, torrent_delay = ?, soulseek_delay = ?,
+                 bypass_if_highest_quality = ?, bypass_if_above_custom_format_score = ?,
                  minimum_custom_format_score = ?, tags = ?, sort_order = ?, updated_at = ?
              WHERE id = ?",
         )
         .bind(p.enable_usenet)
         .bind(p.enable_torrent)
-        .bind(proto_str(p.preferred_protocol))
+        .bind(p.enable_soulseek)
+        .bind(p.preferred_protocol.as_str())
         .bind(p.usenet_delay as i64)
         .bind(p.torrent_delay as i64)
+        .bind(p.soulseek_delay as i64)
         .bind(p.bypass_if_highest_quality)
         .bind(p.bypass_if_above_custom_format_score)
         .bind(p.minimum_custom_format_score)
@@ -165,6 +162,9 @@ mod tests {
         assert_eq!(repo.list().await.unwrap()[0].id, created.id);
         let mut changed = created.clone();
         changed.usenet_delay = 15;
+        changed.soulseek_delay = 30;
+        changed.enable_soulseek = false;
+        changed.preferred_protocol = Protocol::Soulseek;
         assert_eq!(repo.update(created.id, &changed).await.unwrap().unwrap(), changed);
         assert!(repo.delete(created.id).await.unwrap());
         assert_eq!(repo.list().await.unwrap().len(), 1);
