@@ -28,6 +28,7 @@ jobs:
   prepare:
     name: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
@@ -79,6 +80,7 @@ jobs:
     name: web UI
     needs: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -102,6 +104,7 @@ jobs:
     name: linux ${{ matrix.arch }}
     needs: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -118,6 +121,8 @@ jobs:
         with:
           key: linux-${{ matrix.arch }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        # A stuck Zig mirror once hung this step for hours; fail fast so a re-run can retry.
+        timeout-minutes: 10
         with:
           version: ${{ env.ZIG_VERSION }}
       - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2
@@ -142,6 +147,7 @@ jobs:
     name: windows x86_64
     needs: prepare
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       # Link the C runtime statically so users don't need the Visual C++ redistributable.
       RUSTFLAGS: -C target-feature=+crt-static
@@ -166,6 +172,7 @@ jobs:
     name: archives
     needs: [prepare, web, linux, windows]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -224,6 +231,7 @@ jobs:
     name: windows installer
     needs: [prepare, archives]
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -312,6 +320,7 @@ jobs:
     name: package
     needs: [prepare, archives, windows-installer]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       # Signed build provenance for the release assets (verify with `gh attestation verify`).
@@ -388,6 +397,7 @@ jobs:
     name: linux installer
     needs: [prepare, package]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
@@ -429,6 +439,7 @@ jobs:
     name: docker image
     needs: [prepare, web, linux]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -523,6 +534,7 @@ jobs:
     needs: [prepare, package, docker, linux-installer]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
