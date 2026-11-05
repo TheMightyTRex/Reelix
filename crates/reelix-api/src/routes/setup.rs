@@ -1,6 +1,8 @@
+use axum::body::Body;
 use axum::extract::State;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use reelix_api_types::system::PendingRestoreDto;
 use reelix_api_types::{ApiErrorBody, SetupRequest, SetupStatus, UserDto};
 use reelix_core::{AuthSource, DomainEvent, Permissions, VERSION};
 use reelix_db::NewUser;
@@ -71,16 +73,8 @@ pub async fn complete(
     if state.db().users().count().await? > 0 {
         return Err(ApiError::Conflict("setup has already been completed".into()));
     }
-    if token_required(&state, &meta) {
-        let expected = state.inner.setup_token.as_deref().map(sha256_hex);
-        let given = req.setup_token.as_deref().map(|t| sha256_hex(t.trim()));
-        if given.is_none() || given != expected {
-            tracing::warn!(ip = ?meta.ip, "first-run setup attempted without a valid setup token");
-            return Err(ApiError::Validation {
-                status: StatusCode::FORBIDDEN,
-                message: "a valid setup token is required; it is printed in the server log".into(),
-            });
-        }
+    if token_required(&state, &meta) && !token_matches(&state, req.setup_token.as_deref()) {
+        return Err(wrong_token(&meta));
     }
     let password_hash = hash_password_blocking(req.password).await?;
     let user = state
@@ -110,6 +104,60 @@ pub async fn complete(
         ApiJson(user_dto(&user)),
     )
         .into_response())
+}
+
+/// Header carrying the set-up code on `POST /setup/restore`, whose body is the backup itself.
+pub const SETUP_TOKEN_HEADER: &str = "x-reelix-setup-token";
+
+/// Whether `given` is the set-up code this server printed.
+fn token_matches(state: &AppState, given: Option<&str>) -> bool {
+    let expected = state.inner.setup_token.as_deref().map(sha256_hex);
+    let given = given.map(|t| sha256_hex(t.trim()));
+    given.is_some() && given == expected
+}
+
+fn wrong_token(meta: &RequestMeta) -> ApiError {
+    tracing::warn!(ip = ?meta.ip, "first-run setup attempted without a valid setup token");
+    ApiError::Validation {
+        status: StatusCode::FORBIDDEN,
+        message: "a valid setup token is required; it is printed in the server log".into(),
+    }
+}
+
+/// Stages a Reelix backup (the raw zip as the body) during first-run setup, before any account
+/// exists: the backup brings its own accounts. It is applied on the next restart. Remote clients
+/// send the set-up code in the `x-reelix-setup-token` header, as `POST /setup` needs it.
+#[utoipa::path(post, path = "/api/v1/setup/restore", tag = "setup",
+    request_body(content = Vec<u8>, content_type = "application/zip"),
+    params(("x-reelix-setup-token" = Option<String>, Header, description = "The set-up code; needed from other computers")),
+    responses(
+        (status = 202, description = "Restore staged; restart Reelix to apply it", body = PendingRestoreDto),
+        (status = 400, description = "Not a valid Reelix backup", body = ApiErrorBody),
+        (status = 403, description = "Missing or wrong setup token", body = ApiErrorBody),
+        (status = 409, description = "Setup already completed", body = ApiErrorBody),
+        (status = 413, description = "The archive is larger than 2 GiB", body = ApiErrorBody),
+    ))]
+pub async fn restore(
+    State(state): State<AppState>,
+    meta: RequestMeta,
+    headers: HeaderMap,
+    body: Body,
+) -> ApiResult<Response> {
+    // Both checks come before any of the body is read, so nobody can make the server take in
+    // gigabytes without the code.
+    if state.db().users().count().await? > 0 {
+        return Err(ApiError::Conflict("setup has already been completed".into()));
+    }
+    if token_required(&state, &meta) {
+        let given = headers.get(SETUP_TOKEN_HEADER).and_then(|v| v.to_str().ok());
+        if !token_matches(&state, given) {
+            return Err(wrong_token(&meta));
+        }
+    }
+    let _guard = state.inner.setup_lock.lock().await;
+    let pending = crate::routes::maintenance::stage_upload(&state, &headers, body).await?;
+    tracing::warn!(ip = ?meta.ip, "restore staged from first-run setup; it is applied on the next restart");
+    Ok((StatusCode::ACCEPTED, ApiJson(pending)).into_response())
 }
 
 pub(crate) fn validate_username(name: &str) -> ApiResult<()> {

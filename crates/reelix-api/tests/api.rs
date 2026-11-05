@@ -345,6 +345,54 @@ async fn setup_requires_the_token_unless_local() {
 }
 
 #[tokio::test]
+async fn setup_restore_needs_the_token_and_no_accounts() {
+    let mut app = app().await;
+    reconfigure(&mut app, |s| s.with_setup_token("tok-123"));
+    let restore = |token: Option<&'static str>, peer: Option<&'static str>| Req {
+        peer,
+        headers: token
+            .map(|t| vec![("x-reelix-setup-token", t)])
+            .unwrap_or_default(),
+        ..Default::default()
+    };
+    for (token, peer) in [
+        (None, Some("192.0.2.1:5000")),
+        (Some("wrong"), Some("192.0.2.1:5000")),
+    ] {
+        let r = call(&app, Method::POST, "/api/v1/setup/restore", restore(token, peer)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.body);
+    }
+    // Past the checks, the upload reaches the backup service (not registered in these tests).
+    for (token, peer) in [
+        (Some("tok-123"), Some("192.0.2.1:5000")),
+        (None, Some("127.0.0.1:5000")),
+    ] {
+        let r = call(&app, Method::POST, "/api/v1/setup/restore", restore(token, peer)).await;
+        assert!(
+            r.status != StatusCode::FORBIDDEN && r.status != StatusCode::CONFLICT,
+            "{:?}",
+            r.status
+        );
+    }
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/setup",
+        json_body(json!({"username": "admin", "password": ADMIN_PW, "setup_token": "tok-123"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/setup/restore",
+        restore(Some("tok-123"), Some("127.0.0.1:5000")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.body);
+}
+
+#[tokio::test]
 async fn setup_from_the_server_itself_needs_no_token() {
     let mut app = app().await;
     reconfigure(&mut app, |s| s.with_setup_token("tok-123"));

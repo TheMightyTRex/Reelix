@@ -6,6 +6,15 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+### Added
+- **A new setup wizard** with three ways to start: a new install, restoring a Reelix backup, or migrating from the *arr apps. Each answer is saved to the setting Reelix already has, and every step after the account can be skipped.
+  - **New install** asks what to follow, then the TMDB key, library folders, a torrent app and a Usenet app, which to prefer, sites to search, quality, when to get new movies, media servers and requests.
+  - **Restore** stages a backup before any account exists (`POST /api/v1/setup/restore`, behind the same setup token as `POST /api/v1/setup`).
+  - **Migration** brings the *arr apps over with the System → Migrate preview, inside the wizard.
+  - "What is…" help on each step, a progress line, and focus on each new step's heading.
+- **`reelix setup`:** the same wizard in a terminal, for a server with no desktop. Boxed (a screen per step, a progress bar and a menu on the bottom line, with help over the step) or plain (`--plain` or `REELIX_PLAIN=1`) for screen readers.
+- **Send feedback in the wizard,** with [Snaglist](https://github.com/TheMightyTRex/snaglist) (MIT). Reports name the step and open a GitHub issue. **Show as a QR code** sends a report from a phone when the server is not online yet; in the terminal the code is sized to the window, and the whole report is saved under the data directory's `feedback` folder.
+
 ## [0.8.3] - 2026-11-05
 
 ### Added
