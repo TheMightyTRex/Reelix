@@ -23,6 +23,49 @@ modes, uninstall first (your data stays) and copy `%LOCALAPPDATA%\Reelix` to
 `C:\ProgramData\Reelix` or back if you want to keep it: the two modes are separate
 installations with separate data folders, and both use port 7700.
 
+### Fresh install, recovery or migration
+
+A new installation then asks **How would you like to install Reelix?** (an upgrade skips this
+and keeps its data):
+
+- **Fresh install**: a new, empty Reelix.
+- **Recovery**: restore a backup. Pick a `reelix_backup_*.zip` (downloaded from
+  **System → Backup**). Setup checks it right away with `reelix restore check`; after copying the
+  program files, and before Reelix first starts, it runs `reelix restore stage <zip>`, which
+  copies the zip into `<data folder>\restore` as the pending restore, exactly like uploading it in
+  System → Backup. Reelix applies it when it starts (database, `config.toml` apart from this
+  installation's paths, and the secret key), and rolls back if the restored database won't
+  open; the files it replaced stay in `<data folder>\restore\pre-restore_*`. If staging fails,
+  Setup shows why and lets you pick another file or continue with an empty Reelix.
+- **Migration**, from either:
+  - **Radarr, Sonarr, Prowlarr, Lidarr or Readarr on this PC.** Setup reads their
+    `config.xml` (`%ProgramData%\<App>`, the default for the Windows installers of those apps,
+    or `%LOCALAPPDATA%\<App>` / `%APPDATA%\<App>`): `Port`, `UrlBase`, `BindAddress` and `ApiKey`
+    give the address, e.g. `http://localhost:7878`. *arr apps keep serving plain HTTP on `Port`
+    when SSL is enabled, so that address is used. Tick the apps to migrate from. For each one
+    Setup runs `reelix migrate prepare --source radarr --url <url> --api-key-file <file>`; the
+    key goes through a temporary file only you can read (deleted right after), never the
+    command line, where other users could see it in the process list. Reelix stores the
+    source in its database with the key encrypted by its secret key.
+
+    **Nothing is imported by Setup.** After you create the admin account, Reelix shows **Ready to
+    migrate**: **System → Migrate** lists the apps Setup found and fills in the URL with the key
+    masked. Review the preview (it lists what is and isn't migrated) and start the migration
+    as usual; a saved key is forgotten once a run starts with it, or with
+    the delete button. The *arr apps themselves are not changed or stopped: once you are
+    happy, stop them yourself (for example their service in `services.msc`).
+  - **An existing Reelix folder** (for example the portable zip). Choose the old folder (the
+    one with `reelix.exe` and `data`, or the `data` folder itself). Setup refuses if that copy of
+    Reelix is running (close it first) or if the new data folder already has a `reelix.db`
+    (choose to keep that one instead; a silent install fails). It copies the whole data
+    folder (database, `config.toml`, `secret.key`, backups, logs) to the new data folder; in
+    service mode the copy gets the SYSTEM + Administrators ACL like a new data folder. Then
+    `reelix config relocate --from <old data folder>` updates `config.toml`: locations inside
+    the old folder (`[paths] data_dir`, `backup_dir`, `log_dir`, `[security] secret_key_file`,
+    a SQLite `[database] url`) now point to the new one, relative ones are dropped so the
+    defaults apply, and everything else, comments included, stays as it was. The old folder
+    is left as it is; delete it once the new installation works.
+
 ### Install for me only
 
 - No admin rights needed.
@@ -78,6 +121,37 @@ reelix-<version>-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTA
 
 Add `/TASKS="autostart"` (per-user) or `/TASKS="firewall"` (all users) to pick tasks, and
 `/LOG=setup.log` for a log.
+
+How to install (ignored on upgrades), also usable to preselect the choices of an interactive
+install:
+
+| Parameter | |
+|---|---|
+| `/MODE=fresh` | the default: an empty Reelix |
+| `/MODE=recovery /BACKUP=<zip>` | restore this backup on the first start |
+| `/MODE=migrate /MIGRATEFROM=<folder>` | copy the data of the Reelix in `<folder>` |
+| `/MODE=migrate /ARR=radarr,sonarr` | save these apps for System → Migrate (only apps Setup finds on the PC: `radarr`, `sonarr`, `prowlarr`, `lidarr`, `readarr`) |
+
+A silent install checks these before installing anything and exits with code 7 (the reason is
+in the `/LOG`) if the backup isn't valid, the folder has no Reelix data, that Reelix is still
+running, or the new data folder already has a database.
+
+```
+reelix-<version>-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /CURRENTUSER /MODE=recovery /BACKUP="D:\reelix_backup_manual_2026.11.01_10.00.00.zip"
+```
+
+The commands Setup uses work on any install, with `--data-dir` (or `--config`) selecting the
+data folder; Reelix doesn't have to be running, and they print the result or exit non-zero with
+the error on stderr:
+
+| Command | |
+|---|---|
+| `reelix backup create` | write a backup to `<data>\backups` and print its path |
+| `reelix restore check <zip>` | check that the file is a Reelix backup |
+| `reelix restore stage <zip>` | stage it; it is restored on the next start |
+| `reelix migrate prepare --source <app> --url <url> --api-key-file <file>` | save an app for System → Migrate |
+| `reelix migrate list` | the saved apps (keys masked) as JSON |
+| `reelix config relocate --from <old data folder>` | point config.toml at the data folder after copying it |
 
 ### Building the installer
 

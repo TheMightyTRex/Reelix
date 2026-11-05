@@ -51,7 +51,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 ### Discover and requests
 - Discover page with trending, popular and upcoming movies and TV.
 - Books and music on Discover too: trending books and books by subject (fantasy, science fiction, mystery and more) from Open Library, and new releases and popular albums from ListenBrainz, plus search for both.
-- Radio and podcasts on Discover: Apple Podcasts top charts and categories for your country, BBC Sounds popular programmes, and Podcast Index trending.
+- Radio and podcasts on Discover: Apple Podcasts top charts and categories for your country, BBC Sounds popular programmes overall, per station and in 32 categories, and Podcast Index trending.
 - Shows availability everywhere: available, partially available, requested, pending or processing.
 - Request movies, whole series or single seasons, books (ebook, audiobook or both), albums and radio shows.
 - Approval workflow with auto-approve per user or permission, per-user quotas, and decline reasons.
@@ -137,6 +137,8 @@ To build the image yourself, run `docker build -f docker/Dockerfile -t reelix .`
 
 - **Install for me only** (no admin rights): installs to `%LOCALAPPDATA%\Programs\Reelix` and keeps data in `%LOCALAPPDATA%\Reelix`. Start Reelix from the Start menu; optionally it starts when you sign in.
 - **Install for all users** (admin): installs to `C:\Program Files\Reelix` and runs Reelix as the Windows service `Reelix`, which starts with Windows even when nobody is signed in. Data lives in `C:\ProgramData\Reelix`.
+
+A new installation then offers a **Fresh install**, a **Recovery** from a Reelix backup zip, or a **Migration** from Radarr, Sonarr, Prowlarr, Lidarr or Readarr on the same PC (reviewed and run in System → Migrate after setup) or from an existing Reelix folder such as the portable zip; silent installs take `/MODE=`, `/BACKUP=`, `/MIGRATEFROM=` and `/ARR=`.
 
 Either way, **Open Reelix** in the Start menu opens <http://localhost:7700>, updates install in place from **System → Updates**, and uninstalling keeps your data unless you ask to delete it. See [docs/installers.md](docs/installers.md).
 

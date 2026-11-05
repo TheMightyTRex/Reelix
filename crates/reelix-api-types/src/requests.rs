@@ -783,6 +783,10 @@ pub struct RadioDiscoverListDto {
     /// Radio source id (`apple`, `bbc`, `podcastindex`) and its display name.
     pub provider: String,
     pub provider_name: String,
+    /// The heading a category is shown under within its source (`Comedy`, `Drama`); none for
+    /// rows and for a source's general categories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// `GET /discover/genres/radio`: the radio Discover lists of the enabled sources for the

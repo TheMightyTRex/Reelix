@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use reelix_api_types::migrate::{
     MigrateAction, MigrateCategory, MigrateConnection, MigrateItem, MigratePlan, MigrateRunDto,
-    MigrateRunRequest, MigrateState, PathRewrite, SourceKind,
+    MigrateRunRequest, MigrateState, PathRewrite, PendingMigrationSource, SAVED_API_KEY, SourceKind,
 };
 use serde::Deserialize;
 
@@ -43,6 +43,8 @@ pub fn MigratePage() -> impl IntoView {
     let chosen = RwSignal::new(BTreeSet::<MigrateCategory>::new());
     let search_missing = RwSignal::new(false);
     let run = RwSignal::new(None::<MigrateRunDto>);
+    // Apps Setup found on this PC (the Windows installer's "Migration" option).
+    let saved = RwSignal::new(Vec::<PendingMigrationSource>::new());
 
     // Show a run still going (or just finished) when the page opens.
     spawn_local(async move {
@@ -82,6 +84,40 @@ pub fn MigratePage() -> impl IntoView {
         connected.set(None);
         plan.set(None);
         error.set(None);
+    };
+    let use_saved = move |p: &PendingMigrationSource| {
+        source.set(p.source);
+        url.set(p.url.clone());
+        api_key.set(SAVED_API_KEY.to_owned());
+        reset();
+    };
+    let load_saved = move |prefill: bool| {
+        spawn_local(async move {
+            if let Ok(list) = api::get::<Vec<PendingMigrationSource>>("/system/migrate/pending").await {
+                if prefill
+                    && url.get_untracked().trim().is_empty()
+                    && let Some(first) = list.first()
+                {
+                    use_saved(first);
+                }
+                saved.set(list);
+            }
+        });
+    };
+    load_saved(true);
+    let forget = move |kind: SourceKind| {
+        spawn_local(async move {
+            match api::delete(&format!("/system/migrate/pending/{}", kind.as_str())).await {
+                Ok(()) => {
+                    if source.get_untracked() == kind && api_key.get_untracked() == SAVED_API_KEY {
+                        api_key.set(String::new());
+                        reset();
+                    }
+                    load_saved(false);
+                }
+                Err(e) => toasts.error(e.message),
+            }
+        });
     };
 
     let test = move |_| {
@@ -135,6 +171,11 @@ pub fn MigratePage() -> impl IntoView {
                     toasts.success("Migration started.");
                     plan.set(None);
                     run.set(Some(r));
+                    // A saved key is used up once the run has it.
+                    if api_key.get_untracked() == SAVED_API_KEY {
+                        api_key.set(String::new());
+                        load_saved(false);
+                    }
                 }
                 Err(e) => error.set(Some(e.message)),
             }
@@ -153,6 +194,19 @@ pub fn MigratePage() -> impl IntoView {
         <PageHeader title="Migrate" subtitle="Bring settings and libraries over from Radarr, Sonarr, Prowlarr, Readarr, Lidarr and Jellyseerr." />
         <div class="stack">
             {move || run.get().map(|r| view! { <RunCard run=r on_close=Callback::new(move |()| run.set(None)) /> })}
+            {move || {
+                let list = saved.get();
+                (!list.is_empty()).then(|| view! {
+                    <Card title="Found by Setup" subtitle="Setup found these apps on this PC and saved their address and API key. Pick one, preview the migration and start it when the preview looks right; nothing has been imported yet.">
+                        <DataTable caption="Apps found by Setup" headers=vec!["App", "URL", ""]>
+                            {list
+                                .into_iter()
+                                .map(|p| view! { <SavedRow saved=p source=source url=url api_key=api_key on_use=Callback::new(move |p: PendingMigrationSource| use_saved(&p)) on_forget=Callback::new(forget) /> })
+                                .collect_view()}
+                        </DataTable>
+                    </Card>
+                })
+            }}
             <Card title="1. Connect" subtitle="Reelix reads the other app through its API; nothing is changed there. Find the API key under Settings → General in that app.">
                 <div class="form">
                     <div class="field-row">
@@ -182,6 +236,9 @@ pub fn MigratePage() -> impl IntoView {
                         <input id="mg-key" class="input mono" type="password" autocomplete="off"
                             prop:value=move || api_key.get()
                             on:input=move |e| { api_key.set(event_target_value(&e)); reset(); } />
+                        {move || (api_key.get() == SAVED_API_KEY).then(|| view! {
+                            <span class="field-hint">"Using the API key Setup saved. Type a key to use another one."</span>
+                        })}
                     </div>
                     <PathRewrites rows=rewrites />
                     {move || error.get().map(|e| view! { <p class="field-error" role="alert">{e}</p> })}
@@ -230,6 +287,44 @@ pub fn MigratePage() -> impl IntoView {
                 }
             }}
         </div>
+    }
+}
+
+/// One app Setup saved: "Use" fills in the connection form (with the saved key masked).
+#[component]
+fn SavedRow(
+    saved: PendingMigrationSource,
+    source: RwSignal<SourceKind>,
+    url: RwSignal<String>,
+    api_key: RwSignal<String>,
+    on_use: Callback<PendingMigrationSource>,
+    on_forget: Callback<SourceKind>,
+) -> impl IntoView {
+    let kind = saved.source;
+    let saved_url = saved.url.clone();
+    let selected = Memo::new(move |_| {
+        source.get() == kind && url.with(|u| *u == saved_url) && api_key.with(|k| k == SAVED_API_KEY)
+    });
+    let label = saved.url.clone();
+    view! {
+        <tr>
+            <td><span class="cell-strong">{kind.label()}</span></td>
+            <td><span class="mono">{label}</span></td>
+            <td>
+                <div class="lib-toolbar">
+                    <button type="button" class="btn btn-sm btn-secondary"
+                        disabled=move || selected.get()
+                        on:click=move |_| on_use.run(saved.clone())>
+                        {move || if selected.get() { "Selected" } else { "Use" }}
+                    </button>
+                    <button type="button" class="btn btn-sm btn-ghost"
+                        aria-label=format!("Forget {}", kind.label())
+                        on:click=move |_| on_forget.run(kind)>
+                        <Icon name="trash" />
+                    </button>
+                </div>
+            </td>
+        </tr>
     }
 }
 
@@ -456,6 +551,14 @@ fn RunCard(run: MigrateRunDto, on_close: Callback<()>) -> impl IntoView {
                 </p>
             })}
             {run.error.clone().map(|e| view! { <p class="field-error" role="alert">{e}</p> })}
+            {(run.state == MigrateState::Finished && run.source != SourceKind::Jellyseerr).then(|| view! {
+                <p class="field-hint">
+                    {format!(
+                        "Once Reelix works the way you want, you can stop {0}: on Windows, stop it and set its service to Disabled in services.msc (or close {0} and remove it from startup). Reelix doesn't change {0}.",
+                        run.source.label()
+                    )}
+                </p>
+            })}
             {groups
                 .into_iter()
                 .map(|(cat, items)| {

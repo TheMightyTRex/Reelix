@@ -301,6 +301,7 @@ impl LibraryGateway for FakeLibrary {
                 name: id.clone(),
                 provider: id.split('-').next().unwrap_or_default().to_owned(),
                 provider_name: "Fake".into(),
+                group: None,
             })
             .collect();
         rows.sort_by(|a, b| a.id.cmp(&b.id));

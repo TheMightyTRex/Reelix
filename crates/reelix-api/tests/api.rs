@@ -1242,3 +1242,80 @@ async fn ui_settings_are_per_user_and_maintenance_is_admin_only() {
         "the body was read"
     );
 }
+
+fn with_cookie(cookie: &str, csrf: bool) -> Req<'_> {
+    Req {
+        cookie: Some(cookie),
+        csrf,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn pending_migration_sources_are_admin_only_and_masked() {
+    use reelix_api_types::migrate::SourceKind;
+    const PENDING: &str = "/api/v1/system/migrate/pending";
+    let app = app().await;
+    let admin = setup_admin(&app).await;
+    create_regular_user(&app).await;
+    let bob = login(&app, "bob", "user-password", false).await.cookie();
+    let key = "0123456789abcdef0123456789abcdef";
+    for (source, url) in [
+        (SourceKind::Radarr, "http://localhost:7878"),
+        (SourceKind::Sonarr, "http://localhost:8989/sonarr"),
+    ] {
+        reelix_migrate::pending::add(app.state.db(), app.state.secrets(), source, url, key)
+            .await
+            .unwrap();
+    }
+
+    // Regular users can't see or change them; neither can anonymous callers.
+    let r = call(&app, Method::GET, PENDING, with_cookie(&bob, false)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(&app, Method::GET, PENDING, Req::default()).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    for uri in [PENDING, "/api/v1/system/migrate/pending/radarr"] {
+        let r = call(&app, Method::DELETE, uri, with_cookie(&bob, true)).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{uri}");
+    }
+    // A regular user can't borrow a saved key through a connection test either.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/system/migrate/test",
+        Req {
+            body: Some(json!({"source": "radarr", "url": "http://localhost:7878", "api_key": "********"})),
+            ..with_cookie(&bob, true)
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    let r = call(&app, Method::GET, PENDING, with_cookie(&admin, false)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let list = r.body.as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0]["source"], "radarr");
+    assert_eq!(list[0]["url"], "http://localhost:7878");
+    assert_eq!(list[1]["url"], "http://localhost:8989/sonarr");
+    assert!(list.iter().all(|s| s["api_key"] == "********"));
+    assert!(!r.body.to_string().contains(key));
+
+    let sonarr = "/api/v1/system/migrate/pending/sonarr";
+    let r = call(&app, Method::DELETE, sonarr, with_cookie(&admin, true)).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(&app, Method::DELETE, sonarr, with_cookie(&admin, true)).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &app,
+        Method::DELETE,
+        "/api/v1/system/migrate/pending/nope",
+        with_cookie(&admin, true),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(&app, Method::DELETE, PENDING, with_cookie(&admin, true)).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = call(&app, Method::GET, PENDING, with_cookie(&admin, false)).await;
+    assert_eq!(r.body, json!([]));
+}
