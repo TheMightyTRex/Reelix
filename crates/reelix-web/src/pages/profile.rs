@@ -135,6 +135,7 @@ fn QuotaCard() -> impl IntoView {
                         {meter("Series", "season requests", q.tv)}
                         {auth.has(Permissions::REQUEST_BOOK).then(|| meter("Books", "book requests", q.book))}
                         {auth.has(Permissions::REQUEST_MUSIC).then(|| meter("Music", "album requests", q.music))}
+                        {auth.has(Permissions::REQUEST_RADIO).then(|| meter("Radio", "radio requests", q.radio))}
                     </div>
                 }
                 .into_any(),

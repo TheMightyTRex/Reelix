@@ -23,7 +23,7 @@ fn opt_str(s: &str) -> Option<String> {
 }
 
 /// Profile + root folder selects for one kind / quality. `kind`: `movie`, `series`, or
-/// `ebook` / `audiobook` / `music` (book and album request defaults).
+/// `ebook` / `audiobook` / `music` / `radio` (book, album and radio request defaults).
 #[component]
 pub(crate) fn DefaultsEditor(
     #[prop(into)] label: String,
@@ -33,7 +33,7 @@ pub(crate) fn DefaultsEditor(
 ) -> impl IntoView {
     let options = LocalResource::new(move || async move {
         let url = match kind {
-            "ebook" | "audiobook" | "music" => format!("/requests/media/options?kind={kind}"),
+            "ebook" | "audiobook" | "music" | "radio" => format!("/requests/media/options?kind={kind}"),
             _ => format!("/requests/options?kind={kind}&is_4k={is_4k}"),
         };
         api::get::<RequestOptionsDto>(&url).await
@@ -144,6 +144,10 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
     let bq_days = RwSignal::new(s.book_quota_days.to_string());
     let uq_limit = RwSignal::new(s.music_quota_limit.map(|v| v.to_string()).unwrap_or_default());
     let uq_days = RwSignal::new(s.music_quota_days.to_string());
+    let radio = RwSignal::new(s.radio.clone());
+    let auto_radio = RwSignal::new(s.auto_approve_radio);
+    let rq_limit = RwSignal::new(s.radio_quota_limit.map(|v| v.to_string()).unwrap_or_default());
+    let rq_days = RwSignal::new(s.radio_quota_days.to_string());
     let saving = RwSignal::new(false);
 
     let save = move |_| {
@@ -180,6 +184,10 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
             book_quota_days: opt_u32(&bq_days.get_untracked()).unwrap_or(7).max(1),
             music_quota_limit: opt_u32(&uq_limit.get_untracked()),
             music_quota_days: opt_u32(&uq_days.get_untracked()).unwrap_or(7).max(1),
+            radio: radio.get_untracked(),
+            auto_approve_radio: auto_radio.get_untracked(),
+            radio_quota_limit: opt_u32(&rq_limit.get_untracked()),
+            radio_quota_days: opt_u32(&rq_days.get_untracked()).unwrap_or(7).max(1),
         };
         saving.set(true);
         spawn_local(async move {
@@ -255,12 +263,18 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
                     <MetadataProfileSelect value=music_meta />
                 </div>
             </Card>
+            <Card title="Radio" subtitle="How shows from approved radio requests are followed: the follow choice is the radio settings' default; no root folder = the radio library folder.">
+                <div class="form">
+                    <DefaultsEditor label="Shows" kind="radio" is_4k=false value=radio />
+                </div>
+            </Card>
             <Card title="Approval">
                 <div class="form">
                     <Toggle value=auto_movie label="Auto-approve every movie request" hint="Otherwise only users with the auto-approve permission skip review." />
                     <Toggle value=auto_series label="Auto-approve every series request" />
                     <Toggle value=auto_book label="Auto-approve every book request" />
                     <Toggle value=auto_music label="Auto-approve every album request" />
+                    <Toggle value=auto_radio label="Auto-approve every radio request" />
                     <Toggle value=search label="Search as soon as a request is approved" />
                 </div>
             </Card>
@@ -277,7 +291,10 @@ fn RequestSettingsForm(s: RequestSettingsDto) -> impl IntoView {
                     <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || bq_days.get() on:input=move |e| bq_days.set(event_target_value(&e)) /></label>
                     <label>"Albums"<input class="input input-sm" type="number" min="0" placeholder="unlimited" prop:value=move || uq_limit.get() on:input=move |e| uq_limit.set(event_target_value(&e)) /></label>
                     <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || uq_days.get() on:input=move |e| uq_days.set(event_target_value(&e)) /></label>
+                    <label>"Radio shows"<input class="input input-sm" type="number" min="0" placeholder="unlimited" prop:value=move || rq_limit.get() on:input=move |e| rq_limit.set(event_target_value(&e)) /></label>
+                    <label>"per days"<input class="input input-sm" type="number" min="1" prop:value=move || rq_days.get() on:input=move |e| rq_days.set(event_target_value(&e)) /></label>
                 </div>
+
             </Card>
             <Card title="Discovery">
                 <div class="form">

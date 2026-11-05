@@ -97,20 +97,73 @@ pub async fn by_external(db: &Db, provider: &str, external_id: &str) -> Result<O
     )
 }
 
-/// `(provider, external_id) → id` of every show (marks search hits already added).
-pub async fn external_ids(db: &Db) -> Result<Vec<(String, String, i64)>> {
-    let rows = sqlx::query("SELECT provider, external_id, id FROM radio_shows")
+/// What a search hit or Discover item can be matched by: every show's `(provider,
+/// external_id)` and feed URL, and the aliases it was added under (`radio_show_aliases`).
+#[derive(Debug, Clone, Default)]
+pub struct KnownShows {
+    /// `(provider, external_id) → show id`, aliases included.
+    pub by_id: std::collections::HashMap<(String, String), i64>,
+    /// Feed URL ([`feed_key`]) → show id.
+    pub by_feed: std::collections::HashMap<String, i64>,
+}
+
+impl KnownShows {
+    /// The followed show behind a hit: its own id, an alias, else its feed URL (or the
+    /// external id of an `rss` hit, which is the feed URL).
+    pub fn find(&self, provider: &str, external_id: &str, feed_url: Option<&str>) -> Option<i64> {
+        if let Some(id) = self.by_id.get(&(provider.to_owned(), external_id.to_owned())) {
+            return Some(*id);
+        }
+        let feed = feed_url.or((provider == crate::providers::rss::ID).then_some(external_id))?;
+        self.by_feed.get(&feed_key(feed)).copied()
+    }
+}
+
+/// A feed URL for comparison: trimmed, lower case, without a trailing `/` or the scheme.
+pub fn feed_key(url: &str) -> String {
+    let u = url.trim().trim_end_matches('/').to_ascii_lowercase();
+    u.strip_prefix("https://")
+        .or_else(|| u.strip_prefix("http://"))
+        .map(str::to_owned)
+        .unwrap_or(u)
+}
+
+pub async fn known(db: &Db) -> Result<KnownShows> {
+    let mut k = KnownShows::default();
+    let rows = sqlx::query("SELECT id, provider, external_id, feed_url FROM radio_shows")
         .fetch_all(db.pool())
         .await?;
-    rows.iter()
-        .map(|r| {
-            Ok((
-                r.try_get("provider")?,
-                r.try_get("external_id")?,
-                r.try_get("id")?,
-            ))
-        })
-        .collect()
+    for r in &rows {
+        let id: i64 = r.try_get("id")?;
+        k.by_id
+            .insert((r.try_get("provider")?, r.try_get("external_id")?), id);
+        if let Some(f) = r.try_get::<Option<String>, _>("feed_url")? {
+            k.by_feed.entry(feed_key(&f)).or_insert(id);
+        }
+    }
+    let aliases = sqlx::query("SELECT provider, external_id, show_id FROM radio_show_aliases")
+        .fetch_all(db.pool())
+        .await?;
+    for r in &aliases {
+        k.by_id
+            .entry((r.try_get("provider")?, r.try_get("external_id")?))
+            .or_insert(r.try_get("show_id")?);
+    }
+    Ok(k)
+}
+
+/// Remembers that `(provider, external_id)` leads to `show_id` (replacing an older alias).
+pub async fn add_alias(db: &Db, provider: &str, external_id: &str, show_id: i64) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO radio_show_aliases (provider, external_id, show_id) VALUES (?, ?, ?)
+         ON CONFLICT (provider, external_id) DO UPDATE SET show_id = excluded.show_id",
+    )
+    .bind(provider)
+    .bind(external_id)
+    .bind(show_id)
+    .execute(db.pool())
+    .await?;
+    Ok(())
 }
 
 /// Ids of shows from these providers (all providers when `None`).

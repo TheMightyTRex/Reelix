@@ -17,6 +17,12 @@
 //! each (the episode's `versions`), so at most [`ShowFetch::max_lookups`] are read per
 //! refresh, newest first; settled series are not read again.
 //!
+//! Discover lists (cached 30 minutes, only offered for `GB` or no country, like search):
+//! `popular` and `category-{id}` (Comedy, Drama, …) from BBC Sounds' most played episodes
+//! (`rms.api.bbc.co.uk/v2/programmes/playable?sort=popular&category=`, also undocumented),
+//! reduced to the programmes they belong to. Storyarr has no lists; these endpoints were
+//! found on the same public BBC Sounds API as its search.
+//!
 //! The endpoints, the hierarchy walk and the link patterns are adapted from Storyarr's BBC
 //! adapter (`services/app/adapters/bbc_programmes.py` in
 //! <https://github.com/TheMightyTRex/storyarr>), Copyright (c) 2026 Dewarr contributors,
@@ -31,8 +37,8 @@ use reqwest::header::HeaderMap;
 use serde_json::Value;
 
 use crate::provider::{
-    EpisodeData, ProviderError, RadioProvider, SearchPrefs, SeriesData, ShowData, ShowFetch, ShowHit,
-    StationData, async_trait,
+    DISCOVER_LIMIT, DISCOVER_TTL, DiscoverList, EpisodeData, ProviderError, RadioProvider, SearchPrefs,
+    SeriesData, ShowData, ShowFetch, ShowHit, StationData, async_trait,
 };
 use crate::providers::http::{JsonReader, str_at};
 
@@ -55,6 +61,23 @@ const MAX_PAGES: u32 = 20;
 const MAX_PARENT_LEVELS: usize = 6;
 /// Nested series folded into their parent at most this deep.
 const MAX_FOLD_DEPTH: u32 = 2;
+
+/// BBC Sounds speech categories offered as Discover lists: `(category id, name)`.
+pub const CATEGORIES: &[(&str, &str)] = &[
+    ("comedy", "Comedy"),
+    ("drama", "Drama"),
+    ("documentaries", "Documentaries"),
+    (
+        "factual-scienceandnature-scienceandtechnology",
+        "Science & Technology",
+    ),
+    ("factual-crimeandjustice-truecrime", "True Crime"),
+    ("news", "News"),
+    ("sport", "Sport"),
+];
+
+/// Most played episodes read per list (they are reduced to their programmes).
+const POPULAR_EPISODES: u32 = 100;
 
 const CHANGED: &str =
     "the BBC programme data has changed, so Reelix cannot read it; saved series and episodes are kept";
@@ -429,6 +452,50 @@ fn duration(item: &Value) -> Option<u32> {
         .and_then(|s| u32::try_from(s).ok())
 }
 
+/// Programmes of a BBC Sounds list of playable episodes, in order, once each.
+pub fn popular_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
+    let items = data
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ProviderError::Parse("the BBC Sounds lists have changed".into()))?;
+    let mut seen = std::collections::HashSet::new();
+    Ok(items
+        .iter()
+        .filter_map(|i| {
+            let c = i.get("container")?;
+            if !matches!(str_at(c, "type"), Some("brand" | "series")) {
+                return None;
+            }
+            let pid = str_at(c, "id").filter(|p| is_pid(p))?;
+            if !seen.insert(pid.to_owned()) {
+                return None;
+            }
+            let synopses = c.get("synopses");
+            Some(ShowHit {
+                provider: ID.to_owned(),
+                external_id: pid.to_owned(),
+                title: str_at(c, "title")?.to_owned(),
+                synopsis: synopses
+                    .and_then(|s| str_at(s, "short").or_else(|| str_at(s, "medium")))
+                    .map(str::to_owned),
+                author: None,
+                station_name: i
+                    .get("network")
+                    .and_then(|n| str_at(n, "short_title"))
+                    .map(str::to_owned),
+                artwork_url: str_at(i, "image_url")
+                    .filter(|u| u.starts_with("https://ichef.bbci.co.uk/"))
+                    .map(|u| u.replace("{recipe}", "640x640")),
+                web_url: Some(format!("https://www.bbc.co.uk/programmes/{pid}")),
+                feed_url: None,
+                episode_count: None,
+                show_id: None,
+            })
+        })
+        .take(DISCOVER_LIMIT)
+        .collect())
+}
+
 /// Hits of BBC Sounds container search.
 fn search_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
     let items = data.get("data").and_then(Value::as_array).ok_or_else(|| {
@@ -486,6 +553,36 @@ impl RadioProvider for BbcProvider {
 
     fn languages(&self) -> &'static [&'static str] {
         &["en", "cy", "gd"]
+    }
+
+    fn discover_lists(&self) -> Vec<DiscoverList> {
+        std::iter::once(DiscoverList::row("popular", "Popular on BBC Sounds"))
+            .chain(
+                CATEGORIES
+                    .iter()
+                    .map(|(id, name)| DiscoverList::category(&format!("category-{id}"), name)),
+            )
+            .collect()
+    }
+
+    async fn discover(&self, list: &str, _prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
+        let limit = POPULAR_EPISODES.to_string();
+        let mut params = vec![("sort", "popular"), ("limit", limit.as_str())];
+        if list != "popular" {
+            let category = list
+                .strip_prefix("category-")
+                .filter(|c| CATEGORIES.iter().any(|(id, _)| id == c))
+                .ok_or_else(|| ProviderError::NotFound(format!("the BBC has no Discover list {list}")))?;
+            params.push(("category", category));
+        }
+        let url =
+            url::Url::parse_with_params(&format!("{}/v2/programmes/playable", self.search_base), &params)
+                .map_err(|e| ProviderError::Parse(e.to_string()))?;
+        let data = self
+            .search
+            .get_for(url.as_str(), HeaderMap::new(), DISCOVER_TTL)
+            .await?;
+        popular_hits(&data)
     }
 
     async fn search(&self, query: &str, _prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {

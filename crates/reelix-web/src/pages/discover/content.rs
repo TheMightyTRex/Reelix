@@ -1,6 +1,7 @@
 //! Books (Open Library) and music (MusicBrainz) on Discover / Search: browsable rows (Open
 //! Library trending and subjects, ListenBrainz new releases and charts), search results with
-//! availability badges and the book/album request dialog (format picker for books).
+//! availability badges and the book/album request dialog (format picker for books). Radio has
+//! its own cards and show dialog in [`super::radio`]; the components here hand radio to it.
 
 use leptos::ev;
 use leptos::prelude::*;
@@ -9,7 +10,7 @@ use reelix_api_types::Permissions;
 use reelix_api_types::requests::{
     ArtistItemDto, AvailabilityStatus, BookSearchPageDto, ContentDetailDto, ContentItemDto,
     ContentRequestDto, ContentRequestKind, ContentRowDto, CreateContentRequestDto, MusicSearchPageDto,
-    QuotaDto, RequestOptionsDto, RequestStatus,
+    QuotaDto, RadioSearchPageDto, RequestOptionsDto, RequestStatus,
 };
 use reelix_core::BookFormat;
 
@@ -26,7 +27,7 @@ use crate::format;
 use crate::state::{AuthState, Toasts};
 
 /// Resets the default `<button>` look so a card button renders like the poster links.
-const CARD_BUTTON_STYLE: &str = "background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;width:100%";
+pub(crate) const CARD_BUTTON_STYLE: &str = "background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;width:100%";
 
 pub fn format_label(f: BookFormat) -> &'static str {
     match f {
@@ -48,6 +49,7 @@ pub fn content_kind_label(k: ContentRequestKind) -> &'static str {
     match k {
         ContentRequestKind::Book => "Book",
         ContentRequestKind::Music => "Album",
+        ContentRequestKind::Radio => "Radio",
     }
 }
 
@@ -56,6 +58,7 @@ pub fn content_permission(k: ContentRequestKind) -> Permissions {
     match k {
         ContentRequestKind::Book => Permissions::REQUEST_BOOK,
         ContentRequestKind::Music => Permissions::REQUEST_MUSIC,
+        ContentRequestKind::Radio => Permissions::REQUEST_RADIO,
     }
 }
 
@@ -99,6 +102,7 @@ fn ContentCard(item: ContentItemDto, on_open: Callback<ContentItemDto>) -> impl 
     let icon = match item.kind {
         ContentRequestKind::Book => "books",
         ContentRequestKind::Music => "music",
+        ContentRequestKind::Radio => "radio",
     };
     let label = format!("{} — {}", item.title, sub);
     let title = item.title.clone();
@@ -122,9 +126,13 @@ fn ContentCard(item: ContentItemDto, on_open: Callback<ContentItemDto>) -> impl 
     }
 }
 
-/// Search results for books or albums (+ artists) of `query`, with the request dialog.
+/// Search results for books, albums (+ artists) or radio shows of `query`, with the request
+/// dialog.
 #[component]
 pub fn ContentResults(kind: ContentRequestKind, #[prop(into)] query: Signal<String>) -> impl IntoView {
+    if kind == ContentRequestKind::Radio {
+        return view! { <super::radio::RadioResults query=query /> }.into_any();
+    }
     let open = RwSignal::new(false);
     let current = RwSignal::new(None::<ContentItemDto>);
     let artists = RwSignal::new(Vec::<ArtistItemDto>::new());
@@ -137,6 +145,7 @@ pub fn ContentResults(kind: ContentRequestKind, #[prop(into)] query: Signal<Stri
             let path = match kind {
                 ContentRequestKind::Book => "/search/books",
                 ContentRequestKind::Music => "/search/music",
+                ContentRequestKind::Radio => "/search/radio",
             };
             let url = format!("{path}?q={}", url_encode(&q));
             match kind {
@@ -146,6 +155,9 @@ pub fn ContentResults(kind: ContentRequestKind, #[prop(into)] query: Signal<Stri
                 ContentRequestKind::Music => api::get::<MusicSearchPageDto>(&url)
                     .await
                     .map(|p| Some((p.albums, p.artists))),
+                ContentRequestKind::Radio => api::get::<RadioSearchPageDto>(&url)
+                    .await
+                    .map(|p| Some((p.results, Vec::new()))),
             }
         }
     });
@@ -164,6 +176,7 @@ pub fn ContentResults(kind: ContentRequestKind, #[prop(into)] query: Signal<Stri
     let noun = match kind {
         ContentRequestKind::Book => "books",
         ContentRequestKind::Music => "albums",
+        ContentRequestKind::Radio => "radio shows",
     };
 
     let artist_chips = move || {
@@ -202,6 +215,7 @@ pub fn ContentResults(kind: ContentRequestKind, #[prop(into)] query: Signal<Stri
                     description=match kind {
                         ContentRequestKind::Book => "Find books on Open Library by title, author or ISBN and request the ebook or audiobook.",
                         ContentRequestKind::Music => "Find albums on MusicBrainz by title or artist and request them.",
+                        ContentRequestKind::Radio => "Find radio programmes and podcasts by name or link.",
                     } />
             }.into_any(),
             Some(Ok(Some((items, _)))) if items.is_empty() => view! {
@@ -215,6 +229,7 @@ pub fn ContentResults(kind: ContentRequestKind, #[prop(into)] query: Signal<Stri
         }}
         <ContentRequestModal open=open kind=kind item=current on_requested=Callback::new(move |_| res.refetch()) />
     }
+    .into_any()
 }
 
 /// The book/album request view: cover, availability, existing requests, format picker
@@ -245,6 +260,8 @@ pub fn ContentRequestModal(
             let seg = match kind {
                 ContentRequestKind::Book => "book",
                 ContentRequestKind::Music => "album",
+                // Radio details live at /media/radio/{provider}/{id} (see `super::radio`).
+                ContentRequestKind::Radio => "radio",
             };
             Some(api::get::<ContentDetailDto>(&format!("/media/{seg}/{}", url_encode(&id))).await)
         }
@@ -262,6 +279,7 @@ pub fn ContentRequestModal(
     // Advanced options: books only for a single format.
     let option_kind = move || match kind {
         ContentRequestKind::Music => Some("music"),
+        ContentRequestKind::Radio => Some("radio"),
         ContentRequestKind::Book => match formats.get().as_slice() {
             [BookFormat::Ebook] => Some("ebook"),
             [BookFormat::Audiobook] => Some("audiobook"),
@@ -315,6 +333,7 @@ pub fn ContentRequestModal(
         let (usage, noun) = match kind {
             ContentRequestKind::Book => (q.book, "book requests"),
             ContentRequestKind::Music => (q.music, "album requests"),
+            ContentRequestKind::Radio => (q.radio, "radio requests"),
         };
         let line = quota_line(&usage, noun)?;
         Some(view! {
@@ -526,6 +545,7 @@ pub fn ContentRequestModal(
     let title = match kind {
         ContentRequestKind::Book => "Request book",
         ContentRequestKind::Music => "Request album",
+        ContentRequestKind::Radio => "Request radio show",
     };
     view! {
         <Modal open=open title=title>
@@ -592,6 +612,7 @@ pub fn ContentDiscover(kind: ContentRequestKind) -> impl IntoView {
     let (label, placeholder) = match kind {
         ContentRequestKind::Book => ("Search books", "Title, author or ISBN…"),
         ContentRequestKind::Music => ("Search music", "Album or artist…"),
+        ContentRequestKind::Radio => ("Search radio", "Show, podcast or a link to one…"),
     };
     let id = format!("content-search-{}", kind.as_str());
     view! {
@@ -614,7 +635,12 @@ pub fn ContentDiscover(kind: ContentRequestKind) -> impl IntoView {
             </button>
         </form>
         <Show when=move || query.with(String::is_empty) fallback=move || view! { <ContentResults kind=kind query=query /> }>
-            <ContentRows kind=kind />
+            {if kind == ContentRequestKind::Radio {
+                view! { <super::radio::RadioRows /> }.into_any()
+            } else {
+                view! { <ContentRows kind=kind /> }.into_any()
+            }}
         </Show>
+
     }
 }

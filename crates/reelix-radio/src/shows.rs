@@ -105,6 +105,9 @@ impl RadioService {
     /// series and episodes, statuses from the follow choice.
     pub async fn add_show(&self, req: AddRadioShowRequest) -> Result<RadioShowDto> {
         let settings = self.settings().await?;
+        // The id asked for, when it is not the one the show is saved under (an Apple id
+        // handed to `rss`, a BBC series inside a brand): remembered as an alias.
+        let mut asked: Option<(String, String)> = None;
         let (provider, data) = match (
             req.link.as_deref().map(str::trim).filter(|l| !l.is_empty()),
             &req.external_id,
@@ -112,6 +115,7 @@ impl RadioService {
             (Some(link), _) => self.resolve_link(link).await?,
             (None, Some(external_id)) => {
                 let id = req.provider.as_deref().unwrap_or(crate::providers::rss::ID);
+                asked = Some((id.to_owned(), external_id.trim().to_owned()));
                 let p = self.enabled_provider(id).await?;
                 let fetch = ShowFetch {
                     max_lookups: settings.max_lookups_per_refresh,
@@ -127,7 +131,12 @@ impl RadioService {
                 ));
             }
         };
+        let asked =
+            asked.filter(|(p, e)| (p.as_str(), e.as_str()) != (provider.id(), data.external_id.as_str()));
         if let Some(id) = repo::shows::by_external(&self.db, provider.id(), &data.external_id).await? {
+            if let Some((p, e)) = &asked {
+                repo::shows::add_alias(&self.db, p, e, id).await?;
+            }
             return Err(RadioError::Conflict(format!(
                 "{} is already in the library (show {id})",
                 data.title
@@ -159,6 +168,9 @@ impl RadioService {
             },
         )
         .await?;
+        if let Some((p, e)) = &asked {
+            repo::shows::add_alias(&self.db, p, e, id).await?;
+        }
         self.apply_show_data(id, &data, true).await?;
         self.download_artwork(id).await;
         self.emit(entities::SHOW, "created", id);
@@ -363,7 +375,13 @@ impl RadioService {
     /// The show behind a pasted link, with its newest episodes. Saves nothing.
     pub async fn preview(&self, link: &str) -> Result<RadioShowPreviewDto> {
         let (p, data) = self.resolve_link(link.trim()).await?;
-        let mut hit = self.mark_in_library(vec![data.hit(p.id())]).await?;
+        self.preview_of(p.id(), &data).await
+    }
+
+    /// The preview of `data` (owned by provider `owner`): the show (marked when followed)
+    /// and its newest episodes.
+    pub(crate) async fn preview_of(&self, owner: &str, data: &ShowData) -> Result<RadioShowPreviewDto> {
+        let mut hit = self.mark_in_library(vec![data.hit(owner)]).await?;
         let numbers: std::collections::HashMap<&str, Option<u32>> = data
             .series
             .iter()
@@ -414,7 +432,7 @@ impl RadioService {
 
     /// The provider that owns `data` ([`ShowData::provider`], e.g. a directory handing a
     /// feed to `rss`), else `asked`.
-    fn owner(
+    pub(crate) fn owner(
         &self,
         asked: std::sync::Arc<dyn RadioProvider>,
         data: &ShowData,
@@ -442,13 +460,15 @@ impl RadioService {
             })
     }
 
-    async fn mark_in_library(&self, mut hits: Vec<RadioShowHitDto>) -> Result<Vec<RadioShowHitDto>> {
-        let known = repo::shows::external_ids(&self.db).await?;
+    /// Sets `show_id` on hits of followed shows: same provider and id, an id the show was
+    /// added under (alias), or the same feed.
+    pub(crate) async fn mark_in_library(
+        &self,
+        mut hits: Vec<RadioShowHitDto>,
+    ) -> Result<Vec<RadioShowHitDto>> {
+        let known = repo::shows::known(&self.db).await?;
         for h in &mut hits {
-            h.show_id = known
-                .iter()
-                .find(|(p, e, _)| *p == h.provider && *e == h.external_id)
-                .map(|k| k.2);
+            h.show_id = known.find(&h.provider, &h.external_id, h.feed_url.as_deref());
         }
         Ok(hits)
     }

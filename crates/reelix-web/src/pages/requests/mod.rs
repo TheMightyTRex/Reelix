@@ -90,10 +90,15 @@ pub fn RequestsPage() -> impl IntoView {
     let decline_reason = RwSignal::new(String::new());
     let delete_open = RwSignal::new(false);
     let edit_open = RwSignal::new(false);
-    // Book / album requests are listed by their own table.
-    let content_mode = move || matches!(kind.get().as_str(), "media" | "book" | "music");
+    // Book / album / radio requests are listed by their own table.
+    let content_mode = move || matches!(kind.get().as_str(), "media" | "book" | "music" | "radio");
     let has_content = move || {
-        auth.has_any(Permissions::REQUEST_BOOK | Permissions::REQUEST_MUSIC | Permissions::VIEW_REQUESTS)
+        auth.has_any(
+            Permissions::REQUEST_BOOK
+                | Permissions::REQUEST_MUSIC
+                | Permissions::REQUEST_RADIO
+                | Permissions::VIEW_REQUESTS,
+        )
     };
 
     let list = LocalResource::new(move || {
@@ -500,9 +505,11 @@ pub fn RequestsPage() -> impl IntoView {
                 <option value="movie">"Movies"</option>
                 <option value="series">"Series"</option>
                 {move || has_content().then(|| view! {
-                    <option value="media">"Books & music"</option>
+                    <option value="media">"Books, music & radio"</option>
                     <option value="book">"Books"</option>
                     <option value="music">"Music"</option>
+                    <option value="radio">"Radio"</option>
+
                 })}
             </select>
             {user_filter}

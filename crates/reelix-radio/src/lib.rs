@@ -13,6 +13,7 @@
 
 pub mod artwork;
 mod convert;
+mod discover;
 mod error;
 pub mod filing;
 pub mod jobs;
@@ -41,8 +42,8 @@ pub use library::{LibrarySyncSummary, NewEpisodeFile, NoopLibrarySync, RadioLibr
 pub use matching::source_ids;
 pub use naming::EpisodeNaming;
 pub use provider::{
-    EpisodeData, ProviderError, ProviderRegistry, RadioProvider, SearchPrefs, SeriesData, ShowData,
-    ShowFetch, ShowHit, StationData,
+    DISCOVER_LIMIT, DISCOVER_TTL, DiscoverList, EpisodeData, ProviderError, ProviderRegistry, RadioProvider,
+    SearchPrefs, SeriesData, ShowData, ShowFetch, ShowHit, StationData,
 };
 pub use refresh::RefreshSummary;
 pub use search::{RadioTarget, match_release};

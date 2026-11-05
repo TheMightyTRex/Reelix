@@ -53,7 +53,7 @@ impl JobHandler for RequestStatusSyncJob {
     }
 }
 
-/// Library changes that can change the availability of a book/album request.
+/// Library changes that can change the availability of a book/album/radio request.
 const CONTENT_ENTITIES: &[&str] = &[
     "book",
     "book_file",
@@ -63,6 +63,8 @@ const CONTENT_ENTITIES: &[&str] = &[
     "track_file",
     "artist",
     "queue",
+    // A show followed (or removed) on the radio pages changes its radio requests.
+    "radio_show",
 ];
 
 /// Debounce for library change bursts (e.g. an album import emits one event per track).

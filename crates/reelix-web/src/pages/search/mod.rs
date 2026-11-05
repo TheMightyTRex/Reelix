@@ -1,5 +1,6 @@
-//! `/search?q=` — combined TMDB search results with availability; `&type=books|music`
-//! searches Open Library / MusicBrainz instead (REQUEST_BOOK / REQUEST_MUSIC).
+//! `/search?q=` — combined TMDB search results with availability; `&type=books|music|radio`
+//! searches Open Library / MusicBrainz / the radio sources instead (REQUEST_BOOK /
+//! REQUEST_MUSIC / REQUEST_RADIO or MANAGE_LIBRARY).
 
 use leptos::ev;
 use leptos::prelude::*;
@@ -32,6 +33,9 @@ pub fn SearchPage() -> impl IntoView {
         move |_| match query.with(|m| m.get("type").unwrap_or_default()).as_str() {
             "books" if auth.has(Permissions::REQUEST_BOOK) => Some(ContentRequestKind::Book),
             "music" if auth.has(Permissions::REQUEST_MUSIC) => Some(ContentRequestKind::Music),
+            "radio" if auth.has_any(Permissions::REQUEST_RADIO | Permissions::MANAGE_LIBRARY) => {
+                Some(ContentRequestKind::Radio)
+            }
             _ => None,
         },
     );
@@ -101,6 +105,7 @@ pub fn SearchPage() -> impl IntoView {
                 href.push_str(match k {
                     ContentRequestKind::Book => "&type=books",
                     ContentRequestKind::Music => "&type=music",
+                    ContentRequestKind::Radio => "&type=radio",
                 });
             }
             navigate(&href, Default::default());
@@ -136,7 +141,8 @@ pub fn SearchPage() -> impl IntoView {
         </form>
         {move || {
             let (books, music) = (auth.has(Permissions::REQUEST_BOOK), auth.has(Permissions::REQUEST_MUSIC));
-            (books || music).then(|| {
+            let radio = auth.has_any(Permissions::REQUEST_RADIO | Permissions::MANAGE_LIBRARY);
+            (books || music || radio).then(|| {
                 let text = q.get();
                 let cur = content.get();
                 let tab = move |kind: Option<ContentRequestKind>, label: &'static str| {
@@ -144,6 +150,7 @@ pub fn SearchPage() -> impl IntoView {
                         None => "",
                         Some(ContentRequestKind::Book) => "&type=books",
                         Some(ContentRequestKind::Music) => "&type=music",
+                        Some(ContentRequestKind::Radio) => "&type=radio",
                     };
                     let href = format!("{}{suffix}", search_href(&text));
                     let active = cur == kind;
@@ -157,6 +164,8 @@ pub fn SearchPage() -> impl IntoView {
                         {tab(None, "Movies & TV")}
                         {books.then(|| tab(Some(ContentRequestKind::Book), "Books"))}
                         {music.then(|| tab(Some(ContentRequestKind::Music), "Music"))}
+                        {radio.then(|| tab(Some(ContentRequestKind::Radio), "Radio"))}
+
                     </div>
                 }
             })

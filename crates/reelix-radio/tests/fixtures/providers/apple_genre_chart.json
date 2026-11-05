@@ -1,0 +1,195 @@
+{
+ "feed": {
+  "author": {
+   "name": {
+    "label": "iTunes Store"
+   },
+   "uri": {
+    "label": "http://www.apple.com/uk/itunes/"
+   }
+  },
+  "entry": [
+   {
+    "im:name": {
+     "label": "The Romesh Ranganathan Show"
+    },
+    "im:price": {
+     "label": "Get",
+     "attributes": {
+      "amount": "0",
+      "currency": "GBP"
+     }
+    },
+    "im:image": [
+     {
+      "label": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/cf/34/af/cf34afc1-3b2b-bbdd-3192-4c03b01cc6dc/mza_15559108033933444873.jpeg/55x55bb.png",
+      "attributes": {
+       "height": "55"
+      }
+     },
+     {
+      "label": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/cf/34/af/cf34afc1-3b2b-bbdd-3192-4c03b01cc6dc/mza_15559108033933444873.jpeg/60x60bb.png",
+      "attributes": {
+       "height": "60"
+      }
+     },
+     {
+      "label": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/cf/34/af/cf34afc1-3b2b-bbdd-3192-4c03b01cc6dc/mza_15559108033933444873.jpeg/170x170bb.png",
+      "attributes": {
+       "height": "170"
+      }
+     }
+    ],
+    "summary": {
+     "label": "The world’s biggest stars join Romesh for candid conversations and loads of laughs. \n\nEvery Monday, Romesh Ranganathan meets actors, musicians, comedians and icons who share stories you won’t hear anywhere else, combining humour, heart and genuine insight. Expect backstage anecdotes, untold tales fr"
+    },
+    "im:artist": {
+     "label": "Ranga Bee"
+    },
+    "title": {
+     "label": "The Romesh Ranganathan Show - Ranga Bee"
+    },
+    "link": {
+     "attributes": {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://podcasts.apple.com/gb/podcast/the-romesh-ranganathan-show/id1838594107?uo=2"
+     }
+    },
+    "id": {
+     "label": "https://podcasts.apple.com/gb/podcast/the-romesh-ranganathan-show/id1838594107?uo=2",
+     "attributes": {
+      "im:id": "1838594107"
+     }
+    },
+    "im:contentType": {
+     "attributes": {
+      "term": "Podcast",
+      "label": "Podcast"
+     }
+    },
+    "category": {
+     "attributes": {
+      "im:id": "1303",
+      "term": "Comedy",
+      "scheme": "https://podcasts.apple.com/gb/genre/podcasts-comedy/id1303?uo=2",
+      "label": "Comedy"
+     }
+    },
+    "im:releaseDate": {
+     "label": "2026-11-01T16:00:00-07:00",
+     "attributes": {
+      "label": "01 November 2026"
+     }
+    }
+   },
+   {
+    "im:name": {
+     "label": "Parenting Hell with Rob Beckett and Josh Widdicombe"
+    },
+    "im:image": [
+     {
+      "label": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/60/76/56/6076560a-85b4-b7bd-1f45-c5e90ef1a841/mza_12185581846085221031.jpg/55x55bb.png",
+      "attributes": {
+       "height": "55"
+      }
+     },
+     {
+      "label": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/60/76/56/6076560a-85b4-b7bd-1f45-c5e90ef1a841/mza_12185581846085221031.jpg/60x60bb.png",
+      "attributes": {
+       "height": "60"
+      }
+     },
+     {
+      "label": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/60/76/56/6076560a-85b4-b7bd-1f45-c5e90ef1a841/mza_12185581846085221031.jpg/170x170bb.png",
+      "attributes": {
+       "height": "170"
+      }
+     }
+    ],
+    "summary": {
+     "label": "Parenting... just not as you know it.\n\n\n\nJoin Rob & Josh as they share their tales of parenting woe and chat to celebrity parents about how they're coping, or not coping. \n\n\n\nParenting Hell is a Spotify Podcast, video episodes available on Tuesdays and Fridays every week. "
+    },
+    "im:price": {
+     "label": "Get",
+     "attributes": {
+      "amount": "0",
+      "currency": "GBP"
+     }
+    },
+    "im:contentType": {
+     "attributes": {
+      "term": "Podcast",
+      "label": "Podcast"
+     }
+    },
+    "rights": {
+     "label": "© Copyright Keep It Light Media"
+    },
+    "title": {
+     "label": "Parenting Hell with Rob Beckett and Josh Widdicombe - Keep It Light Media / Spotify Studios"
+    },
+    "link": {
+     "attributes": {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://podcasts.apple.com/gb/podcast/parenting-hell-with-rob-beckett-and-josh-widdicombe/id1510251497?uo=2"
+     }
+    },
+    "id": {
+     "label": "https://podcasts.apple.com/gb/podcast/parenting-hell-with-rob-beckett-and-josh-widdicombe/id1510251497?uo=2",
+     "attributes": {
+      "im:id": "1510251497"
+     }
+    },
+    "im:artist": {
+     "label": "Keep It Light Media / Spotify Studios"
+    },
+    "category": {
+     "attributes": {
+      "im:id": "1303",
+      "term": "Comedy",
+      "scheme": "https://podcasts.apple.com/gb/genre/podcasts-comedy/id1303?uo=2",
+      "label": "Comedy"
+     }
+    },
+    "im:releaseDate": {
+     "label": "2026-11-01T17:00:00-07:00",
+     "attributes": {
+      "label": "01 November 2026"
+     }
+    }
+   }
+  ],
+  "updated": {
+   "label": "2026-11-04T17:43:52-07:00"
+  },
+  "rights": {
+   "label": "Copyright 2008 Apple Inc."
+  },
+  "title": {
+   "label": "iTunes Store: Top Podcasts in Comedy"
+  },
+  "icon": {
+   "label": "http://itunes.apple.com/favicon.ico"
+  },
+  "link": [
+   {
+    "attributes": {
+     "rel": "alternate",
+     "type": "text/html",
+     "href": "https://podcasts.apple.com/WebObjects/MZStore.woa/wa/viewTop?cc=gb&id=179541&popId=3"
+    }
+   },
+   {
+    "attributes": {
+     "rel": "self",
+     "href": "https://itunes.apple.com/gb/rss/toppodcasts/limit=50/genre=1303/json"
+    }
+   }
+  ],
+  "id": {
+   "label": "https://itunes.apple.com/gb/rss/toppodcasts/limit=50/genre=1303/json"
+  }
+ }
+}

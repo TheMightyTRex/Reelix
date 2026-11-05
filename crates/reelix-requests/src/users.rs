@@ -144,6 +144,18 @@ pub const PERMISSION_INFO: &[(Permissions, &str, &str, &str)] = &[
         "Auto-approve music",
         "Music requests are approved automatically",
     ),
+    (
+        Permissions::REQUEST_RADIO,
+        "REQUEST_RADIO",
+        "Request radio",
+        "Ask for radio programmes and podcasts to be followed",
+    ),
+    (
+        Permissions::AUTO_APPROVE_RADIO,
+        "AUTO_APPROVE_RADIO",
+        "Auto-approve radio",
+        "Radio requests are approved automatically",
+    ),
 ];
 
 pub fn roles() -> RolesDto {
