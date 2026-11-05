@@ -253,6 +253,7 @@ pub fn snapshot(e: &Eval, ix: Option<&IndexerInfo>) -> GrabbedRelease {
         seed_time_minutes: ix
             .and_then(|x| x.seed_time_minutes)
             .or(i.minimum_seed_time.map(|s| s.div_ceil(60) as u32)),
+        soulseek: i.soulseek.clone(),
     }
 }
 
@@ -314,6 +315,16 @@ impl SearchService {
     }
 
     async fn payload(&self, rel: &GrabbedRelease, pref: PayloadPreference) -> Result<ReleasePayload> {
+        // A Soulseek release carries its own file list; there is nothing to fetch.
+        if rel.protocol == Protocol::Soulseek {
+            return rel
+                .soulseek
+                .clone()
+                .map(|s| ReleasePayload::Soulseek(Box::new(s)))
+                .ok_or_else(|| {
+                    SearchError::Validation("Soulseek release has no file list; search again".into())
+                });
+        }
         let url = rel.download_url.clone().filter(|u| !u.trim().is_empty());
         let Some(url) = url else {
             return rel
@@ -349,6 +360,7 @@ impl SearchService {
                     bytes,
                     name: file_name(&rel.title, "nzb"),
                 },
+                Protocol::Soulseek => unreachable!("handled above"),
             }),
             Err(IndexerError::MagnetRedirect(m)) => Ok(ReleasePayload::Magnet(m)),
             Err(e) => match &rel.magnet_url {
@@ -390,10 +402,7 @@ impl SearchService {
                 .ok_or_else(|| {
                     SearchError::Unavailable(format!(
                         "no enabled {} download client is available for this media",
-                        match rel.protocol {
-                            Protocol::Torrent => "torrent",
-                            Protocol::Usenet => "usenet",
-                        }
+                        rel.protocol.as_str()
                     ))
                 })?,
         };

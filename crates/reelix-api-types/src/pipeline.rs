@@ -116,6 +116,10 @@ pub struct ReleaseDto {
     pub book_format: Option<BookFormat>,
     #[serde(default)]
     pub album_id: Option<i64>,
+    /// Soulseek: the peer (username, free upload slot, queue length, speed) and its files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
+    pub soulseek: Option<reelix_core::soulseek::SoulseekRelease>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

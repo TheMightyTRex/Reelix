@@ -302,6 +302,7 @@ impl wiremock::Respond for NzoIds {
 struct SearchEnv {
     db: Db,
     svc: SearchService,
+    providers: Arc<ProviderService>,
     content: Content,
     indexer: MockServer,
     sab: MockServer,
@@ -390,7 +391,7 @@ async fn search_env() -> SearchEnv {
     let svc = SearchService::new(
         db.clone(),
         events,
-        providers,
+        providers.clone(),
         library,
         SearchOptions {
             throttle: std::time::Duration::ZERO,
@@ -401,6 +402,7 @@ async fn search_env() -> SearchEnv {
     SearchEnv {
         db,
         svc,
+        providers,
         content,
         indexer,
         sab,
@@ -686,6 +688,11 @@ struct ActivityEnv {
 const CLIENT_ID: i64 = 7;
 
 async fn activity_env() -> ActivityEnv {
+    activity_env_with(None).await
+}
+
+/// [`activity_env`] plus another client (`(id, client)`, host `localhost`).
+async fn activity_env_with(extra: Option<(i64, Arc<dyn DownloadClient>)>) -> ActivityEnv {
     let dir = tempfile::tempdir().unwrap();
     let downloads = dir.path().join("downloads");
     std::fs::create_dir_all(&downloads).unwrap();
@@ -720,13 +727,20 @@ async fn activity_env() -> ActivityEnv {
         },
         items: Mutex::default(),
     });
+    let mut clients = vec![ClientHandle {
+        id: CLIENT_ID,
+        name: "Fake".into(),
+        host: "localhost".into(),
+        client: client.clone(),
+    }];
+    clients.extend(extra.map(|(id, client)| ClientHandle {
+        id,
+        name: client.info().name.clone(),
+        host: "localhost".into(),
+        client,
+    }));
     let providers = StaticProviders {
-        clients: vec![ClientHandle {
-            id: CLIENT_ID,
-            name: "Fake".into(),
-            host: "localhost".into(),
-            client: client.clone(),
-        }],
+        clients,
         roots: vec![downloads.clone()],
         ..Default::default()
     };
@@ -772,6 +786,7 @@ fn release(title: &str, quality: Quality) -> GrabbedRelease {
         indexer_flags: vec![],
         seed_ratio: None,
         seed_time_minutes: None,
+        soulseek: None,
     }
 }
 
@@ -945,5 +960,359 @@ async fn failed_album_download_blocklists_and_searches_again() {
     assert_eq!(
         (media.kind.as_str(), media.subtitle.as_deref()),
         ("album", Some("Radiohead"))
+    );
+}
+
+// ---------------------------------------------------------------- Soulseek (slskd)
+
+const SLSKD_SEARCH: &str = r"^/api/v0/searches/[0-9a-f-]{36}$";
+
+/// slskd answering every search with `responses` (shaped like slskd 0.26's JSON) and
+/// accepting every enqueue.
+async fn slskd_server(responses: serde_json::Value) -> MockServer {
+    let s = MockServer::start().await;
+    let search = json!({"fileCount": 4, "id": "6f1c2b9e-3d4a-4e5f-9a7b-1c2d3e4f5a6b", "isComplete": true,
+        "lockedFileCount": 0, "responseCount": 2, "responses": [], "searchText": "Radiohead OK Computer",
+        "startedAt": "2026-11-05T14:02:11.1234567Z", "endedAt": "2026-11-05T14:02:29.9876543Z",
+        "state": "Completed, TimedOut", "token": 48213});
+    Mock::given(method("POST"))
+        .and(path("/api/v0/searches"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&search))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(SLSKD_SEARCH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&search))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(
+            r"^/api/v0/searches/[0-9a-f-]{36}/responses$",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&responses))
+        .mount(&s)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(wiremock::matchers::path_regex(SLSKD_SEARCH))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&s)
+        .await;
+    Mock::given(method("POST"))
+        .and(wiremock::matchers::path_regex(
+            r"^/api/v0/transfers/downloads/[^/]+$",
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "enqueued": [{"id": "0b6f7e1a-2c3d-4e5f-8a9b-0c1d2e3f4a5b", "state": "Queued, Remotely"}],
+            "failed": []
+        })))
+        .mount(&s)
+        .await;
+    s
+}
+
+fn peer(username: &str, dir: &str, free: bool, queue: u32) -> serde_json::Value {
+    let f = |n: &str, size: u64| {
+        json!({"bitDepth": 16, "code": 1, "extension": "", "filename": format!("{dir}\\{n}"), "length": 284,
+               "sampleRate": 44100, "size": size, "isLocked": false})
+    };
+    json!({"fileCount": 2, "files": [f("01 - Airbag.flac", 30 * MB), f("02 - Paranoid Android.flac", 40 * MB)],
+           "hasFreeUploadSlot": free, "lockedFileCount": 0, "lockedFiles": [], "queueLength": queue,
+           "token": 48213, "uploadSpeed": 1048576, "username": username})
+}
+
+#[tokio::test]
+async fn soulseek_album_search_uses_its_own_delay_and_grabs_only_through_slskd() {
+    let e = search_env().await;
+    Mock::given(method("GET"))
+        .and(path("/api"))
+        .and(query_param("t", "music"))
+        .respond_with(xml(rss(&e.indexer.uri(), &[])))
+        .mount(&e.indexer)
+        .await;
+    let dir = r"@@abcde\Music\Radiohead - OK Computer (1997)";
+    let slskd = slskd_server(json!([peer("queued", dir, false, 9), peer("fast", dir, true, 0)])).await;
+    let client = e
+        .providers
+        .create(
+            ProviderKind::DownloadClient,
+            &ProviderInput {
+                implementation: "slskd".into(),
+                name: "slskd".into(),
+                enabled: true,
+                priority: 1,
+                tags: vec![],
+                settings: json!({"host": "127.0.0.1", "port": slskd.address().port(), "api_key": "k",
+                                 "downloads_dir": "/downloads"}),
+            },
+        )
+        .await
+        .unwrap();
+    // The matching indexer came with the client.
+    assert!(
+        e.providers
+            .indexers()
+            .iter()
+            .any(|(r, ix)| r.implementation == "slskd" && ix.protocol() == Protocol::Soulseek)
+    );
+    let req = AlbumSearchRequest {
+        kind: ContentSearchKind::Item,
+        ids: vec![e.content.album],
+    };
+
+    // Only the Soulseek delay applies to Soulseek releases.
+    let mut dp = e.db.delay_profiles().list().await.unwrap().remove(0);
+    dp.usenet_delay = 0;
+    dp.soulseek_delay = 6000;
+    dp.bypass_if_highest_quality = false;
+    e.db.delay_profiles().update(dp.id, &dp).await.unwrap();
+    let held = e.svc.run_album_search(&req, &|| false).await.unwrap();
+    assert_eq!((held.grabbed, held.pending), (0, 1), "{held:?}");
+    let p = pending::all(&e.db).await.unwrap();
+    let rel = &p[0].release;
+    assert_eq!(rel.protocol, Protocol::Soulseek);
+    assert_eq!(rel.title, "Radiohead - OK Computer (1997) [FLAC]");
+    assert_eq!(rel.quality.quality, Quality::Flac);
+    // The free-slot peer ranks first; its file list travels with the pending release.
+    let s = rel.soulseek.as_ref().unwrap();
+    assert_eq!((s.username.as_str(), s.files.len()), ("fast", 2));
+    assert_eq!(rel.indexer_flags, ["free_upload_slot"]);
+
+    // Soulseek releases never go to the usenet client.
+    let sab = e
+        .providers
+        .download_clients()
+        .into_iter()
+        .find(|(r, _)| r.implementation == "sabnzbd")
+        .unwrap()
+        .0;
+    let err = e
+        .svc
+        .grab(rel, &Default::default(), Some(sab.id))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("does not handle Soulseek"), "{err}");
+
+    let r = e.svc.grab_pending(p[0].id).await.unwrap();
+    assert!(sab_categories(&e).await.is_empty());
+    assert_eq!(r.download_client, "slskd");
+    let posts: Vec<_> = slskd
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "POST" && r.url.path().starts_with("/api/v0/transfers/"))
+        .collect();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].url.path(), "/api/v0/transfers/downloads/fast");
+    let body: serde_json::Value = serde_json::from_slice(&posts[0].body).unwrap();
+    assert_eq!(body[0]["filename"], format!(r"{dir}\01 - Airbag.flac"));
+    assert_eq!(body[1]["size"], 40 * MB);
+    let row = tracked::get(&e.db, r.queue_id).await.unwrap().unwrap();
+    assert_eq!(row.protocol, Protocol::Soulseek);
+    assert_eq!(row.download_client_id, client.id);
+    assert_eq!(row.download_id, format!("fast/{dir}"));
+    assert_eq!(row.content, ContentRef::album(e.content.album));
+
+    // A blocklisted peer folder is rejected; the same folder from another peer is not.
+    tracked::delete(&e.db, r.queue_id).await.unwrap();
+    blocklist::insert(
+        &e.db,
+        &blocklist::NewBlocklist {
+            source_title: rel.title.clone(),
+            protocol: Some(Protocol::Soulseek),
+            torrent_info_hash: rel.release_key(),
+            content: ContentRef::album(e.content.album),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    dp.soulseek_delay = 0;
+    e.db.delay_profiles().update(dp.id, &dp).await.unwrap();
+    let sum = e.svc.run_album_search(&req, &|| false).await.unwrap();
+    assert_eq!(sum.grabbed, 1, "{sum:?}");
+    let last = tracked::active(&e.db).await.unwrap();
+    assert_eq!(last[0].download_id, format!("queued/{dir}"));
+}
+
+#[tokio::test]
+async fn completed_soulseek_folder_is_imported_from_the_slskd_downloads_folder() {
+    let slskd = MockServer::start().await;
+    let dir = r"books\Frank Herbert\Dune";
+    let file = |id: &str, name: &str, size: u64| {
+        json!({"id": id, "username": "reader", "direction": "Download", "filename": format!("{dir}\\{name}"),
+               "size": size, "state": "Completed, Succeeded", "requestedAt": "2026-11-05T14:05:00.0000000",
+               "startedAt": "2026-11-05T14:05:01.0000000Z", "endedAt": "2026-11-05T14:05:09.0000000Z",
+               "bytesTransferred": size, "averageSpeed": 524288, "attempts": 1, "removed": false,
+               "bytesRemaining": 0, "percentComplete": 100})
+    };
+    let user = json!({"username": "reader", "directories": [{"directory": dir, "fileCount": 1,
+        "files": [file("3f4a5b6c-7d8e-4f9a-8b1c-2d3e4f5a6b7c", "Dune.epub", 4096)]}]});
+    Mock::given(method("GET"))
+        .and(path("/api/v0/transfers/downloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([user.clone(), {
+            "username": "someone", "directories": [{"directory": "music\\Mine", "fileCount": 1, "files": [{
+                "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d", "username": "someone", "direction": "Download",
+                "filename": "music\\Mine\\a.mp3", "size": 10, "state": "InProgress",
+                "requestedAt": "2026-11-05T14:05:00.0000000", "bytesTransferred": 5, "averageSpeed": 1,
+                "attempts": 1, "removed": false, "bytesRemaining": 5, "percentComplete": 50}]}]}])))
+        .mount(&slskd)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v0/transfers/downloads/reader"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&user))
+        .mount(&slskd)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/api/v0/transfers/downloads/reader/3f4a5b6c-7d8e-4f9a-8b1c-2d3e4f5a6b7c",
+        ))
+        .and(query_param("remove", "true"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&slskd)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let downloads = tmp.path().join("slskd");
+    let client: Arc<dyn DownloadClient> = Arc::from(
+        reelix_downloaders::build(
+            "slskd",
+            &json!({"name": "slskd", "host": "127.0.0.1", "port": slskd.address().port(), "api_key": "k",
+                    "downloads_dir": downloads}),
+            &reelix_downloaders::BuildContext::new(reqwest::Client::new()),
+        )
+        .unwrap(),
+    );
+    const SLSKD_ID: i64 = 8;
+    let e = activity_env_with(Some((SLSKD_ID, client))).await;
+    // slskd saved the files under its downloads folder by the last remote folder name.
+    let folder = downloads.join("Dune");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("Dune.epub"), vec![7u8; 4096]).unwrap();
+    let title = "Frank Herbert - Dune [EPUB]";
+    let mut rel = release(title, Quality::Epub);
+    rel.protocol = Protocol::Soulseek;
+    let id = tracked::insert(
+        &e.db,
+        &NewTracked {
+            download_client_id: SLSKD_ID,
+            download_id: format!("reader/{dir}"),
+            protocol: Protocol::Soulseek,
+            title: title.into(),
+            movie_id: None,
+            series_id: None,
+            episode_ids: vec![],
+            release: rel,
+        },
+    )
+    .await
+    .unwrap();
+    tracked::set_content(&e.db, id, &ContentRef::book(e.content.dune, BookFormat::Ebook))
+        .await
+        .unwrap();
+
+    e.svc.poll().await.unwrap();
+    let row = tracked::get(&e.db, id).await.unwrap().unwrap();
+    assert_eq!(row.state, TrackedState::Imported, "{:?}", row.status_messages);
+    assert_eq!(
+        row.output_path.as_deref(),
+        Some(folder.to_string_lossy().as_ref())
+    );
+    let book = e.content.books.get_book(e.content.dune).await.unwrap();
+    let f = book.ebook_file.expect("ebook file recorded");
+    assert!(Path::new(&f.path).starts_with(&e.content.ebooks));
+    // The slskd download the user started themselves was not adopted.
+    assert_eq!(tracked::active(&e.db).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn failed_soulseek_folder_blocklists_only_that_peer() {
+    let slskd = MockServer::start().await;
+    let dir = "music/Radiohead/OK Computer";
+    Mock::given(method("GET"))
+        .and(path("/api/v0/transfers/downloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"username": "flaky", "directories": [{
+            "directory": dir, "fileCount": 1, "files": [{"id": "4a5b6c7d-8e9f-4a0b-9c2d-3e4f5a6b7c8d",
+            "username": "flaky", "direction": "Download", "filename": format!("{dir}/01 Airbag.flac"), "size": 5000000,
+            "state": "Completed, Rejected", "requestedAt": "2026-11-05T14:06:00.0000000",
+            "endedAt": "2026-11-05T14:06:30.0000000Z", "bytesTransferred": 0, "averageSpeed": 0,
+            "exception": "Transfer rejected: File not shared.", "attempts": 1, "removed": false,
+            "bytesRemaining": 5000000, "percentComplete": 0}]}]}])))
+        .mount(&slskd)
+        .await;
+    let client: Arc<dyn DownloadClient> = Arc::from(
+        reelix_downloaders::build(
+            "slskd",
+            &json!({"name": "slskd", "host": "127.0.0.1", "port": slskd.address().port(), "api_key": "k",
+                    "downloads_dir": "/downloads", "remove_failed": false}),
+            &reelix_downloaders::BuildContext::new(reqwest::Client::new()),
+        )
+        .unwrap(),
+    );
+    let e = activity_env_with(Some((8, client))).await;
+    let title = "Radiohead - OK Computer [FLAC]";
+    let mut rel = release(title, Quality::Flac);
+    rel.protocol = Protocol::Soulseek;
+    rel.soulseek = Some(reelix_core::soulseek::SoulseekRelease {
+        username: "flaky".into(),
+        directory: dir.into(),
+        files: vec![],
+        has_free_upload_slot: true,
+        queue_length: 0,
+        upload_speed: 0,
+    });
+    let id = tracked::insert(
+        &e.db,
+        &NewTracked {
+            download_client_id: 8,
+            download_id: format!("flaky/{dir}"),
+            protocol: Protocol::Soulseek,
+            title: title.into(),
+            movie_id: None,
+            series_id: None,
+            episode_ids: vec![],
+            release: rel,
+        },
+    )
+    .await
+    .unwrap();
+    tracked::set_content(&e.db, id, &ContentRef::album(e.content.album))
+        .await
+        .unwrap();
+    e.svc.poll().await.unwrap();
+    assert_eq!(
+        tracked::get(&e.db, id).await.unwrap().unwrap().state,
+        TrackedState::Failed
+    );
+    let entries = blocklist::for_content(&e.db, &ContentRef::album(e.content.album))
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].protocol, Some(Protocol::Soulseek));
+    let key = format!("slsk:flaky/{dir}").to_ascii_lowercase();
+    assert_eq!(entries[0].torrent_info_hash.as_deref(), Some(key.as_str()));
+    assert!(blocklist::is_blocked(
+        &entries,
+        title,
+        Some(&format!("slsk:flaky/{dir}"))
+    ));
+    assert!(!blocklist::is_blocked(
+        &entries,
+        title,
+        Some(&format!("slsk:other/{dir}"))
+    ));
+    // The failure was recorded with the client's message.
+    let hist = e
+        .svc
+        .history(&HistoryQuery {
+            album_id: Some(e.content.album),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(hist.items[0].event_type, "download_failed");
+    assert_eq!(
+        hist.items[0].download_id.as_deref(),
+        Some(format!("flaky/{dir}").as_str())
     );
 }

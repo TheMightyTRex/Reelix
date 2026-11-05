@@ -28,6 +28,7 @@ fn info_from(rel: &GrabbedRelease) -> ReleaseInfo {
     i.size = rel.size;
     i.publish_date = rel.publish_date;
     i.seeders = rel.seeders;
+    i.soulseek = rel.soulseek.clone();
     i.indexer_flags = rel
         .indexer_flags
         .iter()
@@ -177,8 +178,12 @@ impl SearchService {
                     let mut c = mapping::candidate_for(&info, shared.priority(info.indexer_id), &t);
                     c.media_id = Some(t.media_id());
                     c.episode_ids = p.episode_ids.clone();
-                    let decision =
-                        ev.evaluate(&c, info.info_hash.as_deref(), SearchKind::Automatic, Vec::new());
+                    let decision = ev.evaluate(
+                        &c,
+                        mapping::release_key(&info).as_deref(),
+                        SearchKind::Automatic,
+                        Vec::new(),
+                    );
                     out.push(Eval {
                         info,
                         ranked: RankedRelease {

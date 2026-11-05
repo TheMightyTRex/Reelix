@@ -385,6 +385,10 @@ impl ActivityService {
         // New Reelix-category downloads.
         let now_secs = now_ms() / 1000;
         for (h, items) in ok.values() {
+            // slskd has no categories: its other downloads are the user's own, not ours.
+            if h.client.protocol() == Protocol::Soulseek {
+                continue;
+            }
             for item in items.iter().filter(|i| adoptable(i, now_secs)) {
                 if tracked::by_download(&self.db, h.id, &item.download_id.0)
                     .await?
@@ -488,6 +492,7 @@ impl ActivityService {
             indexer_flags: Vec::new(),
             seed_ratio: None,
             seed_time_minutes: None,
+            soulseek: None,
         };
         let id = tracked::insert(
             &self.db,
@@ -1038,7 +1043,7 @@ impl ActivityService {
                 indexer: rel.map(|r| r.indexer.clone()).filter(|i| !i.is_empty()),
                 size: rel.and_then(|r| r.size),
                 publish_date: rel.and_then(|r| r.publish_date),
-                torrent_info_hash: rel.and_then(|r| r.info_hash.clone()).or_else(|| {
+                torrent_info_hash: rel.and_then(GrabbedRelease::release_key).or_else(|| {
                     (t.protocol == Protocol::Torrent && t.download_id.len() == 40)
                         .then(|| t.download_id.clone())
                 }),

@@ -135,7 +135,7 @@ fn sort_releases(list: &mut [ReleaseDto], key: &str, desc: bool) {
         "peers" => list.sort_by_key(|r| r.seeders.unwrap_or(0)),
         "quality" => list.sort_by_key(|r| (r.quality.quality.id(), r.quality.revision)),
         "score" => list.sort_by_key(|r| r.format_score),
-        "protocol" => list.sort_by_key(|r| r.protocol == Protocol::Usenet),
+        "protocol" => list.sort_by_key(|r| r.protocol.as_str()),
         // Rank: higher is better.
         _ => list.sort_by_key(|r| std::cmp::Reverse(r.rank)),
     }
@@ -332,9 +332,8 @@ pub fn InteractiveSearchModal(open: RwSignal<bool>, target: RwSignal<Option<Sear
                             <label class="visually-hidden" for="isr-p">"Protocol"</label>
                             <select id="isr-p" class="input input-sm" on:change=move |e| protocol_filter.set(event_target_value(&e))
                                 prop:value=move || protocol_filter.get()>
-                                <option value="">"Torrent + Usenet"</option>
-                                <option value="torrent">"Torrent"</option>
-                                <option value="usenet">"Usenet"</option>
+                                <option value="">"All protocols"</option>
+                                {Protocol::ALL.into_iter().map(|p| view! { <option value=p.as_str()>{p.label()}</option> }).collect_view()}
                             </select>
                             <label class="checkbox">
                                 <input type="checkbox" prop:checked=move || show_rejected.get()
@@ -358,6 +357,15 @@ pub fn InteractiveSearchModal(open: RwSignal<bool>, target: RwSignal<Option<Sear
     }
 }
 
+/// Peers column of a Soulseek result: `free slot`, or the peer's upload queue.
+pub fn soulseek_peer(s: Option<&reelix_core::soulseek::SoulseekRelease>) -> String {
+    match s {
+        Some(s) if s.has_free_upload_slot => "free slot".into(),
+        Some(s) => format!("queue {}", s.queue_length),
+        None => "—".into(),
+    }
+}
+
 fn release_row(
     r: ReleaseDto,
     grabbing: RwSignal<Option<String>>,
@@ -372,6 +380,7 @@ fn release_row(
     let tooltip = reasons.join("\n");
     let peers = match (r.protocol, r.seeders, r.peers) {
         (Protocol::Usenet, _, _) => "—".to_string(),
+        (Protocol::Soulseek, _, _) => soulseek_peer(r.soulseek.as_ref()),
         (_, Some(s), Some(p)) => format!("{s} / {p}"),
         (_, Some(s), None) => s.to_string(),
         _ => "—".into(),
@@ -398,6 +407,9 @@ fn release_row(
                     {full_season.then(|| view! { <span class="chip chip-xs">"Season pack"</span> })}
                     {eps.map(|e| view! { <span>{e}</span> })}
                     {r.release_group.clone().map(|g| view! { <span>{g}</span> })}
+                    {r.soulseek.as_ref().map(|s| view! {
+                        <span title=format!("Soulseek user · {} files", s.files.len())>{format!("@{}", s.username)}</span>
+                    })}
                     {r.indexer_flags.iter().map(|f| view! { <span class="chip chip-xs">{f.replace('_', " ")}</span> }).collect_view()}
                 </span>
                 {(!accepted).then(|| view! {

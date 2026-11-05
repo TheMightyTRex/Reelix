@@ -31,7 +31,17 @@ pub fn decision_flag(f: reelix_indexers::IndexerFlag) -> IndexerFlag {
         I::Internal => IndexerFlag::Internal,
         I::Scene => IndexerFlag::Scene,
         I::Nuked => IndexerFlag::Nuked,
+        I::FreeUploadSlot => IndexerFlag::FreeUploadSlot,
     }
+}
+
+/// Blocklist identity of a result: its info hash, or the Soulseek `slsk:{user}/{dir}` key.
+pub fn release_key(r: &ReleaseInfo) -> Option<String> {
+    r.info_hash.clone().or_else(|| {
+        r.soulseek
+            .as_ref()
+            .map(reelix_core::soulseek::SoulseekRelease::key)
+    })
 }
 
 /// Flag name as stored in [`crate::GrabbedRelease::indexer_flags`].
@@ -71,6 +81,10 @@ fn fill(mut c: ReleaseCandidate, r: &ReleaseInfo, priority: i32) -> ReleaseCandi
     c.indexer_priority = priority;
     c.seeders = r.seeders;
     c.peers = r.peers;
+    if let Some(s) = &r.soulseek {
+        c.queue_length = Some(s.queue_length);
+        c.upload_speed = Some(s.upload_speed);
+    }
     c.publish_date = r.publish_date;
     c.indexer_flags = r.indexer_flags.iter().copied().map(decision_flag).collect();
     if r.download_volume_factor == 0.0 && !c.indexer_flags.contains(&IndexerFlag::Freeleech) {

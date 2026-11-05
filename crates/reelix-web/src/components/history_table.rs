@@ -34,12 +34,9 @@ pub fn quality_label(q: &QualityModel) -> String {
     out
 }
 
-/// `torrent` / `usenet`.
+/// `torrent` / `usenet` / `soulseek`.
 pub fn proto_key(p: Protocol) -> &'static str {
-    match p {
-        Protocol::Torrent => "torrent",
-        Protocol::Usenet => "usenet",
-    }
+    p.as_str()
 }
 
 /// Small protocol pill.

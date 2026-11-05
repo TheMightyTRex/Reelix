@@ -222,8 +222,12 @@ pub struct ReleaseDto {
     pub tvdb_id: Option<u32>,
     pub download_volume_factor: f64,
     pub upload_volume_factor: f64,
-    /// `freeleech`, `halfleech`, `double_upload`, `internal`, `scene`, `nuked`.
+    /// `freeleech`, `halfleech`, `double_upload`, `internal`, `scene`, `nuked`, `free_upload_slot`.
     pub indexer_flags: Vec<String>,
+    /// Soulseek: the peer and its files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
+    pub soulseek: Option<reelix_core::soulseek::SoulseekRelease>,
 }
 
 /// Per-indexer outcome of a manual search.

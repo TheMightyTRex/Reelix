@@ -597,7 +597,54 @@ impl ProviderService {
         self.reload_kind(kind, false).await?;
         self.publish(kind.as_str(), "created", id);
         tracing::info!(kind = kind.as_str(), id, name = %row.name, "provider created");
+        if kind == ProviderKind::DownloadClient
+            && row.implementation == reelix_downloaders::slskd::IMPLEMENTATION
+            && row.setting_bool("add_indexer", true)
+            && let Err(e) = self.add_slskd_indexer(&row).await
+        {
+            tracing::warn!(client = %row.name, error = %e, "could not add the matching slskd indexer");
+        }
         self.require(kind, id).await
+    }
+
+    /// slskd is both a download client and an indexer: a new slskd client also gets an slskd
+    /// indexer with the same address and API key, unless one for that address exists.
+    async fn add_slskd_indexer(&self, client: &ProviderRow) -> Result<Option<i64>> {
+        let http: reelix_downloaders::common::HttpSettings =
+            serde_json::from_value(Value::Object(client.settings.clone()))
+                .map_err(|e| validation(e.to_string()))?;
+        let base_url = http.base_url().map_err(|e| validation(e.to_string()))?;
+        let same = |u: &str| {
+            u.trim()
+                .trim_end_matches('/')
+                .eq_ignore_ascii_case(base_url.trim_end_matches('/'))
+        };
+        let exists = self.list(ProviderKind::Indexer).await?.into_iter().any(|r| {
+            r.implementation == reelix_indexers::slskd::IMPLEMENTATION
+                && r.setting_str("base_url").is_some_and(same)
+        });
+        if exists {
+            return Ok(None);
+        }
+        let input = ProviderInput {
+            implementation: reelix_indexers::slskd::IMPLEMENTATION.into(),
+            name: client.name.clone(),
+            enabled: client.enabled,
+            priority: 25,
+            tags: client.tags.clone(),
+            settings: serde_json::json!({
+                "base_url": base_url,
+                "api_key": client.settings.get("api_key").cloned().unwrap_or(Value::Null),
+            }),
+        };
+        let kind = ProviderKind::Indexer;
+        let (row, schema) = self.prepare(kind, &input, None).await?;
+        self.try_build(&row).map_err(validation)?;
+        let id = self.write_row(&row, &schema, None).await?;
+        self.reload_kind(kind, false).await?;
+        self.publish(kind.as_str(), "created", id);
+        tracing::info!(id, name = %row.name, "slskd indexer added with its download client");
+        Ok(Some(id))
     }
 
     pub async fn update(&self, kind: ProviderKind, id: i64, input: &ProviderInput) -> Result<ProviderRow> {

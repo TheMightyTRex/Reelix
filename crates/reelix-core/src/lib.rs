@@ -6,6 +6,7 @@ pub mod events;
 pub mod jobs;
 pub mod permissions;
 pub mod provider;
+pub mod soulseek;
 pub mod user;
 
 pub use events::{Audience, DomainEvent};
@@ -17,6 +18,34 @@ pub use permissions::Permissions;
 pub enum Protocol {
     Torrent,
     Usenet,
+    /// Peer-to-peer file sharing through an slskd daemon ([`soulseek`]).
+    Soulseek,
+}
+
+impl Protocol {
+    pub const ALL: [Protocol; 3] = [Self::Usenet, Self::Torrent, Self::Soulseek];
+
+    /// DB / wire string: `torrent`, `usenet`, `soulseek`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Torrent => "torrent",
+            Self::Usenet => "usenet",
+            Self::Soulseek => "soulseek",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.as_str() == s)
+    }
+
+    /// Display name: `Torrent`, `Usenet`, `Soulseek`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Torrent => "Torrent",
+            Self::Usenet => "Usenet",
+            Self::Soulseek => "Soulseek",
+        }
+    }
 }
 
 /// Movie or series.

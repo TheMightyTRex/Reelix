@@ -9,12 +9,17 @@ pub struct DelayProfile {
     pub id: i64,
     pub enable_usenet: bool,
     pub enable_torrent: bool,
+    #[serde(default = "yes")]
+    pub enable_soulseek: bool,
     pub preferred_protocol: Protocol,
     /// Minutes to wait after a usenet release is first seen.
     #[serde(default)]
     pub usenet_delay: u32,
     #[serde(default)]
     pub torrent_delay: u32,
+    /// Counted from the search that first found the release (Soulseek has no publish date).
+    #[serde(default)]
+    pub soulseek_delay: u32,
     /// Skip the delay when the release is the profile's best allowed quality.
     #[serde(default)]
     pub bypass_if_highest_quality: bool,
@@ -31,15 +36,21 @@ pub struct DelayProfile {
     pub order: i32,
 }
 
+fn yes() -> bool {
+    true
+}
+
 impl Default for DelayProfile {
     fn default() -> Self {
         Self {
             id: 0,
             enable_usenet: true,
             enable_torrent: true,
+            enable_soulseek: true,
             preferred_protocol: Protocol::Usenet,
             usenet_delay: 0,
             torrent_delay: 0,
+            soulseek_delay: 0,
             bypass_if_highest_quality: true,
             bypass_if_above_custom_format_score: false,
             minimum_custom_format_score: 0,
@@ -54,6 +65,7 @@ impl DelayProfile {
         match protocol {
             Protocol::Usenet => self.usenet_delay,
             Protocol::Torrent => self.torrent_delay,
+            Protocol::Soulseek => self.soulseek_delay,
         }
     }
 
@@ -61,6 +73,7 @@ impl DelayProfile {
         match protocol {
             Protocol::Usenet => self.enable_usenet,
             Protocol::Torrent => self.enable_torrent,
+            Protocol::Soulseek => self.enable_soulseek,
         }
     }
 

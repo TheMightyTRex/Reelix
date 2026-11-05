@@ -1,6 +1,7 @@
 //! Indexer-facing domain types: releases, queries and capabilities.
 
 use chrono::{DateTime, Utc};
+use reelix_core::soulseek::SoulseekRelease;
 use reelix_core::{BookFormat, ContentKind, Protocol};
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,8 @@ pub enum IndexerFlag {
     Internal,
     Scene,
     Nuked,
+    /// Soulseek: the peer has a free upload slot.
+    FreeUploadSlot,
 }
 
 impl IndexerFlag {
@@ -32,6 +35,7 @@ impl IndexerFlag {
                 "internal" => Self::Internal,
                 "scene" => Self::Scene,
                 "nuked" => Self::Nuked,
+                "freeuploadslot" | "freeslot" => Self::FreeUploadSlot,
                 _ => return None,
             },
         )
@@ -74,6 +78,9 @@ pub struct ReleaseInfo {
     /// Seconds.
     pub minimum_seed_time: Option<u64>,
     pub indexer_flags: Vec<IndexerFlag>,
+    /// Soulseek: the peer folder to enqueue (slskd).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soulseek: Option<SoulseekRelease>,
 }
 
 impl ReleaseInfo {
@@ -104,6 +111,7 @@ impl ReleaseInfo {
             minimum_ratio: None,
             minimum_seed_time: None,
             indexer_flags: Vec::new(),
+            soulseek: None,
         }
     }
 

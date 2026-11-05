@@ -7,6 +7,7 @@ pub mod pending;
 pub mod tracked;
 
 use chrono::{DateTime, Utc};
+use reelix_core::soulseek::SoulseekRelease;
 use reelix_core::{BookFormat, Protocol};
 use reelix_parser::{Language, QualityModel};
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,18 @@ pub struct GrabbedRelease {
     pub indexer_flags: Vec<String>,
     pub seed_ratio: Option<f64>,
     pub seed_time_minutes: Option<u32>,
+    /// Soulseek: the peer's folder the slskd client enqueues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soulseek: Option<SoulseekRelease>,
+}
+
+impl GrabbedRelease {
+    /// Identity used for blocklisting: the info hash, or the Soulseek `slsk:{user}/{dir}` key.
+    pub fn release_key(&self) -> Option<String> {
+        self.info_hash
+            .clone()
+            .or_else(|| self.soulseek.as_ref().map(SoulseekRelease::key))
+    }
 }
 
 /// Book / album / radio episode reference of a pipeline row (columns from
@@ -121,16 +134,9 @@ pub(crate) fn from_json<T: serde::de::DeserializeOwned + Default>(s: &str) -> T 
 }
 
 pub(crate) fn protocol_str(p: Protocol) -> &'static str {
-    match p {
-        Protocol::Torrent => "torrent",
-        Protocol::Usenet => "usenet",
-    }
+    p.as_str()
 }
 
 pub(crate) fn parse_protocol(s: &str) -> Option<Protocol> {
-    match s {
-        "torrent" => Some(Protocol::Torrent),
-        "usenet" => Some(Protocol::Usenet),
-        _ => None,
-    }
+    Protocol::parse(s)
 }

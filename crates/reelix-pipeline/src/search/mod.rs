@@ -464,7 +464,7 @@ impl SearchService {
                     }
                 }
             }
-            let decision = ev.evaluate(&c, info.info_hash.as_deref(), kind, extra);
+            let decision = ev.evaluate(&c, mapping::release_key(&info).as_deref(), kind, extra);
             out.push(Eval {
                 info,
                 ranked: RankedRelease {
@@ -668,6 +668,7 @@ impl SearchService {
             indexer_flags: Vec::new(),
             seed_ratio: row.settings.get("seed_ratio").and_then(serde_json::Value::as_f64),
             seed_time_minutes: row.setting_u64("seed_time_minutes").map(|v| v as u32),
+            soulseek: None,
         })
     }
 

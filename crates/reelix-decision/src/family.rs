@@ -85,6 +85,8 @@ impl ReleaseCandidate {
             indexer_priority: 25,
             seeders: None,
             peers: None,
+            queue_length: None,
+            upload_speed: None,
             publish_date: None,
             indexer_flags: Vec::new(),
             download_url: String::new(),

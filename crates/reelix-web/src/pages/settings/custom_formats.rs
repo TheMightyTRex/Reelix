@@ -74,6 +74,7 @@ const FLAGS: &[(&str, &str)] = &[
     ("golden", "Golden"),
     ("approved", "Approved"),
     ("nuked", "Nuked"),
+    ("free_upload_slot", "Free upload slot (Soulseek)"),
 ];
 const RELEASE_TYPES: &[(&str, &str)] = &[
     ("single_episode", "Single episode"),

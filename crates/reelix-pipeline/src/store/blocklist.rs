@@ -177,11 +177,15 @@ pub async fn for_content(db: &Db, c: &ContentRef) -> Result<Vec<BlocklistEntry>>
 /// Whether a release is blocklisted: same info hash, or same title (case-insensitive) for the media.
 pub fn is_blocked(entries: &[BlocklistEntry], title: &str, info_hash: Option<&str>) -> bool {
     entries.iter().any(|e| {
-        info_hash.is_some_and(|h| {
+        let key = info_hash.is_some_and(|h| {
             e.torrent_info_hash
                 .as_deref()
                 .is_some_and(|b| b.eq_ignore_ascii_case(h))
-        }) || e.source_title.eq_ignore_ascii_case(title)
+        });
+        // Soulseek entries block one peer's folder (key `slsk:{user}/{dir}`, stored in the
+        // hash column); the same folder name from other peers stays allowed.
+        let peer_folder = e.protocol == Some(Protocol::Soulseek) && e.torrent_info_hash.is_some();
+        key || (!peer_folder && e.source_title.eq_ignore_ascii_case(title))
     })
 }
 

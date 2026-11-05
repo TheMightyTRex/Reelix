@@ -192,7 +192,7 @@ pub fn IndexerSearchPage() -> impl IntoView {
                         <DataTable caption="Releases" headers=vec!["Protocol", "Age", "Title", "Indexer", "Size", "Peers", "Flags", ""]>
                             {rel.into_iter().map(|r| {
                                 let link = r.magnet_url.clone().or(r.download_url.clone()).unwrap_or_default();
-                                let proto = match r.protocol { Protocol::Torrent => "torrent", Protocol::Usenet => "usenet" };
+                                let proto = r.protocol.as_str();
                                 view! {
                                     <tr>
                                         <td><span class=format!("badge proto-{proto}")>{proto}</span></td>
@@ -206,6 +206,13 @@ pub fn IndexerSearchPage() -> impl IntoView {
                                         <td>{r.indexer.clone()}</td>
                                         <td>{r.size.map(bytes).unwrap_or_else(|| "—".into())}</td>
                                         <td>{match (r.seeders, r.peers) {
+                                            _ if r.protocol == Protocol::Soulseek => {
+                                                let peer = crate::components::interactive_search::soulseek_peer(r.soulseek.as_ref());
+                                                match &r.soulseek {
+                                                    Some(s) => format!("@{} · {peer}", s.username),
+                                                    None => peer,
+                                                }
+                                            }
                                             (Some(s), Some(p)) => format!("{s} / {p}"),
                                             (Some(s), None) => s.to_string(),
                                             _ => "—".into(),

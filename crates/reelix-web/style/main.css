@@ -3174,6 +3174,7 @@ select.input {
 .release-title { max-width: 520px; word-break: break-word; }
 .proto-torrent { background: var(--accent-soft); }
 .proto-usenet { background: var(--surface-2); }
+.proto-soulseek { background: var(--success-soft); }
 .search-outcomes { margin: var(--space-3) 0; }
 .field.grow { flex: 1 1 auto; }
 /* ---- end Providers UI ---- */
@@ -3183,6 +3184,7 @@ select.input {
 .proto-badge { height: 20px; padding: 0 8px; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .02em; }
 .proto-badge.proto-torrent { color: var(--accent); }
 .proto-badge.proto-usenet { color: var(--info); background: var(--info-soft); }
+.proto-badge.proto-soulseek { color: var(--success); background: var(--success-soft); }
 .cf-score { font-family: var(--font-mono); font-size: var(--text-sm); cursor: help; }
 .cf-score.score-pos { color: var(--success); }
 .cf-score.score-neg { color: var(--danger); }

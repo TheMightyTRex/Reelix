@@ -14,10 +14,16 @@ use reelix_indexers::definition::IMPLEMENTATION_PREFIX;
 pub const ROW_FIELDS: [&str; 3] = ["name", "priority", "tags"];
 
 fn indexer_fields(protocol: Protocol) -> Vec<FieldSchema> {
+    // Soulseek has no feed of new releases.
+    let rss = protocol != Protocol::Soulseek;
     let mut v = vec![
         FieldSchema::new("enable_rss", "Enable RSS", FieldKind::Bool)
-            .default_value(true)
-            .help("Use this indexer for RSS sync"),
+            .default_value(rss)
+            .help(if rss {
+                "Use this indexer for RSS sync"
+            } else {
+                "Soulseek has no RSS feed; this indexer is only used by searches"
+            }),
         FieldSchema::new(
             "enable_automatic_search",
             "Enable automatic search",
@@ -71,6 +77,7 @@ pub fn indexer_protocol(implementation: &str, defs: &DefinitionStore) -> Option<
     match implementation {
         "torznab" => Some(Protocol::Torrent),
         "newznab" => Some(Protocol::Usenet),
+        reelix_indexers::slskd::IMPLEMENTATION => Some(Protocol::Soulseek),
         other => {
             let def = defs.get(other.strip_prefix(IMPLEMENTATION_PREFIX)?)?;
             Some(match def.protocol.as_deref() {
@@ -337,7 +344,7 @@ pub fn find(kind: ProviderKind, implementation: &str, defs: &DefinitionStore) ->
         // Avoid building every definition schema for a single lookup.
         let protocol = indexer_protocol(implementation, defs)?;
         let mut s = match implementation {
-            "torznab" | "newznab" => reelix_indexers::schemas()
+            "torznab" | "newznab" | reelix_indexers::slskd::IMPLEMENTATION => reelix_indexers::schemas()
                 .into_iter()
                 .find(|s| s.implementation == implementation)?,
             other => {
@@ -371,13 +378,25 @@ mod tests {
     fn catalogs_are_augmented() {
         let defs = DefinitionStore::default();
         let idx = catalog(ProviderKind::Indexer, &defs);
-        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.len(), 3);
         let torznab = idx.iter().find(|s| s.schema.implementation == "torznab").unwrap();
         assert_eq!(torznab.protocol, Some(Protocol::Torrent));
         assert!(torznab.schema.fields.iter().any(|f| f.name == "seed_ratio"));
         let newznab = find(ProviderKind::Indexer, "newznab", &defs).unwrap();
         assert!(!newznab.schema.fields.iter().any(|f| f.name == "seed_ratio"));
         assert!(newznab.schema.fields.iter().any(|f| f.name == "enable_rss"));
+        let slskd = find(ProviderKind::Indexer, "slskd", &defs).unwrap();
+        assert_eq!(slskd.protocol, Some(Protocol::Soulseek));
+        let rss = slskd
+            .schema
+            .fields
+            .iter()
+            .find(|f| f.name == "enable_rss")
+            .unwrap();
+        assert_eq!(rss.default, Some(serde_json::Value::Bool(false)));
+        assert!(!slskd.schema.fields.iter().any(|f| f.name == "minimum_seeders"));
+        let client = find(ProviderKind::DownloadClient, "slskd", &defs).unwrap();
+        assert_eq!(client.protocol, Some(Protocol::Soulseek));
 
         let dc = catalog(ProviderKind::DownloadClient, &defs);
         assert!(

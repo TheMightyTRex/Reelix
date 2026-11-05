@@ -77,6 +77,7 @@ pub fn release_dto(e: &Eval, t: &Target, rank: u32, now: DateTime<Utc>) -> Relea
         book_id: t.content().book_id,
         book_format: t.book_format(),
         album_id: t.content().album_id,
+        soulseek: i.soulseek.clone(),
     }
 }
 
