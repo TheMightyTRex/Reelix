@@ -86,6 +86,30 @@ pub async fn apply_pending_restore(cfg: &Config) {
     }
 }
 
+/// Snapshots the database into a new backup archive and returns its path.
+pub async fn snapshot_backup(db: &Db, paths: &Paths, kind: BackupKind) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(&paths.backup_dir)?;
+    let snapshot = paths
+        .backup_dir
+        .join(format!(".snapshot-{}.db", rand::random::<u64>()));
+    // VACUUM INTO writes a consistent, compacted copy while the server keeps running.
+    let vacuum = sqlx::query("VACUUM INTO ?")
+        .bind(snapshot.to_string_lossy().into_owned())
+        .execute(db.pool())
+        .await;
+    let result = match vacuum {
+        Ok(_) => {
+            let paths = paths.clone();
+            let snap = snapshot.clone();
+            tokio::task::spawn_blocking(move || backup::write_archive(&paths, &snap, kind, Utc::now()))
+                .await?
+        }
+        Err(e) => Err(anyhow::Error::new(e).context("snapshotting the database")),
+    };
+    let _ = std::fs::remove_file(&snapshot);
+    result
+}
+
 fn install_kind() -> InstallKind {
     if self_update::in_docker() {
         InstallKind::Docker
@@ -277,27 +301,7 @@ impl MaintenanceService {
 
     /// [`Self::make_backup`] for a caller already holding `backup_lock`.
     async fn backup_locked(&self, kind: BackupKind) -> anyhow::Result<BackupDto> {
-        std::fs::create_dir_all(&self.paths.backup_dir)?;
-        let snapshot = self
-            .paths
-            .backup_dir
-            .join(format!(".snapshot-{}.db", rand::random::<u64>()));
-        // VACUUM INTO writes a consistent, compacted copy while the server keeps running.
-        let vacuum = sqlx::query("VACUUM INTO ?")
-            .bind(snapshot.to_string_lossy().into_owned())
-            .execute(self.db.pool())
-            .await;
-        let result = match vacuum {
-            Ok(_) => {
-                let paths = self.paths.clone();
-                let snap = snapshot.clone();
-                tokio::task::spawn_blocking(move || backup::write_archive(&paths, &snap, kind, Utc::now()))
-                    .await?
-            }
-            Err(e) => Err(anyhow::Error::new(e).context("snapshotting the database")),
-        };
-        let _ = std::fs::remove_file(&snapshot);
-        let path = result?;
+        let path = snapshot_backup(&self.db, &self.paths, kind).await?;
         let name = path
             .file_name()
             .unwrap_or_default()
