@@ -6,6 +6,15 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-05
+
+### Fixed
+- **Importing a large library no longer times out.**
+  - **Before:** Import selected sent every folder in one request and only answered once all of them were added. With hundreds of folders that took longer than a reverse proxy allows (Cloudflare's 524).
+  - **Now:** folders are imported 25 at a time, with an "Importing… N of M" counter, and the errors from every batch are listed together.
+  - This applies to movies, series, music and books.
+- **Matching and importing movies and series is about five times faster.** Reelix still paced its TMDB lookups to 4 per second, TMDB's old limit, which it dropped in 2019. It now makes up to 20 per second and still backs off if TMDB asks it to. Up to 8 folders are now added at once, up from 4.
+
 ## [0.8.0] - 2026-11-05
 
 ### Added
