@@ -10,6 +10,9 @@
 ARG REELIX_FEATURES=""
 # A static ffprobe, pinned. Change the tag to update it.
 ARG FFPROBE_IMAGE=mwader/static-ffmpeg:7.1
+# The Reelix version, written into the image's version label so Starboard and other tools can tell which
+# version runs, even under the floating "lite" tag (added 5 November 2026). lite.yml passes the release, such as 0.7.1.
+ARG VERSION=dev
 
 FROM rust:1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS chef
 RUN cargo install --locked cargo-chef
@@ -42,6 +45,9 @@ RUN cd crates/reelix-web && trunk build --release
 FROM ${FFPROBE_IMAGE} AS ffprobe
 
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS runtime
+ARG VERSION
+LABEL org.opencontainers.image.title="Reelix" \
+      org.opencontainers.image.version="${VERSION}"
 # util-linux (setpriv) is part of the base image; tzdata makes TZ work.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \

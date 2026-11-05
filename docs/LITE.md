@@ -34,7 +34,8 @@ left.
 
 1. merges upstream's newest release tag;
 2. tests the lite build;
-3. builds the image and checks it starts healthy and has ffprobe;
+3. builds the image with the release in its version label (`org.opencontainers.image.version`, such as
+   0.7.1), and checks it starts healthy, has ffprobe and carries that label;
 4. pushes the merged branch.
 
 A clash or failure pushes nothing, and GitHub emails the owner. It warns when upstream changes its own
