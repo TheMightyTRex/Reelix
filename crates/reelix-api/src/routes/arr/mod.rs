@@ -274,6 +274,12 @@ pub(crate) fn quality_model(app: App, q: &QualityModel) -> Value {
     })
 }
 
+/// Now plus an ETA from a download client; `None` when the ETA is too large to be a date.
+fn completion_time(eta_secs: u64) -> Option<chrono::DateTime<Utc>> {
+    let eta = chrono::Duration::try_seconds(i64::try_from(eta_secs).ok()?)?;
+    Utc::now().checked_add_signed(eta)
+}
+
 fn hms(secs: u64) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
 }
@@ -960,7 +966,7 @@ pub(crate) fn queue_record(app: App, q: &QueueItemDto) -> Value {
         "indexer": q.indexer,
         "outputPath": q.output_path,
         "timeleft": q.eta_secs.map(hms),
-        "estimatedCompletionTime": q.eta_secs.map(|s| Utc::now() + chrono::Duration::seconds(s as i64)),
+        "estimatedCompletionTime": q.eta_secs.and_then(completion_time),
         "added": q.added,
         "quality": q.quality.as_ref().map(|m| quality_model(app, m)),
         "customFormats": q.custom_formats.iter().map(|f| json!({"id": f.id, "name": f.name})).collect::<Vec<_>>(),
