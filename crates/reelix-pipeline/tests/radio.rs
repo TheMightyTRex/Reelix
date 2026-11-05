@@ -1,4 +1,4 @@
-//! Radio through the pipeline: wanted episodes searched in the radio category (Audio/Other)
+//! Radio through the pipeline: wanted episodes searched in the radio categories
 //! of a wiremock Newznab indexer, scored with the audiobook profile, grabbed into the client's
 //! book category; RSS releases matched to wanted episodes; completed downloads filed into the
 //! podcast library.
@@ -343,7 +343,7 @@ async fn radio_search_scores_and_grabs_wanted_episodes_only() {
         let r = rows.iter().find(|r| r.guid == wrong).unwrap();
         assert!(r.rejections.iter().any(|x| x.spec == "mapping"), "{r:?}");
     }
-    // Searched in Audio/Other, by show + SxxEyy (and the date).
+    // Searched in Audio/MP3, Audio/Audiobook and Audio/Other, by show + SxxEyy (and the date).
     let searches: Vec<(String, String)> = e
         .indexer
         .received_requests()
@@ -363,7 +363,7 @@ async fn radio_search_scores_and_grabs_wanted_episodes_only() {
         })
         .collect();
     assert!(
-        searches.contains(&("The News Quiz S20E03".into(), "3050".into())),
+        searches.contains(&("The News Quiz S20E03".into(), "3010,3030,3050".into())),
         "{searches:?}"
     );
 

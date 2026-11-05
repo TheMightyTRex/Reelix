@@ -361,7 +361,11 @@ filed into the podcast library.
 `Show - Episode title`, date-based `Show 2026-11-04` / `2026.11.04` / `20261104` /
 `04 Nov 2026`, dotted scene names with a `-GROUP`, a station in front (`BBC.Radio.4.The.Archers…`)
 or in a leading bracket (`[BBC R4]` → `BBC Radio 4`), and audio tags anywhere (`(128kbps)`,
-`[64kbps opus]`, `.mp3`, `AAC`, `WEB`). Quality is of the audiobook family: MP3 →
+`[64kbps opus]`, `.mp3`, `AAC`, `WEB`), and get_iplayer names with underscores and the BBC
+programme id (`The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a` → show,
+series 20, episode 3, `pid` `b09zv5m0`; the version word after the id, such as `original` or
+`editorial`, is dropped). A pid is 8 characters, `b`, `p`, `m` or `w` then digits and consonants,
+and must contain a digit (`reelix_parser::is_bbc_pid`). Quality is of the audiobook family: MP3 →
 `AudiobookMp3`, AAC/M4A/M4B → `AudiobookM4b`, FLAC → `AudiobookFlac`, Opus/Ogg/unknown →
 `UnknownAudiobook`; the codec and bitrate are kept. `ReleaseCandidate::for_radio`
 (`reelix-decision`) builds decision candidates from it.
@@ -373,19 +377,30 @@ have a file (a search by hand); `parent` = wanted episodes of the given shows; `
 = every wanted episode (`wanted_episodes()`: monitored, broadcast, no file). Episodes Reelix has
 filed whose file still exists (`radio_episodes.filed_path`) are left out until the library sync
 matches them. `RadioTarget::search_terms()`: `Show S20E03`, `Show 2026 11 04`, `Show Episode
-title` (titles like "Episode 3" are skipped). `RadioTarget::check_release(&ParsedRadio)`: the
-show must match (case, punctuation and articles ignored; a station prefix tolerated), then the
-numbers, else the broadcast date (one day either way), else the episode title.
+title` (titles like "Episode 3" are skipped). `RadioTarget::check_release(&ParsedRadio)`: when the
+release carries a BBC programme id and the episode is a BBC one (provider `bbc`, whose external
+id is the pid; `WantedEpisode::provider`), the pid decides: the same pid matches whatever the
+name says, another pid is refused. Otherwise the show must match (case, punctuation and
+articles ignored; a station prefix tolerated), then the numbers, else the broadcast date (one
+day either way), else the episode title. A release with only a pid still identifies an episode
+for `match_release`.
 
 **Pipeline** (`crates/reelix-pipeline`): `Target::Radio`, `ContentRef::radio_episode(id)`
 (column `radio_episode_id` on `history`, `blocklist`, `tracked_downloads`,
 `pending_releases`, migration `0015_radio_filing.sql`). Queries are basic searches in
-`DEFAULT_RADIO` (Audio/Other); releases in movie or book categories are rejected. Scoring uses
+`DEFAULT_RADIO` (Audio/MP3 3010, Audio/Audiobook 3030 and Audio/Other 3050: radio has no
+category of its own, and MyAnonamouse's Radio categories arrive as Audio/Audiobook through
+Prowlarr and Jackett; the Audio parent is not asked for, as it would also bring Lossless and
+Audio/Video); releases in movie or book categories are rejected, and music or audiobook
+releases are only taken when they match the episode. Scoring uses
 the decision engine with the target's audiobook profile, the audiobook quality definitions
 (size per minute of the episode's length), delay profiles, release profiles, the blocklist and
 the queue, exactly like books and albums. Grabs go to the download client's book category.
-RSS sync first matches releases in Audio/Other, Audio/Audiobook or without categories against
-every wanted, monitored episode (`reelix_radio::match_release`). A failed download is
+RSS sync first matches releases in the radio categories (Audio/MP3, Audio/Audiobook,
+Audio/Other) or without categories against every wanted, monitored episode
+(`reelix_radio::match_release`); a release that is no wanted episode goes on to the books or
+music library as before (`content_kind_of` still files Audio/Audiobook as audiobook and
+Audio/MP3 as music). A failed download is
 blocklisted for the episode and searched again.
 
 | Job | Interval | What it does |

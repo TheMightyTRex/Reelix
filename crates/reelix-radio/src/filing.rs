@@ -389,6 +389,7 @@ mod tests {
             episode_id: 1,
             show_id: 1,
             show_title: "The News Quiz".into(),
+            provider: "rss".into(),
             station_name: None,
             series_number: 20,
             number: Some(3),

@@ -6,6 +6,11 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+### Changed
+- **Radio searches find more episodes:**
+  - **BBC programme ids:** get_iplayer names such as `The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a` are now read, including the BBC programme id (`b09zv5m0`). For a BBC episode the id decides: a release with the episode's id matches even when the show is named differently, and one with another id is refused.
+  - **More categories:** radio is now searched in Audio/MP3 and Audio/Audiobook as well as Audio/Other, because indexers often file radio there (MyAnonamouse's Radio categories arrive as Audio/Audiobook through Prowlarr and Jackett). A release still has to match a wanted episode, so music and audiobooks are not grabbed as radio. RSS sync also checks Audio/MP3 releases against wanted episodes before passing them to music.
+
 ## [0.8.5] - 2026-11-06
 
 ### Added
