@@ -6,6 +6,16 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-05
+
+### Changed
+- **Infinite scrolling.** These pages now load more as you scroll, instead of using page buttons or "Show more":
+  - library pages: Movies, Series, Music artists, Books authors and Radio shows
+  - logs and lists: History, Blocklist, Requests and Issues
+  - Discover "see all" grids and Search results
+
+  Every list keeps a **Load more** button for keyboard users, and shows "Showing N of M" where the total is known. Going **Back** to a library page returns you to where you were. Select all on Requests, History and Blocklist applies to the loaded rows and says so. The Queue and Wanted pages keep their page buttons.
+
 ## [0.8.2] - 2026-11-05
 
 ### Added
