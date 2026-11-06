@@ -187,6 +187,14 @@ fn endpoints(settings: &Map<String, Value>) -> BTreeSet<String> {
         .collect()
 }
 
+/// True when `input` keeps a masked (stored) secret while the saved row's address changes.
+fn secret_follows_new_host(input: &Value, previous: &ProviderRow, row: &ProviderRow) -> bool {
+    let reuses_secret = input
+        .as_object()
+        .is_some_and(|o| o.values().any(|v| v.as_str() == Some(SECRET_MASK)));
+    reuses_secret && endpoints(&previous.settings) != endpoints(&row.settings)
+}
+
 /// The definitions catalog is code-like input: HTTPS only (plain HTTP just for loopback mirrors).
 fn definitions_source_ok(url: &url::Url) -> bool {
     match url.scheme() {
@@ -650,6 +658,13 @@ impl ProviderService {
     pub async fn update(&self, kind: ProviderKind, id: i64, input: &ProviderInput) -> Result<ProviderRow> {
         let previous = self.require(kind, id).await?;
         let (row, schema) = self.prepare(kind, input, Some(&previous)).await?;
+        // As in `test_input`: a masked secret is only kept for the host it was saved for, so
+        // changing the address cannot send the stored password or API key somewhere else.
+        if secret_follows_new_host(&input.settings, &previous, &row) {
+            return Err(validation(
+                "the address changed; re-enter the password / API key for the new host",
+            ));
+        }
         self.check_addresses(&row).await?;
         self.try_build(&row).map_err(validation)?;
         self.write_row(&row, &schema, Some(id)).await?;
@@ -1071,14 +1086,8 @@ impl ProviderService {
             Err(e) => return Err(e),
         };
         // Stored secrets only go back to the host they were saved for.
-        let reuses_secret = req
-            .provider
-            .settings
-            .as_object()
-            .is_some_and(|o| o.values().any(|v| v.as_str() == Some(SECRET_MASK)));
-        if reuses_secret
-            && let Some(prev) = &previous
-            && endpoints(&prev.settings) != endpoints(&row.settings)
+        if let Some(prev) = &previous
+            && secret_follows_new_host(&req.provider.settings, prev, &row)
         {
             return Ok(failed(
                 "settings",
