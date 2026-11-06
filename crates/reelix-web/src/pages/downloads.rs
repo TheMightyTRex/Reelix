@@ -14,7 +14,30 @@ pub fn DownloadsPage() -> impl IntoView {
     let toasts = Toasts::expect();
     let jobs = LocalResource::new(|| api::get::<Vec<DirectDownload>>("/downloads"));
     let settings = LocalResource::new(|| api::get::<DirectSettings>("/downloads/settings"));
-    let timer = set_interval_with_handle(move || jobs.refetch(), std::time::Duration::from_secs(2)).ok();
+    // Every 2 seconds while something is queued or running and the tab is visible; otherwise every 30
+    // seconds, so a new download started elsewhere still appears.
+    let idle_ticks = StoredValue::new(0_u32);
+    let timer = set_interval_with_handle(
+        move || {
+            if document().hidden() {
+                return;
+            }
+            let active = jobs.get_untracked().is_none_or(|r| {
+                r.as_ref().map_or(true, |list| {
+                    list.iter().any(|d| d.state == "queued" || d.state == "running")
+                })
+            });
+            let ticks = idle_ticks.get_value() + 1;
+            if active || ticks >= 15 {
+                idle_ticks.set_value(0);
+                jobs.refetch();
+            } else {
+                idle_ticks.set_value(ticks);
+            }
+        },
+        std::time::Duration::from_secs(2),
+    )
+    .ok();
     on_cleanup(move || {
         if let Some(t) = timer {
             t.clear();

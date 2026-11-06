@@ -5,14 +5,15 @@ use std::rc::Rc;
 
 use leptos::ev;
 use leptos::prelude::*;
-use leptos_router::components::Outlet;
+use leptos_router::components::{A, Outlet};
 use leptos_router::hooks::{use_location, use_navigate};
+use reelix_api_types::migrate::PendingMigrationSource;
 use reelix_api_types::system::UiSettings;
 use wasm_bindgen::JsCast;
 
-use super::Spinner;
 use super::sidebar::Sidebar;
 use super::topbar::{SEARCH_ID, Topbar};
+use super::{Icon, Spinner};
 use crate::state::{AuthState, Boot};
 
 /// Layout for every signed-in page. Redirects to `/setup` or `/login` when appropriate.
@@ -87,11 +88,60 @@ pub fn Shell() -> impl IntoView {
                 <div class="shell-main">
                     <Topbar drawer_open=drawer_open />
                     <main id="main" class="content" tabindex="-1">
+                        <MigrationBanner />
                         <Outlet />
                     </main>
                 </div>
             </div>
         </Show>
+    }
+}
+
+/// For admins: points to System → Migrate while Setup (the Windows installer) has saved apps to
+/// migrate from. Checked again on navigation until the list is empty.
+#[component]
+fn MigrationBanner() -> impl IntoView {
+    let auth = AuthState::expect();
+    let location = use_location();
+    let apps = RwSignal::new(None::<Vec<String>>);
+    Effect::new(move |_| {
+        let _ = location.pathname.get();
+        if !auth.is_admin() || apps.with_untracked(|a| a.as_ref().is_some_and(Vec::is_empty)) {
+            return;
+        }
+        leptos::task::spawn_local(async move {
+            if let Ok(list) = crate::api::get::<Vec<PendingMigrationSource>>("/system/migrate/pending").await
+            {
+                let mut names: Vec<String> = list.iter().map(|p| p.source.label().to_owned()).collect();
+                names.dedup();
+                apps.set(Some(names));
+            }
+        });
+    });
+    move || {
+        let names = apps.get().unwrap_or_default();
+        let on_page = location.pathname.with(|p| p.contains("/system/migrate"));
+        (!names.is_empty() && !on_page).then(|| {
+            view! {
+                <div class="alert alert-info" role="status">
+                    <Icon name="download" />
+                    <div class="alert-body">
+                        <strong>"Ready to migrate"</strong>
+                        <span>
+                            {format!(
+                                "Setup found {} on this PC. Review what Reelix would import, then start the migration.",
+                                names.join(", ")
+                            )}
+                        </span>
+                        <div>
+                            <A href="/system/migrate" attr:class="btn btn-primary btn-sm">
+                                "Review migration"
+                            </A>
+                        </div>
+                    </div>
+                </div>
+            }
+        })
     }
 }
 

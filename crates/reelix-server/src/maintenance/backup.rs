@@ -768,7 +768,12 @@ mod tests {
         std::fs::write(&p.secret_key_file, "live-key").unwrap();
         let bomb = tmp.path().join("bomb.zip");
         {
-            let db = reelix_db::Db::connect(&url(&p)).await.unwrap();
+            // A separate database: on Windows the live file can stay locked for a while after
+            // its pool closes, which would make the restore below fail for the wrong reason.
+            let other = tmp.path().join("bomb-source.db");
+            let db = reelix_db::Db::connect(&format!("sqlite://{}", other.display()))
+                .await
+                .unwrap();
             let snap = tmp.path().join("bomb-snap.db");
             snapshot(&db, &snap).await;
             db.pool().close().await;

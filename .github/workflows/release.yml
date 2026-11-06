@@ -28,6 +28,7 @@ jobs:
   prepare:
     name: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
@@ -35,7 +36,7 @@ jobs:
       publish: ${{ steps.version.outputs.publish }}
       image: ${{ steps.version.outputs.image }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: version
@@ -70,7 +71,7 @@ jobs:
         run: |
           scripts/release-notes.sh "${{ steps.version.outputs.version }}" > release-notes.md
           cat release-notes.md
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-notes
           path: release-notes.md
@@ -79,8 +80,9 @@ jobs:
     name: web UI
     needs: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: wasm32-unknown-unknown
@@ -93,7 +95,7 @@ jobs:
       - name: trunk build
         working-directory: crates/reelix-web
         run: trunk build --release
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web
           path: crates/reelix-web/dist
@@ -102,6 +104,7 @@ jobs:
     name: linux ${{ matrix.arch }}
     needs: prepare
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -110,7 +113,7 @@ jobs:
           - arch: aarch64
             docker: arm64
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.arch }}-unknown-linux-gnu
@@ -118,6 +121,8 @@ jobs:
         with:
           key: linux-${{ matrix.arch }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        # A stuck Zig mirror once hung this step for hours; fail fast so a re-run can retry.
+        timeout-minutes: 10
         with:
           version: ${{ env.ZIG_VERSION }}
       - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2
@@ -132,7 +137,7 @@ jobs:
           max=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
           echo "Highest glibc symbol: $max"
           [ "$max" = GLIBC_2.17 ] || { echo "::error::Binary needs $max, expected GLIBC_2.17"; exit 1; }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bin-linux-${{ matrix.docker }}
           path: target/${{ matrix.arch }}-unknown-linux-gnu/release/reelix
@@ -142,11 +147,12 @@ jobs:
     name: windows x86_64
     needs: prepare
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       # Link the C runtime statically so users don't need the Visual C++ redistributable.
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -156,7 +162,7 @@ jobs:
       - name: smoke test
         shell: bash
         run: ./target/release/reelix.exe --version
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bin-windows-x86_64
           path: target/release/reelix.exe
@@ -166,31 +172,32 @@ jobs:
     name: archives
     needs: [prepare, web, linux, windows]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: dl1
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: web
           path: artifacts/web
       - name: retry download (web)
         if: steps.dl1.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: web
           path: artifacts/web
       - id: dl2
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: bin-*
           path: artifacts
       - name: retry download (bin-*)
         if: steps.dl2.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bin-*
           path: artifacts
@@ -214,7 +221,7 @@ jobs:
           curl -fsS http://127.0.0.1:7799/api/v1/setup
           curl -fsS -o /dev/null http://127.0.0.1:7799/
           kill "$pid"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archives
           path: dist
@@ -224,19 +231,20 @@ jobs:
     name: windows installer
     needs: [prepare, archives]
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: dl7
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: archives
           path: archives
       - name: retry download (archives)
         if: steps.dl7.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: archives
           path: archives
@@ -302,7 +310,91 @@ jobs:
           foreach ($i in 1..60) { if (-not (Test-Path "$dir\reelix.exe")) { break }; Start-Sleep 1 }
           if (Get-Service Reelix -ErrorAction SilentlyContinue) { throw 'service still registered after uninstall' }
           if (-not (Test-Path "$env:ProgramData\Reelix")) { throw 'uninstall deleted the data folder' }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # Setup's "How would you like to install Reelix?" modes, driven by /MODE= etc. Each step makes
+      # its own Reelix data with the portable reelix.exe from the zip, installs per-user, checks
+      # the result through the API and uninstalls.
+      - name: smoke test (recovery from a backup)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . scripts\windows-smoke.ps1
+          $src = "$env:RUNNER_TEMP\recovery-src"
+          Remove-Item $ReelixData -Recurse -Force -ErrorAction SilentlyContinue
+          New-ReelixData $src 'restored-admin' 7795
+          $zip = (& $Portable backup create --data-dir $src | Select-Object -Last 1).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zip)) { throw "reelix backup create failed: $zip" }
+          # An invalid backup is refused before anything is installed.
+          Set-Content "$env:RUNNER_TEMP\junk.zip" 'not a zip'
+          $code = Install-Reelix 'recovery-bad' '/MODE=recovery', "/BACKUP=$env:RUNNER_TEMP\junk.zip"
+          if ($code -eq 0) { throw 'setup accepted an invalid backup' }
+          if (Test-Path "$InstallDir\reelix.exe") { throw 'setup installed Reelix despite the invalid backup' }
+          $code = Install-Reelix 'recovery' '/MODE=recovery', "/BACKUP=$zip"
+          if ($code -ne 0) { throw "setup exited $code" }
+          if (-not (Test-Path "$ReelixData\restore\pending.zip")) { throw 'the backup was not staged' }
+          $rx = Start-Installed 7794
+          $status = Invoke-RestMethod http://127.0.0.1:7794/api/v1/setup
+          if ($status.needs_setup) { throw 'the restored database has no admin account' }
+          Invoke-RestMethod -Method Post http://127.0.0.1:7794/api/v1/auth/login -ContentType 'application/json' `
+            -Body (@{ username = 'restored-admin'; password = $Password } | ConvertTo-Json) | Out-Null
+          if (Test-Path "$ReelixData\restore\pending.zip") { throw 'the staged restore was not applied' }
+          Stop-Process -Id $rx.Id -Force; $rx.WaitForExit()
+          Uninstall-Reelix
+          Remove-Item $ReelixData, $src -Recurse -Force
+      - name: smoke test (migration from another Reelix folder)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . scripts\windows-smoke.ps1
+          $old = "$env:RUNNER_TEMP\old-reelix"
+          Remove-Item $ReelixData -Recurse -Force -ErrorAction SilentlyContinue
+          New-ReelixData "$old\data" 'old-admin' 7793
+          # A location pinned to the old folder, which Setup has to point at the new one.
+          $cfg = "$old\data\config.toml"
+          (Get-Content $cfg -Raw).Replace('# log_dir = "<data_dir>/logs"', "log_dir = '$old\data\logs'") | Set-Content $cfg
+          if (-not (Get-Content $cfg -Raw).Contains("log_dir = '")) { throw 'could not pin log_dir in the old config.toml' }
+          $code = Install-Reelix 'migrate-folder' '/MODE=migrate', "/MIGRATEFROM=$old"
+          if ($code -ne 0) { throw "setup exited $code" }
+          foreach ($f in 'reelix.db', 'secret.key', 'config.toml') {
+            if (-not (Test-Path "$ReelixData\$f")) { throw "$f was not copied to $ReelixData" }
+          }
+          if (-not (Test-Path "$old\data\reelix.db")) { throw 'the old folder was changed' }
+          $toml = Get-Content "$ReelixData\config.toml" -Raw
+          if ($toml.Contains('old-reelix')) { Write-Host $toml; throw 'config.toml still points at the old folder' }
+          $rx = Start-Installed 7792
+          Invoke-RestMethod -Method Post http://127.0.0.1:7792/api/v1/auth/login -ContentType 'application/json' `
+            -Body (@{ username = 'old-admin'; password = $Password } | ConvertTo-Json) | Out-Null
+          Stop-Process -Id $rx.Id -Force; $rx.WaitForExit()
+          # A data folder that already has a database is never overwritten.
+          Uninstall-Reelix
+          $code = Install-Reelix 'migrate-folder-again' '/MODE=migrate', "/MIGRATEFROM=$old"
+          if ($code -eq 0) { throw 'setup overwrote an existing database' }
+          Remove-Item $ReelixData, $old -Recurse -Force
+      - name: smoke test (migration from Radarr on this PC)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . scripts\windows-smoke.ps1
+          Remove-Item $ReelixData -Recurse -Force -ErrorAction SilentlyContinue
+          $arr = "$env:ProgramData\Radarr"
+          $key = '0123456789abcdef0123456789abcdef'
+          New-Item -ItemType Directory $arr -Force | Out-Null
+          Set-Content "$arr\config.xml" "<Config><BindAddress>*</BindAddress><Port>7878</Port><SslPort>9898</SslPort><EnableSsl>False</EnableSsl><UrlBase></UrlBase><ApiKey>$key</ApiKey></Config>"
+          $code = Install-Reelix 'migrate-arr' '/MODE=migrate', '/ARR=radarr'
+          if ($code -ne 0) { throw "setup exited $code" }
+          $rx = Start-Installed 7791
+          # Setup from this PC needs no token; it signs the new admin in.
+          Invoke-RestMethod -Method Post http://127.0.0.1:7791/api/v1/setup -ContentType 'application/json' -SessionVariable s `
+            -Body (@{ username = 'admin'; password = $Password } | ConvertTo-Json) | Out-Null
+          $pending = @(Invoke-RestMethod http://127.0.0.1:7791/api/v1/system/migrate/pending -WebSession $s)
+          $pending | ConvertTo-Json | Write-Host
+          if ($pending.Count -ne 1 -or $pending[0].source -ne 'radarr' -or $pending[0].url -ne 'http://localhost:7878' -or $pending[0].api_key -ne '********') {
+            throw 'the Radarr found by Setup is not pending in Reelix'
+          }
+          Stop-Process -Id $rx.Id -Force; $rx.WaitForExit()
+          if (Select-String -Path "$ReelixData\reelix.db*" -SimpleMatch $key -Quiet) { throw 'the API key is stored in plain text' }
+          Uninstall-Reelix
+          Remove-Item $ReelixData, $arr -Recurse -Force
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-installer
           path: installer/*.exe
@@ -312,6 +404,7 @@ jobs:
     name: package
     needs: [prepare, archives, windows-installer]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       # Signed build provenance for the release assets (verify with `gh attestation verify`).
@@ -320,28 +413,28 @@ jobs:
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: dl8
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: archives
           path: dist
       - name: retry download (archives)
         if: steps.dl8.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: archives
           path: dist
       - id: dl9
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: windows-installer
           path: dist
       - name: retry download (windows-installer)
         if: steps.dl9.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-installer
           path: dist
@@ -352,7 +445,7 @@ jobs:
       # Syft reads the workspace Cargo.lock (copied alone so the fuzz crate's lockfile stays out).
       - name: prepare SBOM input
         run: mkdir sbom-src && cp Cargo.toml Cargo.lock sbom-src/
-      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: sbom-src
           format: spdx-json
@@ -378,7 +471,7 @@ jobs:
             dist/install.sh
             dist/*.spdx.json
             dist/SHA256SUMS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist
           path: dist
@@ -388,18 +481,19 @@ jobs:
     name: linux installer
     needs: [prepare, package]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - id: dl10
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: dist
           path: dist
       - name: retry download (dist)
         if: steps.dl10.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
           path: dist
@@ -429,6 +523,7 @@ jobs:
     name: docker image
     needs: [prepare, web, linux]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -436,28 +531,28 @@ jobs:
       IMAGE: ${{ needs.prepare.outputs.image }}
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: dl3
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: web
           path: artifacts/web
       - name: retry download (web)
         if: steps.dl3.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: web
           path: artifacts/web
       - id: dl4
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           pattern: bin-linux-*
           path: artifacts
       - name: retry download (bin-linux-*)
         if: steps.dl4.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bin-linux-*
           path: artifacts
@@ -468,10 +563,10 @@ jobs:
           cp artifacts/bin-linux-arm64/reelix context/bin/arm64/
           cp -R artifacts/web context/web
           cp docker/entrypoint.sh context/docker/
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           flavor: latest=false
@@ -480,7 +575,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=v${{ env.VERSION }},enable=${{ needs.prepare.outputs.stable == 'true' }}
             type=raw,value=latest,enable=${{ needs.prepare.outputs.stable == 'true' }}
       - name: smoke test (amd64)
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: context
           file: docker/Dockerfile.release
@@ -500,13 +595,13 @@ jobs:
           docker logs reelix
           docker rm -f reelix
       - if: needs.prepare.outputs.publish == 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: build and push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: context
           file: docker/Dockerfile.release
@@ -523,30 +618,31 @@ jobs:
     needs: [prepare, package, docker, linux-installer]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - id: dl5
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: release-notes
           path: artifacts/release-notes
       - name: retry download (release-notes)
         if: steps.dl5.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-notes
           path: artifacts/release-notes
       - id: dl6
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: dist
           path: artifacts/dist
       - name: retry download (dist)
         if: steps.dl6.outcome == 'failure'
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
           path: artifacts/dist
@@ -564,7 +660,7 @@ jobs:
             echo "docker pull $IMAGE:$VERSION"
             echo '```'
           } > notes.md
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: Reelix ${{ needs.prepare.outputs.version }}
           body_path: notes.md

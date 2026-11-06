@@ -149,11 +149,23 @@ impl JobRepo<'_> {
         Ok(())
     }
 
-    /// Crash recovery: puts jobs left `running` by a previous process back in the queue.
+    /// Crash recovery: puts jobs left `running` by a previous process back in the queue. A job
+    /// that was on its last attempt is marked failed instead, so a job that takes the process
+    /// down (for example by running out of memory) cannot crash it again on every start.
     pub async fn requeue_running(&self) -> Result<u64> {
+        let mut tx = self.db.pool().begin().await?;
+        sqlx::query(
+            "UPDATE jobs SET status = 'failed', finished_at = ?, \
+             error = 'interrupted on its last attempt (the process stopped while it was running)' \
+             WHERE status = 'running' AND attempts >= max_attempts",
+        )
+        .bind(now_ms())
+        .execute(&mut *tx)
+        .await?;
         let r = sqlx::query("UPDATE jobs SET status = 'queued' WHERE status = 'running'")
-            .execute(self.db.pool())
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(r.rows_affected())
     }
 
@@ -172,6 +184,17 @@ impl JobRepo<'_> {
             .fetch_optional(self.db.pool())
             .await?;
         row.as_ref().map(map_job).transpose()
+    }
+
+    /// Kinds with at least one queued job that is runnable at `now_ms`. A plain read, so the
+    /// runner can skip kinds with nothing to do instead of trying a claim (a write) for each.
+    pub async fn ready_kinds(&self, now_ms: i64) -> Result<std::collections::HashSet<String>> {
+        let kinds: Vec<String> =
+            sqlx::query_scalar("SELECT DISTINCT kind FROM jobs WHERE status = 'queued' AND run_after <= ?")
+                .bind(now_ms)
+                .fetch_all(self.db.pool())
+                .await?;
+        Ok(kinds.into_iter().collect())
     }
 
     /// Whether any queued/running job of `kind` exists.
@@ -345,6 +368,52 @@ mod tests {
         assert_eq!(j.error.as_deref(), Some("boom2"));
         assert!(j.finished_at.is_some());
         assert!(!db.jobs().is_active("k").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn requeue_fails_jobs_interrupted_on_their_last_attempt() {
+        let db = Db::in_memory().await.unwrap();
+        let mut last = NewJob::new("k", json!({}));
+        last.max_attempts = 1;
+        let last = db.jobs().enqueue(last).await.unwrap().unwrap();
+        let again = db
+            .jobs()
+            .enqueue(NewJob::new("k", json!({})))
+            .await
+            .unwrap()
+            .unwrap();
+        db.jobs().claim("k", now_ms()).await.unwrap().unwrap();
+        db.jobs().claim("k", now_ms()).await.unwrap().unwrap();
+
+        assert_eq!(db.jobs().requeue_running().await.unwrap(), 1);
+        let failed = db.jobs().get(last).await.unwrap().unwrap();
+        assert_eq!(failed.status, JobStatus::Failed);
+        assert!(failed.finished_at.is_some());
+        assert!(failed.error.as_deref().unwrap().contains("last attempt"));
+        assert_eq!(
+            db.jobs().get(again).await.unwrap().unwrap().status,
+            JobStatus::Queued
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_kinds_lists_only_runnable_queued_kinds() {
+        let db = Db::in_memory().await.unwrap();
+        let now = now_ms();
+        assert!(db.jobs().ready_kinds(now).await.unwrap().is_empty());
+        db.jobs().enqueue(NewJob::new("a", json!({}))).await.unwrap();
+        db.jobs().enqueue(NewJob::new("a", json!({}))).await.unwrap();
+        let mut later = NewJob::new("b", json!({}));
+        later.run_after_ms = now + 60_000;
+        db.jobs().enqueue(later).await.unwrap();
+        let ready = db.jobs().ready_kinds(now_ms()).await.unwrap();
+        assert_eq!(ready.len(), 1);
+        assert!(ready.contains("a"));
+        // Running jobs are not ready.
+        db.jobs().claim("a", now_ms()).await.unwrap().unwrap();
+        db.jobs().claim("a", now_ms()).await.unwrap().unwrap();
+        assert!(db.jobs().ready_kinds(now_ms()).await.unwrap().is_empty());
+        assert!(db.jobs().ready_kinds(now + 120_000).await.unwrap().contains("b"));
     }
 
     #[tokio::test]

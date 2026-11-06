@@ -31,7 +31,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.8.3"
+version = "0.8.6"
 edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
@@ -68,7 +68,7 @@ aes-gcm = "0.10"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws", "macros"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
-base64 = "0.22"
+base64 = "0.23"
 bitflags = "2"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -102,10 +102,10 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
-toml = "0.8"
-toml_edit = "0.22"
+toml = "1.1"
+toml_edit = "0.25"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["trace", "fs", "set-header", "compression-gzip", "timeout"] }
+tower-http = { version = "0.7", features = ["trace", "fs", "set-header", "compression-gzip", "timeout"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

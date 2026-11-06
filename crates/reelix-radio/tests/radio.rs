@@ -783,8 +783,17 @@ async fn restricted_reads_use_only_the_public_client() {
     // Outside the scope the shared client is used as before.
     let normal = p.show(&url, &ShowFetch::default()).await;
     assert!(matches!(normal, Err(ProviderError::NotFound(_))), "{normal:?}");
-    // With one, restricted reads go through it.
+    // IP literals of private addresses are refused before any request.
+    let p2 = RssProvider::new(reqwest::Client::new()).with_public_client(reqwest::Client::new());
+    let literal = rss::restricted(p2.show(&url, &ShowFetch::default())).await;
+    assert!(
+        matches!(literal, Err(ProviderError::Network(ref m)) if m.contains("cannot be read here")),
+        "{literal:?}"
+    );
+    // With one, restricted reads of public hosts go through it (a name here: wiremock listens
+    // on a loopback literal, which the check above refuses).
+    let by_name = url.replace("127.0.0.1", "localhost");
     let p = RssProvider::new(reqwest::Client::new()).with_public_client(reqwest::Client::new());
-    let routed = rss::restricted(p.show(&url, &ShowFetch::default())).await;
+    let routed = rss::restricted(p.show(&by_name, &ShowFetch::default())).await;
     assert!(matches!(routed, Err(ProviderError::NotFound(_))), "{routed:?}");
 }

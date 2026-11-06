@@ -35,6 +35,7 @@ impl RadioService {
                     name: l.name,
                     provider: p.id().to_owned(),
                     provider_name: p.name().to_owned(),
+                    group: l.group,
                 };
                 if l.category {
                     out.categories.push(dto);

@@ -16,16 +16,21 @@ use anyhow::{Context, Result, bail};
 use reelix_api_types::direct::*;
 use reelix_db::{Db, now_ms};
 use sqlx::Row;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 const SETTINGS: &str = "direct_downloads";
+
+/// How often an idle worker looks for queued downloads without being woken.
+const IDLE_RECHECK: Duration = Duration::from_secs(30);
 
 pub struct DirectService {
     db: Db,
     data_dir: PathBuf,
     /// Serialises mutations with claiming and process completion.
     gate: Mutex<()>,
+    /// Wakes the worker when a download is queued, so it does not poll the database every second.
+    wake: Notify,
     http: reqwest::Client,
     login: std::sync::Mutex<spotify_login::LoginState>,
     /// Spotify accounts service base URL; tests point it at a mock server.
@@ -39,6 +44,7 @@ impl DirectService {
             db,
             data_dir,
             gate: Mutex::new(()),
+            wake: Notify::new(),
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(15))
                 .read_timeout(Duration::from_secs(30))
@@ -132,6 +138,7 @@ impl DirectService {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        self.wake.notify_one();
         self.get(id).await
     }
 
@@ -178,6 +185,7 @@ impl DirectService {
         .bind(id)
         .execute(self.db.pool())
         .await?;
+        self.wake.notify_one();
         Ok(())
     }
 
@@ -257,11 +265,19 @@ impl DirectService {
                     };
                     sqlx::query("UPDATE direct_downloads SET state=?, message=?, updated_at=? WHERE id=? AND state='running'")
                         .bind(state).bind(message).bind(now_ms()).bind(job.id).execute(self.db.pool()).await?;
+                    // Straight on to the next queued download, if there is one.
+                    continue;
                 }
                 Ok(None) => {}
                 Err(e) => tracing::error!(error=%e, "direct download worker could not claim job"),
             }
-            tokio::select! { _ = stop.cancelled() => return Ok(()), _ = tokio::time::sleep(Duration::from_secs(1)) => {} }
+            // Nothing to do: wait for a new download, or look again after a while (for example
+            // when direct downloads were just switched on).
+            tokio::select! {
+                _ = stop.cancelled() => return Ok(()),
+                _ = self.wake.notified() => {}
+                _ = tokio::time::sleep(IDLE_RECHECK) => {}
+            }
         }
     }
 

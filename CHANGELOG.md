@@ -6,6 +6,74 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-06
+
+### Security
+- **Changing a provider's address no longer sends its saved password or API key to the new host.** Saving an indexer, download client or other connection with a new host or port now asks you to enter the secret again, as testing it already did (#23).
+
+### Added
+- **Radio: popular shows on each BBC station.** Discover's Radio tab has a row for Radio 4, Radio 4 Extra, Radio 2, Radio 5 Live and the World Service, next to Popular on BBC Sounds (UK only, like the other BBC rows).
+- **Radio: 32 BBC Sounds categories, up from 7**, under four headings: Comedy, Drama, Factual, and Sport and music. They include sub-genres such as Science fiction and fantasy, Sitcoms, Panel games and quizzes, and Thrillers.
+
+### Changed
+- **Radio search finds older BBC shows.** BBC Sounds search leaves out many shows, such as Cabin Pressure and Old Harry's Game. When none of its results has the name you typed, Reelix also reads the BBC programmes A to Z and lists its radio shows first.
+- **Radio searches find more episodes:**
+  - **BBC programme ids:** get_iplayer names such as `The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a` are now read, including the BBC programme id (`b09zv5m0`). For a BBC episode the id decides: a release with the episode's id matches even when the show is named differently, and one with another id is refused.
+  - **More categories:** radio is now searched in Audio/MP3 and Audio/Audiobook as well as Audio/Other, because indexers often file radio there (MyAnonamouse's Radio categories arrive as Audio/Audiobook through Prowlarr and Jackett). A release still has to match a wanted episode, so music and audiobooks are not grabbed as radio. RSS sync also checks Audio/MP3 releases against wanted episodes before passing them to music.
+
+### Fixed
+- **Interrupted jobs:** a job cut off on its last attempt is marked failed instead of being retried after every restart (#24).
+- **Folder moves:** moving a movie, series or author folder to another disk no longer stalls the server while the files copy (#37, #41).
+- **Huge times:** large time values from indexers and download clients no longer crash Reelix (#27).
+- **rTorrent:** it now reports when a download finished (#38).
+- **Discord:** notifications no longer repeat the overview as a "Path" field (#39).
+
+### Performance
+- **Fewer idle database writes:**
+  - the job runner skips kinds with nothing queued (#28);
+  - the direct-download worker is woken instead of polling (#28);
+  - library pages read tags and alternative titles only for the items shown (#26).
+- **Calmer web UI:**
+  - library pages bundle bursts of live updates (#34);
+  - polling pauses in hidden tabs (#34, #40);
+  - Downloads polls slowly when nothing is downloading (#40).
+- **SQLite:** filtered history pages use an index, and the WAL file is kept small (#36).
+- **Docker:** lower idle memory and a lighter health check (#29).
+
+### Changed
+- **Dependencies:**
+  - updated: toml_edit 0.25, tower-http 0.7, toml 1, base64 0.23, openidconnect 4.1, encoding_rs and 10 GitHub Actions;
+  - Dependabot now groups compatible Cargo updates into one pull request.
+
+## [0.8.5] - 2026-11-06
+
+### Added
+- **The Windows installer asks how to install Reelix:**
+  - **Fresh install:** a new, empty Reelix.
+  - **Recovery:** pick a Reelix backup (`reelix_backup_*.zip`). Setup checks it and stages it, and Reelix restores it on first start, rolling back if the restored database won't open.
+  - **Migration:**
+    - **From Radarr, Sonarr, Prowlarr, Lidarr or Readarr on this PC.** Setup finds them from their `config.xml`, and you tick the ones to bring over. After you create the admin account, Reelix shows a "Ready to migrate" banner and opens System → Migrate with those apps filled in. Their API keys are stored encrypted and never put on a command line.
+    - **From an existing Reelix folder,** such as the zip download. Setup copies its data and updates `config.toml` for the new location.
+  - Upgrades skip this question and keep your data.
+  - Silent installs can use `/MODE=fresh|recovery|migrate`, `/BACKUP=`, `/MIGRATEFROM=` and `/ARR=`; see `docs/installers.md`.
+- New commands:
+  - `reelix backup create`
+  - `reelix restore check|stage <zip>`
+  - `reelix migrate prepare|list`
+  - `reelix config relocate`
+- API: `GET`/`DELETE /api/v1/system/migrate/pending` (admin).
+
+### Changed
+- Release builds time out instead of hanging when a download stalls.
+
+## [0.8.4] - 2026-11-06
+
+### Fixed
+- **Opening an Apple Podcasts show from Discover works again.** In 0.8.2 and 0.8.3 it failed with "Request failed (502)" or "this link cannot be read here", because the Apple source's feed reader was missing the public-only client that Discover uses.
+
+### Security
+- Feed links read for Discover and requests now also refuse private IP addresses written as numbers (such as `http://127.0.0.1/…`), not only host names that resolve to private addresses.
+
 ## [0.8.3] - 2026-11-05
 
 ### Added

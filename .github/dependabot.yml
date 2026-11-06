@@ -13,6 +13,19 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # One PR for all compatible updates: separate PRs each rewrite Cargo.lock, and merging several
+    # in a row leaves it out of date (every `--locked` build then fails).
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Breaking API changes across Reelix's XML parsers; needs a port first.
+      - dependency-name: "quick-xml"
+        versions: [">= 0.42"]
+      # Needs utoipa 6.
+      - dependency-name: "utoipa-scalar"
+        versions: [">= 0.4"]
 
   # Base image digests in docker/Dockerfile and docker/Dockerfile.release.
   - package-ecosystem: docker

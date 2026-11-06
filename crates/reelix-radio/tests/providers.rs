@@ -241,6 +241,91 @@ async fn bbc_sounds_search() {
     );
 }
 
+#[tokio::test]
+async fn bbc_search_falls_back_to_the_programmes_a_to_z() {
+    let s = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/programmes/search/container"))
+        .and(query_param("q", "Cabin Pressure"))
+        .respond_with(json("bbc_search_cabin_pressure.json"))
+        .mount(&s)
+        .await;
+    // The pages a binary search reads for "cabin pressure" (8671 titles under C, 30 a page),
+    // trimmed to their first title except the page that holds the show.
+    for page in [1, 2, 3, 4, 5, 10, 19, 37, 73, 146] {
+        Mock::given(method("GET"))
+            .and(path("/programmes/a-z/by/c/all.json"))
+            .and(query_param("page", page.to_string()))
+            .respond_with(json(&format!("bbc_atoz/c-{page}.json")))
+            .expect(1) // cached, and each page read once
+            .mount(&s)
+            .await;
+    }
+    let hits = bbc(&s)
+        .search("Cabin Pressure", &SearchPrefs::default())
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|h| h.external_id.as_str()).collect();
+    // The A to Z's radio brand first (not its episodes, not television), then BBC Sounds.
+    assert_eq!(ids, ["b00lmcxj", "p0397866", "b01mk97n"]);
+    assert_eq!(hits[0].title, "Cabin Pressure");
+    assert_eq!(hits[0].provider, "bbc");
+    assert_eq!(hits[0].station_name.as_deref(), Some("BBC Radio 4"));
+    assert_eq!(
+        hits[0].web_url.as_deref(),
+        Some("https://www.bbc.co.uk/programmes/b00lmcxj")
+    );
+    assert!(
+        hits[0]
+            .artwork_url
+            .as_deref()
+            .unwrap()
+            .starts_with("https://ichef.bbci.co.uk/images/ic/640x640/")
+    );
+}
+
+#[tokio::test]
+async fn bbc_search_skips_the_a_to_z_when_sounds_has_the_name() {
+    let s = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/programmes/search/container"))
+        .respond_with(json("bbc_search.json"))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/programmes/a-z/by/j/all.json"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&s)
+        .await;
+    let hits = bbc(&s)
+        .search("just a minute!", &SearchPrefs::default())
+        .await
+        .unwrap();
+    assert_eq!(hits[0].external_id, "b006s5dp");
+}
+
+#[tokio::test]
+async fn bbc_search_keeps_sounds_results_when_the_a_to_z_fails() {
+    let s = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/programmes/search/container"))
+        .respond_with(json("bbc_search_cabin_pressure.json"))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/programmes/a-z/by/c/all.json"))
+        .respond_with(json("bbc_brand.json"))
+        .mount(&s)
+        .await;
+    let hits = bbc(&s)
+        .search("Cabin Pressure", &SearchPrefs::default())
+        .await
+        .unwrap();
+    let ids: Vec<&str> = hits.iter().map(|h| h.external_id.as_str()).collect();
+    assert_eq!(ids, ["p0397866", "b01mk97n"]);
+}
+
 // ---------------------------------------------------------------- Apple
 
 const FEED: &str = include_str!("fixtures/plain.xml");

@@ -58,7 +58,7 @@ pub struct Db {
 
 impl Db {
     /// Opens/creates the DB (create_if_missing, WAL, foreign_keys=on, busy_timeout 5s,
-    /// synchronous=NORMAL) and runs migrations.
+    /// synchronous=NORMAL, journal_size_limit 64 MiB) and runs migrations.
     pub async fn connect(url: &str) -> Result<Db> {
         let opts = SqliteConnectOptions::from_str(url)?
             .create_if_missing(true)
@@ -75,6 +75,16 @@ impl Db {
         }
         let pool = SqlitePoolOptions::new()
             .max_connections(8)
+            // Shrink the write-ahead log back to at most 64 MiB after each checkpoint; without a limit it
+            // keeps its largest size (after a big import or migration) on disk for good.
+            .after_connect(|conn, _| {
+                Box::pin(async move {
+                    sqlx::query("PRAGMA journal_size_limit = 67108864")
+                        .execute(conn)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect_with(opts)
             .await?;
         Self::migrated(pool).await

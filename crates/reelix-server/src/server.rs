@@ -146,7 +146,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 }
 
 /// `REELIX_SECRET_KEY` (base64, 32 bytes) overrides the key file.
-fn load_secrets(config: &Config) -> anyhow::Result<SecretBox> {
+pub(crate) fn load_secrets(config: &Config) -> anyhow::Result<SecretBox> {
     if let Some(encoded) = std::env::var("REELIX_SECRET_KEY")
         .ok()
         .filter(|v| !v.trim().is_empty())

@@ -210,3 +210,19 @@ pub struct MigrateRunDto {
     /// Set when the whole run failed (e.g. the source became unreachable).
     pub error: Option<String>,
 }
+
+/// What [`PendingMigrationSource::api_key`] shows; sending it back as
+/// [`MigrateConnection::api_key`] (with the same source and URL) uses the saved key.
+pub const SAVED_API_KEY: &str = "********";
+
+/// An app Setup (the Windows installer, `reelix migrate prepare`) found and saved for the admin
+/// to migrate from; the key is stored encrypted and never returned.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PendingMigrationSource {
+    pub source: SourceKind,
+    pub url: String,
+    /// Always [`SAVED_API_KEY`].
+    pub api_key: String,
+    pub added_at: DateTime<Utc>,
+}

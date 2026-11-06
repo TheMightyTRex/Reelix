@@ -2,12 +2,12 @@
 //!
 //! **Undocumented endpoints.** The BBC publishes no API for this. The provider reads the
 //! public JSON behind its programme pages (`/programmes/{pid}.json`,
-//! `/programmes/{pid}/children.json`) and BBC Sounds search
-//! (`rms.api.bbc.co.uk/v2/programmes/search/container`). Either can change without notice:
-//! every read is checked, and a changed or missing answer fails with a plain message; saved
-//! series and episodes are kept (a failed read changes nothing, and nothing is ever deleted).
-//! Responses are cached for an hour (searches for five minutes), requests are spaced 1.5 s
-//! apart and `Retry-After` is honoured.
+//! `/programmes/{pid}/children.json`, the A to Z `/programmes/a-z/by/{letter}/all.json`) and
+//! BBC Sounds search (`rms.api.bbc.co.uk/v2/programmes/search/container`). Either can change
+//! without notice: every read is checked, and a changed or missing answer fails with a plain
+//! message; saved series and episodes are kept (a failed read changes nothing, and nothing is
+//! ever deleted). Responses are cached for an hour (searches for five minutes), requests are
+//! spaced 1.5 s apart and `Retry-After` is honoured.
 //!
 //! A show is a brand, or a series with no brand above it. Any pid inside a show (an episode,
 //! a series) resolves to it by walking up to six parent levels. The brand's children are its
@@ -17,24 +17,36 @@
 //! each (the episode's `versions`), so at most [`ShowFetch::max_lookups`] are read per
 //! refresh, newest first; settled series are not read again.
 //!
-//! Discover lists (cached 30 minutes, only offered for `GB` or no country, like search):
-//! `popular` and `category-{id}` (Comedy, Drama, …) from BBC Sounds' most played episodes
-//! (`rms.api.bbc.co.uk/v2/programmes/playable?sort=popular&category=`, also undocumented),
-//! reduced to the programmes they belong to. Storyarr has no lists; these endpoints were
-//! found on the same public BBC Sounds API as its search.
+//! Search: BBC Sounds leaves out many older shows (Cabin Pressure, Old Harry's Game), so when
+//! none of its results has the name asked for, the BBC programmes A to Z is read too and its
+//! radio brands and series whose title starts with the name come first. The A to Z lists
+//! every title for one letter in pages of [`ATOZ_PAGE`], in order, so a binary search finds
+//! the page in about ten requests (cached like every programme read).
 //!
-//! The endpoints, the hierarchy walk and the link patterns are adapted from Storyarr's BBC
-//! adapter (`services/app/adapters/bbc_programmes.py` in
+//! Discover lists (cached 30 minutes, only offered for `GB` or no country, like search):
+//! `popular`, `station-{service id}` (Radio 4, Radio 4 Extra, …) and `category-{id}`
+//! (Comedy, Drama and their sub-genres, …) from BBC Sounds' most played episodes
+//! (`rms.api.bbc.co.uk/v2/programmes/playable?sort=popular&network=|category=`, also
+//! undocumented), reduced to the programmes they belong to.
+//!
+//! The endpoints, the hierarchy walk, the link patterns, the A to Z search, the stations and
+//! the categories are adapted from Storyarr's BBC adapter and radio Discover
+//! (`services/app/adapters/bbc_programmes.py`, `services/app/domain/radio.py`,
+//! `services/app/api/radio_discover.py` and `services/app/api/preferences.py` in
 //! <https://github.com/TheMightyTRex/storyarr>), Copyright (c) 2026 Dewarr contributors,
 //! used under the MIT License
 //! (<https://github.com/TheMightyTRex/storyarr/blob/main/LICENSE>).
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reelix_api_types::radio::RadioSeriesKind;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 use crate::provider::{
     DISCOVER_LIMIT, DISCOVER_TTL, DiscoverList, EpisodeData, ProviderError, RadioProvider, SearchPrefs,
@@ -62,19 +74,82 @@ const MAX_PARENT_LEVELS: usize = 6;
 /// Nested series folded into their parent at most this deep.
 const MAX_FOLD_DEPTH: u32 = 2;
 
-/// BBC Sounds speech categories offered as Discover lists: `(category id, name)`.
-pub const CATEGORIES: &[(&str, &str)] = &[
-    ("comedy", "Comedy"),
-    ("drama", "Drama"),
-    ("documentaries", "Documentaries"),
+/// BBC Sounds categories offered as Discover lists, by heading: `(heading, [(category id,
+/// name)])`. Sub-genres (`drama-scifiandfantasy`) are categories of their own; BBC Sounds has
+/// no separate science fiction category.
+pub const CATEGORY_GROUPS: &[(&str, &[(&str, &str)])] = &[
     (
-        "factual-scienceandnature-scienceandtechnology",
-        "Science & Technology",
+        "Comedy",
+        &[
+            ("comedy", "All comedy"),
+            ("comedy-sitcoms", "Sitcoms"),
+            ("comedy-satire", "Satire"),
+            ("comedy-standup", "Stand-up"),
+            ("comedy-sketch", "Sketches"),
+            ("comedy-chat", "Chat"),
+            ("gamesandquizzes", "Panel games and quizzes"),
+        ],
     ),
-    ("factual-crimeandjustice-truecrime", "True Crime"),
-    ("news", "News"),
-    ("sport", "Sport"),
+    (
+        "Drama",
+        &[
+            ("drama", "All drama"),
+            ("drama-scifiandfantasy", "Science fiction and fantasy"),
+            ("drama-crime", "Crime"),
+            ("drama-thriller", "Thrillers"),
+            ("drama-horrorandsupernatural", "Horror and supernatural"),
+            ("drama-historical", "Historical"),
+            ("drama-classicandperiod", "Classic and period"),
+            ("drama-relationshipsandromance", "Relationships and romance"),
+            ("drama-soaps", "Soaps"),
+            ("readings", "Readings"),
+            ("audiobooks", "Audiobooks"),
+        ],
+    ),
+    (
+        "Factual",
+        &[
+            ("news", "News"),
+            ("documentaries", "Documentaries"),
+            ("factual-history", "History"),
+            ("factual-scienceandnature", "Science and nature"),
+            (
+                "factual-scienceandnature-scienceandtechnology",
+                "Science and technology",
+            ),
+            ("factual-politics", "Politics"),
+            ("factual-crimeandjustice", "Crime and justice"),
+            ("factual-crimeandjustice-truecrime", "True crime"),
+            ("factual-artscultureandthemedia", "Arts, culture and media"),
+            ("factual-healthandwellbeing", "Health and wellbeing"),
+            ("factual-foodanddrink", "Food and drink"),
+            ("discussionandtalk", "Discussion and talk"),
+        ],
+    ),
+    ("Sport and music", &[("sport", "Sport"), ("music", "Music")]),
 ];
+
+/// Every category id in [`CATEGORY_GROUPS`].
+pub fn categories() -> impl Iterator<Item = &'static str> {
+    CATEGORY_GROUPS
+        .iter()
+        .flat_map(|(_, cats)| cats.iter().map(|(id, _)| *id))
+}
+
+/// BBC stations offered as Discover rows of their most played programmes: `(service id,
+/// name)`.
+pub const STATIONS: &[(&str, &str)] = &[
+    ("bbc_radio_four", "Radio 4"),
+    ("bbc_radio_four_extra", "Radio 4 Extra"),
+    ("bbc_radio_two", "Radio 2"),
+    ("bbc_radio_five_live", "Radio 5 Live"),
+    ("bbc_world_service", "World Service"),
+];
+
+/// Titles per page of the BBC programmes A to Z.
+pub const ATOZ_PAGE: u64 = 30;
+/// Most A to Z shows put before the BBC Sounds results.
+const ATOZ_LIMIT: usize = 10;
 
 /// Most played episodes read per list (they are reduced to their programmes).
 const POPULAR_EPISODES: u32 = 100;
@@ -198,6 +273,56 @@ impl BbcProvider {
             }
         }
         Ok(found)
+    }
+
+    /// One page of the A to Z for `letter`: the total titles and the page's titles.
+    async fn atoz_page(&self, letter: char, page: u64) -> Result<(u64, Vec<Value>), ProviderError> {
+        let url = format!("{}/programmes/a-z/by/{letter}/all.json?page={page}", self.base);
+        let data = self.programmes.get(&url, HeaderMap::new()).await?;
+        atoz_titles(&data)
+    }
+
+    /// Radio brands and series whose title starts with `title` in the BBC programmes A to Z
+    /// (at most `limit`). Its pages hold [`ATOZ_PAGE`] titles in order, so a binary search on
+    /// each page's first title finds the right page.
+    async fn atoz(&self, title: &str, limit: usize) -> Result<Vec<ShowHit>, ProviderError> {
+        let key = atoz_key(title);
+        let Some(first) = key.chars().next().filter(char::is_ascii_alphanumeric) else {
+            return Ok(Vec::new());
+        };
+        let letter = if first.is_ascii_alphabetic() { first } else { '@' };
+        let (total, titles) = self.atoz_page(letter, 1).await?;
+        let mut pages = HashMap::from([(1, titles)]);
+        let last = total.div_ceil(ATOZ_PAGE).max(1);
+        let (mut low, mut high) = (1, last);
+        while low < high {
+            let middle = (low + high).div_ceil(2);
+            if let Entry::Vacant(e) = pages.entry(middle) {
+                e.insert(self.atoz_page(letter, middle).await?.1);
+            }
+            let head = pages[&middle].first().and_then(|t| str_at(t, "title"));
+            if head.is_some_and(|h| atoz_key(h) <= key) {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        let mut hits = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for page in low.saturating_sub(1).max(1)..=(low + 1).min(last) {
+            if let Entry::Vacant(e) = pages.entry(page) {
+                e.insert(self.atoz_page(letter, page).await?.1);
+            }
+            hits.extend(
+                pages[&page]
+                    .iter()
+                    .filter(|t| str_at(t, "title").is_some_and(|n| atoz_key(n).starts_with(&key)))
+                    .filter_map(|t| atoz_hit(t.get("programme")?))
+                    .filter(|h| seen.insert(h.external_id.clone())),
+            );
+        }
+        hits.truncate(limit);
+        Ok(hits)
     }
 
     /// Reads the show whose top programme is `top`.
@@ -496,6 +621,58 @@ pub fn popular_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
         .collect())
 }
 
+/// How the BBC A to Z sorts titles: no case, accents or punctuation, and no leading "The"
+/// (the A to Z lists "The Archers" as "Archers, The").
+pub fn atoz_key(value: &str) -> String {
+    let folded: String = value
+        .nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .flat_map(char::to_lowercase)
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c.is_whitespace())
+        .collect();
+    let spaced = folded.split_whitespace().collect::<Vec<_>>().join(" ");
+    match spaced.strip_prefix("the ") {
+        Some(rest) => rest.to_owned(),
+        None => spaced,
+    }
+}
+
+/// The total and the titles of one A to Z page.
+pub fn atoz_titles(data: &Value) -> Result<(u64, Vec<Value>), ProviderError> {
+    let atoz = data.get("atoz");
+    let titles = atoz.and_then(|a| a.get("tleo_titles")).and_then(Value::as_array);
+    let total = atoz.and_then(|a| a.get("total")).and_then(Value::as_u64);
+    let (Some(titles), Some(total)) = (titles, total) else {
+        return Err(ProviderError::Parse(CHANGED.into()));
+    };
+    Ok((total, titles.iter().filter(|t| t.is_object()).cloned().collect()))
+}
+
+/// A radio brand or series from the A to Z; `None` for episodes, clips and television.
+fn atoz_hit(programme: &Value) -> Option<ShowHit> {
+    if !matches!(str_at(programme, "type"), Some("brand" | "series")) {
+        return None;
+    }
+    let service = programme.get("ownership").and_then(|o| o.get("service"));
+    if service.and_then(|s| str_at(s, "type")) != Some("radio") {
+        return None;
+    }
+    let pid = str_at(programme, "pid").filter(|p| is_pid(p))?;
+    Some(ShowHit {
+        provider: ID.to_owned(),
+        external_id: pid.to_owned(),
+        title: str_at(programme, "title")?.to_owned(),
+        synopsis: str_at(programme, "short_synopsis").map(str::to_owned),
+        author: None,
+        station_name: service.and_then(|s| str_at(s, "title")).map(str::to_owned),
+        artwork_url: image_pid(programme).map(|p| ARTWORK_URL.replace("{pid}", p)),
+        web_url: Some(format!("https://www.bbc.co.uk/programmes/{pid}")),
+        feed_url: None,
+        episode_count: None,
+        show_id: None,
+    })
+}
+
 /// Hits of BBC Sounds container search.
 fn search_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
     let items = data.get("data").and_then(Value::as_array).ok_or_else(|| {
@@ -556,24 +733,35 @@ impl RadioProvider for BbcProvider {
     }
 
     fn discover_lists(&self) -> Vec<DiscoverList> {
+        let stations = STATIONS
+            .iter()
+            .map(|(id, name)| DiscoverList::row(&format!("station-{id}"), &format!("Popular on {name}")));
+        let categories = CATEGORY_GROUPS.iter().flat_map(|(group, cats)| {
+            cats.iter()
+                .map(|(id, name)| DiscoverList::category(&format!("category-{id}"), name).in_group(group))
+        });
         std::iter::once(DiscoverList::row("popular", "Popular on BBC Sounds"))
-            .chain(
-                CATEGORIES
-                    .iter()
-                    .map(|(id, name)| DiscoverList::category(&format!("category-{id}"), name)),
-            )
+            .chain(stations)
+            .chain(categories)
             .collect()
     }
 
     async fn discover(&self, list: &str, _prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
+        let unknown = || ProviderError::NotFound(format!("the BBC has no Discover list {list}"));
         let limit = POPULAR_EPISODES.to_string();
         let mut params = vec![("sort", "popular"), ("limit", limit.as_str())];
-        if list != "popular" {
-            let category = list
-                .strip_prefix("category-")
-                .filter(|c| CATEGORIES.iter().any(|(id, _)| id == c))
-                .ok_or_else(|| ProviderError::NotFound(format!("the BBC has no Discover list {list}")))?;
+        if let Some(station) = list.strip_prefix("station-") {
+            let station = STATIONS
+                .iter()
+                .map(|(id, _)| *id)
+                .find(|id| *id == station)
+                .ok_or_else(unknown)?;
+            params.push(("network", station));
+        } else if let Some(category) = list.strip_prefix("category-") {
+            let category = categories().find(|id| *id == category).ok_or_else(unknown)?;
             params.push(("category", category));
+        } else if list != "popular" {
+            return Err(unknown());
         }
         let url =
             url::Url::parse_with_params(&format!("{}/v2/programmes/playable", self.search_base), &params)
@@ -592,7 +780,27 @@ impl RadioProvider for BbcProvider {
         )
         .map_err(|e| ProviderError::Parse(e.to_string()))?;
         let data = self.search.get(url.as_str(), HeaderMap::new()).await?;
-        search_hits(&data)
+        let found = search_hits(&data)?;
+        // BBC Sounds leaves out many older shows: when none of its results has the name asked
+        // for, the A to Z's radio shows come first.
+        let key = atoz_key(query);
+        if found.iter().any(|h| atoz_key(&h.title) == key) {
+            return Ok(found);
+        }
+        let mut listed = match self.atoz(query, ATOZ_LIMIT).await {
+            Ok(listed) => listed,
+            Err(e) => {
+                tracing::debug!(error = %e, "BBC A to Z not read");
+                return Ok(found);
+            }
+        };
+        listed.extend(
+            found
+                .into_iter()
+                .filter(|h| !listed.iter().any(|l| l.external_id == h.external_id))
+                .collect::<Vec<_>>(),
+        );
+        Ok(listed)
     }
 
     async fn preview(&self, link: &str) -> Result<Option<ShowData>, ProviderError> {
@@ -657,6 +865,22 @@ mod tests {
         assert_eq!(parse_link("https://evil.example/programmes/b006s5dp"), None);
         assert_eq!(parse_link("https://www.bbc.co.uk/news"), None);
         assert_eq!(parse_link("https://www.bbc.co.uk/sounds/brand/nope"), None);
+    }
+
+    #[test]
+    fn a_to_z_keys() {
+        assert_eq!(atoz_key("Cabin Pressure"), "cabin pressure");
+        assert_eq!(atoz_key("  Old Harry's   Game "), "old harrys game");
+        assert_eq!(atoz_key("The Archers"), "archers");
+        assert_eq!(atoz_key("Archers, The"), "archers the");
+        assert_eq!(atoz_key("Café Mozart"), "cafe mozart");
+        assert_eq!(atoz_key("C.A.N. 2024"), "can 2024");
+        assert_eq!(atoz_key("!!!"), "");
+        assert!(atoz_key("The Archers").starts_with(&atoz_key("the arch")));
+        assert!(matches!(
+            atoz_titles(&serde_json::json!({"atoz": {"total": 3}})),
+            Err(ProviderError::Parse(_))
+        ));
     }
 
     #[test]
