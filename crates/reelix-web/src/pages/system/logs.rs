@@ -101,6 +101,10 @@ pub fn LogsPage() -> impl IntoView {
                 if generation.try_get_value() != Some(mine) {
                     break;
                 }
+                // Each tail reads up to 4 MB of log on the server: skip it while the tab is hidden.
+                if document().hidden() {
+                    continue;
+                }
                 logs.refetch();
             }
         });
