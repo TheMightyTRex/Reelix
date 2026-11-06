@@ -347,26 +347,12 @@ impl BooksService {
         if to.exists() {
             return Err(BooksError::Conflict(format!("{} already exists", to.display())));
         }
-        if let Some(parent) = to.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if std::fs::rename(from, to).is_err() {
-            // Cross-filesystem: move file by file, then remove the old tree.
-            for f in reelix_import::files::scan(
-                from,
-                &reelix_import::files::ScanOptions {
-                    include_non_video: true,
-                    max_depth: 16,
-                },
-            )? {
-                reelix_import::files::transfer(
-                    &f.path,
-                    &to.join(&f.relative),
-                    reelix_import::files::TransferMode::Move,
-                )?;
-            }
-            let _ = std::fs::remove_dir_all(from);
-        }
+        // A move across file systems copies the whole author folder, so it runs on a blocking thread: on a
+        // small server it would otherwise stall the API and the download monitor.
+        let (src, dst) = (from.to_path_buf(), to.to_path_buf());
+        tokio::task::spawn_blocking(move || move_tree(&src, &dst))
+            .await
+            .map_err(|e| BooksError::Internal(format!("folder move stopped: {e}")))??;
         tracing::info!(from = %from.display(), to = %to.display(), "moved author folder");
         Ok(())
     }
@@ -423,4 +409,28 @@ impl BooksService {
             })
             .collect())
     }
+}
+
+/// Renames `from` to `to`, or, across file systems, moves it file by file and removes the old tree.
+fn move_tree(from: &Path, to: &Path) -> Result<()> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if std::fs::rename(from, to).is_err() {
+        for f in reelix_import::files::scan(
+            from,
+            &reelix_import::files::ScanOptions {
+                include_non_video: true,
+                max_depth: 16,
+            },
+        )? {
+            reelix_import::files::transfer(
+                &f.path,
+                &to.join(&f.relative),
+                reelix_import::files::TransferMode::Move,
+            )?;
+        }
+        let _ = std::fs::remove_dir_all(from);
+    }
+    Ok(())
 }
