@@ -6,7 +6,8 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
-## [0.8.6] - 2026-11-07
+## [0.8.6] - 2026-11-06
+
 ### Security
 - **Changing a provider's address no longer sends its saved password or API key to the new host.** Saving an indexer, download client or other connection with a new host or port now asks you to enter the secret again, as testing it already did (#23).
 
