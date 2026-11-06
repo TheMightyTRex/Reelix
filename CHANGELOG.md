@@ -6,12 +6,44 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-06
+
+### Security
+- **Changing a provider's address no longer sends its saved password or API key to the new host.** Saving an indexer, download client or other connection with a new host or port now asks you to enter the secret again, as testing it already did (#23).
+
 ### Added
 - **Radio: popular shows on each BBC station.** Discover's Radio tab has a row for Radio 4, Radio 4 Extra, Radio 2, Radio 5 Live and the World Service, next to Popular on BBC Sounds (UK only, like the other BBC rows).
 - **Radio: 32 BBC Sounds categories, up from 7**, under four headings: Comedy, Drama, Factual, and Sport and music. They include sub-genres such as Science fiction and fantasy, Sitcoms, Panel games and quizzes, and Thrillers.
 
 ### Changed
 - **Radio search finds older BBC shows.** BBC Sounds search leaves out many shows, such as Cabin Pressure and Old Harry's Game. When none of its results has the name you typed, Reelix also reads the BBC programmes A to Z and lists its radio shows first.
+- **Radio searches find more episodes:**
+  - **BBC programme ids:** get_iplayer names such as `The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a` are now read, including the BBC programme id (`b09zv5m0`). For a BBC episode the id decides: a release with the episode's id matches even when the show is named differently, and one with another id is refused.
+  - **More categories:** radio is now searched in Audio/MP3 and Audio/Audiobook as well as Audio/Other, because indexers often file radio there (MyAnonamouse's Radio categories arrive as Audio/Audiobook through Prowlarr and Jackett). A release still has to match a wanted episode, so music and audiobooks are not grabbed as radio. RSS sync also checks Audio/MP3 releases against wanted episodes before passing them to music.
+
+### Fixed
+- **Interrupted jobs:** a job cut off on its last attempt is marked failed instead of being retried after every restart (#24).
+- **Folder moves:** moving a movie, series or author folder to another disk no longer stalls the server while the files copy (#37, #41).
+- **Huge times:** large time values from indexers and download clients no longer crash Reelix (#27).
+- **rTorrent:** it now reports when a download finished (#38).
+- **Discord:** notifications no longer repeat the overview as a "Path" field (#39).
+
+### Performance
+- **Fewer idle database writes:**
+  - the job runner skips kinds with nothing queued (#28);
+  - the direct-download worker is woken instead of polling (#28);
+  - library pages read tags and alternative titles only for the items shown (#26).
+- **Calmer web UI:**
+  - library pages bundle bursts of live updates (#34);
+  - polling pauses in hidden tabs (#34, #40);
+  - Downloads polls slowly when nothing is downloading (#40).
+- **SQLite:** filtered history pages use an index, and the WAL file is kept small (#36).
+- **Docker:** lower idle memory and a lighter health check (#29).
+
+### Changed
+- **Dependencies:**
+  - updated: toml_edit 0.25, tower-http 0.7, toml 1, base64 0.23, openidconnect 4.1, encoding_rs and 10 GitHub Actions;
+  - Dependabot now groups compatible Cargo updates into one pull request.
 
 ## [0.8.5] - 2026-11-06
 

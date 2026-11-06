@@ -55,9 +55,18 @@ fn client_badge(state: &str) -> (Tone, String) {
     (tone, format::humanize_kind(state))
 }
 
-/// Runs `f` every `every` while the calling component is alive.
+/// Runs `f` every `every` while the calling component is alive and its tab is visible (a hidden tab
+/// still gets live WebSocket updates, and refreshes on the first tick after it is shown).
 fn poll(every: Duration, f: impl Fn() + 'static) {
-    let handle = set_interval_with_handle(f, every).ok();
+    let handle = set_interval_with_handle(
+        move || {
+            if !document().hidden() {
+                f();
+            }
+        },
+        every,
+    )
+    .ok();
     on_cleanup(move || {
         if let Some(h) = handle {
             h.clear();

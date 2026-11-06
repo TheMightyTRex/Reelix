@@ -84,8 +84,8 @@ pub async fn load_light(db: &Db) -> Result<Vec<SeriesDto>> {
         .iter()
         .map(map)
         .collect::<Result<_>>()?;
-    let mut tags = misc::tags_of(db, MediaKind::Series).await?;
-    let mut alts = misc::alt_titles_of(db, MediaKind::Series).await?;
+    let mut tags = misc::tags_of(db, MediaKind::Series, None).await?;
+    let mut alts = misc::alt_titles_of(db, MediaKind::Series, None).await?;
     for s in &mut list {
         s.tags = tags.remove(&s.id).unwrap_or_default();
         s.alternative_titles = alts.remove(&s.id).unwrap_or_default();
@@ -236,8 +236,8 @@ pub async fn load(db: &Db, ids: Option<&[i64]>, today: NaiveDate) -> Result<Vec<
         }
     }
 
-    let mut tags = misc::tags_of(db, MediaKind::Series).await?;
-    let mut alts = misc::alt_titles_of(db, MediaKind::Series).await?;
+    let mut tags = misc::tags_of(db, MediaKind::Series, ids).await?;
+    let mut alts = misc::alt_titles_of(db, MediaKind::Series, ids).await?;
     for s in &mut list {
         s.tags = tags.remove(&s.id).unwrap_or_default();
         s.alternative_titles = alts.remove(&s.id).unwrap_or_default();

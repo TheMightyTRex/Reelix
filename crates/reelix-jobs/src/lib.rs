@@ -332,10 +332,23 @@ async fn dispatch(
     if n == 0 {
         return;
     }
+    // One read finds the kinds with runnable work, so an idle runner does not try a claim (a
+    // database write) for every registered kind each poll.
+    let ready = match shared.queue.inner.db.jobs().ready_kinds(now_ms()).await {
+        Ok(ready) if ready.is_empty() => return,
+        Ok(ready) => ready,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to look for runnable jobs");
+            return;
+        }
+    };
     // Rotate the starting kind so one busy kind can't monopolise the global slots.
     let start = rot.fetch_add(1, Ordering::Relaxed) % n;
     for i in 0..n {
         let kind = shared.kinds[(start + i) % n];
+        if !ready.contains(kind) {
+            continue;
+        }
         let reg = &shared.handlers[kind];
         loop {
             if cancel.is_cancelled() {

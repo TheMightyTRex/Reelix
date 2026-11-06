@@ -368,9 +368,16 @@ async fn add_movie_list_edit_and_conflicts() {
         Err(LibraryError::Validation(_))
     ));
 
-    e.svc.add_movie(add_movie_req(&e, 900)).await.unwrap();
+    let other = e.svc.add_movie(add_movie_req(&e, 900)).await.unwrap();
     let list = e.svc.list_movies(&MovieListQuery::default()).await.unwrap();
     assert_eq!(list.total, 2);
+    // One movie's tags and alternative titles are read for that movie only.
+    let one = e.svc.get_movie(m.id).await.unwrap();
+    assert_eq!(one.alternative_titles, vec!["The Matrix Alt".to_string()]);
+    assert_eq!(one.tags, vec![1, 2]);
+    let two = e.svc.get_movie(other.id).await.unwrap();
+    assert_eq!(two.alternative_titles, other.alternative_titles);
+    assert_ne!(two.alternative_titles, one.alternative_titles);
     let missing = e
         .svc
         .list_movies(&MovieListQuery {

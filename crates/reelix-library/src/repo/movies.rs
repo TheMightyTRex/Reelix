@@ -157,9 +157,10 @@ pub async fn load(db: &Db, ids: Option<&[i64]>, profiles: &ProfileCache) -> Resu
     if movies.is_empty() {
         return Ok(movies);
     }
-    let mut tags = misc::tags_of(db, MediaKind::Movie).await?;
-    let mut alts = misc::alt_titles_of(db, MediaKind::Movie).await?;
     let owner_ids: Vec<i64> = movies.iter().map(|m| m.id).collect();
+    let scope = ids.map(|_| owner_ids.as_slice());
+    let mut tags = misc::tags_of(db, MediaKind::Movie, scope).await?;
+    let mut alts = misc::alt_titles_of(db, MediaKind::Movie, scope).await?;
     let file_rows = files::list(db, FileTable::Movie, ids.map(|_| owner_ids.as_slice())).await?;
     let mut by_movie: HashMap<i64, Vec<files::FileRow>> = HashMap::new();
     for f in file_rows {
@@ -204,8 +205,8 @@ pub async fn load_light(db: &Db) -> Result<Vec<MovieDto>> {
                 ))
             })
             .collect::<Result<_>>()?;
-    let mut tags = misc::tags_of(db, MediaKind::Movie).await?;
-    let mut alts = misc::alt_titles_of(db, MediaKind::Movie).await?;
+    let mut tags = misc::tags_of(db, MediaKind::Movie, None).await?;
+    let mut alts = misc::alt_titles_of(db, MediaKind::Movie, None).await?;
     for m in &mut movies {
         m.tags = tags.remove(&m.id).unwrap_or_default();
         m.alternative_titles = alts.remove(&m.id).unwrap_or_default();

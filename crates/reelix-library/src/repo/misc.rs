@@ -83,13 +83,38 @@ pub async fn root_folder_usage(db: &Db, id: i64) -> Result<i64> {
     Ok(n)
 }
 
+// ---------------- lookups by media id ----------------
+
+/// Above this many ids, one read of the whole kind is cheaper than a long `IN (…)` list (and
+/// stays under SQLite's bound-parameter limit).
+const MAX_SCOPED_IDS: usize = 500;
+
+fn use_ids(ids: Option<&[i64]>) -> Option<&[i64]> {
+    ids.filter(|ids| ids.len() <= MAX_SCOPED_IDS)
+}
+
+/// `base`, narrowed to `ids` when they are few enough, then `order`.
+fn scoped(base: &str, ids: Option<&[i64]>, order: &str) -> String {
+    match use_ids(ids) {
+        Some(ids) => format!("{base} AND media_id IN ({}) {order}", placeholders(ids.len())),
+        None => format!("{base} {order}"),
+    }
+}
+
 // ---------------- tags ----------------
 
-pub async fn tags_of(db: &Db, kind: MediaKind) -> Result<HashMap<i64, Vec<i64>>> {
-    let rows = sqlx::query("SELECT media_id, tag_id FROM media_tags WHERE media_kind = ? ORDER BY tag_id")
-        .bind(kind_str(kind))
-        .fetch_all(db.pool())
-        .await?;
+/// Tags by media id, for every item of `kind` or only `ids`.
+pub async fn tags_of(db: &Db, kind: MediaKind, ids: Option<&[i64]>) -> Result<HashMap<i64, Vec<i64>>> {
+    let sql = scoped(
+        "SELECT media_id, tag_id FROM media_tags WHERE media_kind = ?",
+        ids,
+        "ORDER BY tag_id",
+    );
+    let mut q = sqlx::query(&sql).bind(kind_str(kind));
+    for id in use_ids(ids).unwrap_or_default() {
+        q = q.bind(id);
+    }
+    let rows = q.fetch_all(db.pool()).await?;
     let mut out: HashMap<i64, Vec<i64>> = HashMap::new();
     for r in rows {
         out.entry(r.try_get("media_id")?)
@@ -120,11 +145,22 @@ pub async fn set_tags(db: &Db, kind: MediaKind, id: i64, tags: &[i64]) -> Result
 
 // ---------------- alternative titles ----------------
 
-pub async fn alt_titles_of(db: &Db, kind: MediaKind) -> Result<HashMap<i64, Vec<String>>> {
-    let rows = sqlx::query("SELECT media_id, title FROM alternative_titles WHERE media_kind = ? ORDER BY id")
-        .bind(kind_str(kind))
-        .fetch_all(db.pool())
-        .await?;
+/// Alternative titles by media id, for every item of `kind` or only `ids`.
+pub async fn alt_titles_of(
+    db: &Db,
+    kind: MediaKind,
+    ids: Option<&[i64]>,
+) -> Result<HashMap<i64, Vec<String>>> {
+    let sql = scoped(
+        "SELECT media_id, title FROM alternative_titles WHERE media_kind = ?",
+        ids,
+        "ORDER BY id",
+    );
+    let mut q = sqlx::query(&sql).bind(kind_str(kind));
+    for id in use_ids(ids).unwrap_or_default() {
+        q = q.bind(id);
+    }
+    let rows = q.fetch_all(db.pool()).await?;
     let mut out: HashMap<i64, Vec<String>> = HashMap::new();
     for r in rows {
         out.entry(r.try_get("media_id")?)

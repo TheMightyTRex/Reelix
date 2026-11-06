@@ -19,6 +19,9 @@ pub struct WantedEpisode {
     pub episode_id: i64,
     pub show_id: i64,
     pub show_title: String,
+    /// The show's provider (`bbc`, `rss`, …); for `bbc` the episode's external id is its
+    /// programme id.
+    pub provider: String,
     pub station_name: Option<String>,
     /// Filing series number (specials = 0).
     pub series_number: u32,
@@ -55,6 +58,7 @@ impl WantedEpisode {
             episode_id: e.id,
             show_id: show.id,
             show_title: show.title.clone(),
+            provider: show.provider.clone(),
             station_name: show.station_name.clone(),
             series_number: filing_series_number(e.series_kind, e.series_number),
             number: e.number,
