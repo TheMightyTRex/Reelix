@@ -167,7 +167,8 @@ impl OpenData {
     // Films (Wikidata + Wikipedia)
     // ------------------------------------------------------------------
 
-    /// The SPARQL for films matching `filter` (a triple pattern on `?item`).
+    /// The SPARQL for films matching `filter` (a triple pattern on `?item`). The name is the label in
+    /// the language, else the multilingual (`mul`) label Wikidata now uses for many films, else English.
     fn film_query(&self, filter: &str, limit: u32) -> String {
         let lang = self.lang();
         format!(
@@ -175,11 +176,15 @@ impl OpenData {
               (GROUP_CONCAT(DISTINCT ?genreLabel; separator="|") AS ?genres) WHERE {{
               {filter}
               ?item wdt:P4947 ?tmdb.
-              OPTIONAL {{ ?item rdfs:label ?label FILTER(lang(?label) = "{lang}") }}
+              OPTIONAL {{ ?item rdfs:label ?labelLang FILTER(lang(?labelLang) = "{lang}") }}
+              OPTIONAL {{ ?item rdfs:label ?labelMul FILTER(lang(?labelMul) = "mul") }}
+              OPTIONAL {{ ?item rdfs:label ?labelEn FILTER(lang(?labelEn) = "en") }}
+              BIND(COALESCE(?labelLang, ?labelMul, ?labelEn) AS ?label)
               OPTIONAL {{ ?item wdt:P345 ?imdb }}
               OPTIONAL {{ ?item wdt:P577 ?date }}
               OPTIONAL {{ ?item wdt:P2047 ?duration }}
-              OPTIONAL {{ ?item wdt:P136 ?genre. ?genre rdfs:label ?genreLabel FILTER(lang(?genreLabel) = "{lang}") }}
+              OPTIONAL {{ ?item wdt:P136 ?genre. ?genre rdfs:label ?genreLabel
+                          FILTER(lang(?genreLabel) = "{lang}" || (lang(?genreLabel) = "en" && "{lang}" = "en")) }}
               OPTIONAL {{ ?article schema:about ?item; schema:isPartOf <https://{lang}.wikipedia.org/> }}
             }} GROUP BY ?item ?label ?tmdb ?imdb ?date ?duration ?article LIMIT {limit}"#
         )
@@ -392,7 +397,22 @@ impl OpenData {
             }
         };
         let url = self.tvmaze("/lookup/shows");
-        let show = self.get(&url, &[(by, value)], &self.inner.tvmaze).await?;
+        let show = match self.get(&url, &[(by, value)], &self.inner.tvmaze).await {
+            // TVmaze does not know every show by its TVDB id: try its IMDb id from Wikidata.
+            Err(MetaError::NotFound) if by == "thetvdb" => {
+                let SeriesExternalId::Tvdb(t) = id else {
+                    return Err(MetaError::NotFound);
+                };
+                let imdb = self
+                    .series_ids(&format!(r#"?item wdt:P4835 "{t}"."#))
+                    .await?
+                    .and_then(|r| r.get("imdb").cloned())
+                    .filter(|i| is_imdb(i))
+                    .ok_or(MetaError::NotFound)?;
+                self.get(&url, &[("imdb", imdb)], &self.inner.tvmaze).await?
+            }
+            other => other?,
+        };
         if tmdb.is_none() {
             // The TMDB id, when Wikidata knows it, so the series matches one added with TMDB later.
             let filter = match id {
@@ -928,6 +948,38 @@ mod tests {
             .await
             .unwrap();
         assert_eq!((s.tmdb_id, s.tvdb_id), (Some(1186), Some(76736)));
+    }
+
+    #[tokio::test]
+    async fn a_series_tvmaze_does_not_know_by_tvdb_is_found_by_imdb() {
+        let server = MockServer::start().await;
+        Mock::given(path("/lookup/shows"))
+            .and(query_param("thetvdb", "76736"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(path("/lookup/shows"))
+            .and(query_param("imdb", "tt0084988"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(show()))
+            .mount(&server)
+            .await;
+        Mock::given(path("/shows/2380/episodes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(path("/sparql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"results": {"bindings": [
+                    binding(&[("tmdb", "1186"), ("tvdb", "76736"), ("imdb", "tt0084988")])
+                ]}}),
+            ))
+            .mount(&server)
+            .await;
+        let s = client(&server)
+            .series(SeriesExternalId::Tvdb(76736))
+            .await
+            .unwrap();
+        assert_eq!(s.title, "Blackadder");
     }
 
     #[tokio::test]
