@@ -15,6 +15,8 @@ services:
       # - REELIX_URL_BASE=/reelix       # when served under a sub-path
       # - REELIX_LOG_LEVEL=info
       # - REELIX_LOG_FORMAT=json
+      # On a small or low-power server, fewer worker threads use less memory:
+      # - TOKIO_WORKER_THREADS=2
     volumes:
       - ./config:/config
       # Single mount containing torrents/, usenet/ and media/ so hardlinks and atomic moves work.
@@ -22,3 +24,9 @@ services:
     ports:
       - "7700:7700"
     restart: unless-stopped
+    # Keep Docker's copy of the log from growing without limit (Reelix also keeps its own in /config/logs).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
