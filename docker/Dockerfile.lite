@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # The fork's lite image (TheMightyTRex/Reelix, 4 November 2026): the same build as docker/Dockerfile, without
 # direct downloads (YouTube, Spotify) or the /api/docs page, and with a stand-alone ffprobe instead of Debian's
-# full ffmpeg, Deno and yt-dlp. For films, series, books and music Reelix only runs ffprobe.
+# full ffmpeg, Deno and yt-dlp. For films, series, books and music Reelix only runs ffprobe. Radio filing rewraps
+# MPEG-TS captures with `ffmpeg -c copy`, so the image has a 3 MB FFmpeg built for that alone (6 November 2026).
 #
 # Build: docker build -f docker/Dockerfile.lite -t reelix:lite .
 # Kept in step with upstream by .github/workflows/lite.yml: only this file and the build options differ.
@@ -44,6 +45,28 @@ RUN cd crates/reelix-web && trunk build --release
 
 FROM ${FFPROBE_IMAGE} AS ffprobe
 
+# FFmpeg for radio filing only: MPEG-TS in, Matroska audio out, audio copied as is (crates/reelix-radio/src/filing.rs).
+# No encoders, no network and no video, so it is about 3 MB instead of 135 MB for a full static FFmpeg.
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS remux
+ARG FFMPEG_VERSION=7.1.2
+ARG FFMPEG_SHA256=089bc60fb59d6aecc5d994ff530fd0dcb3ee39aa55867849a2bbc4e555f9c304
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gcc make libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+RUN curl -sSfL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
+    && echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c - \
+    && tar xf ffmpeg.tar.xz --strip-components=1 \
+    && ./configure --disable-everything --disable-autodetect --disable-asm --disable-doc --disable-network \
+        --disable-ffplay --disable-ffprobe --disable-avdevice --disable-swscale --disable-postproc \
+        --enable-small --enable-static --disable-shared \
+        --enable-protocol=file --enable-demuxer=mpegts --enable-muxer=matroska --enable-muxer=matroska_audio \
+        --enable-parser=aac,aac_latm,mpegaudio,ac3,opus --enable-bsf=aac_adtstoasc \
+        --enable-decoder=aac,aac_latm,mp2,mp3,ac3,eac3,opus \
+        --extra-ldflags=-static \
+    && make -j"$(nproc)" ffmpeg \
+    && strip ffmpeg && cp ffmpeg /ffmpeg
+
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS runtime
 ARG VERSION
 LABEL org.opencontainers.image.title="Reelix" \
@@ -55,6 +78,7 @@ RUN apt-get update \
 
 # --chmod on COPY, not a later RUN chmod, which would store a second copy of each file in a new layer.
 COPY --from=ffprobe --chmod=0755 /ffprobe /usr/local/bin/ffprobe
+COPY --from=remux --chmod=0755 /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=builder --chmod=0755 /reelix /app/reelix
 COPY --from=web /src/crates/reelix-web/dist /app/web
 COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh

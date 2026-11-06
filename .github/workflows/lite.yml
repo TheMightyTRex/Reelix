@@ -78,6 +78,7 @@ jobs:
           done
           docker inspect -f '{{.State.Health.Status}}' lite | grep -qx healthy
           docker exec lite ffprobe -version | head -1
+          docker exec lite ffmpeg -hide_banner -muxers | grep -q matroska
           test "$(docker image inspect reelix:lite --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "${tag#v}"
           sleep 60
           {

@@ -7,7 +7,7 @@ switched off and a slimmer image. It is not part of upstream Reelix.
 |---|---|---|
 | Direct downloads (YouTube, Spotify) | Yes | No (`direct` feature off) |
 | `/api/docs` page | Yes | No (`docs` feature off; `/api/v1/openapi.json` is kept) |
-| ffmpeg | Debian's full package (479 MB) | A stand-alone `ffprobe` only |
+| ffmpeg | Debian's full package (479 MB) | A stand-alone `ffprobe`, and a 3 MB `ffmpeg` that only rewraps radio captures (MPEG-TS to Matroska audio) |
 | Deno and yt-dlp | Yes (138 MB) | No |
 | Web app | Yes | Yes (set `REELIX_WEB_DIR` to an empty folder for headless use) |
 
