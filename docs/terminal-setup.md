@@ -15,6 +15,9 @@ questions are asked in the terminal by `reelix setup`, the same questions the br
 
    Other systems: see <https://docs.docker.com/engine/install/>.
 
+   `sudo` asks for the password you sign in with. On most systems nothing shows as you type; on Ubuntu 26.04 and
+   later, a star shows for each character.
+
 2. Make a folder for Reelix and write its compose file:
 
    ```bash
@@ -55,6 +58,8 @@ systemctl status reelix --no-pager
 ```
 
 ## 2. Answer the set-up questions
+
+If Reelix has only just started, `reelix setup` waits for it to answer, for up to two minutes.
 
 ### With Docker
 

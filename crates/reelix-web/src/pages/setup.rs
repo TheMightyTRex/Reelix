@@ -454,7 +454,11 @@ fn StepBody(wizard: Wizard, id: StepId, code: RwSignal<String>) -> impl IntoView
         .into_any(),
         StepId::Migrate => view! { <div class="wizard-content"><MigratePage /></div> }.into_any(),
         StepId::Tmdb => view! { <TmdbFields wizard=wizard /> }.into_any(),
-        StepId::Folders => view! { <div class="wizard-content"><RootFoldersCard /></div> }.into_any(),
+        StepId::Folders => {
+            // The same folders the terminal wizard suggests, for what the person follows.
+            let suggest = wizard.answers.with_untracked(install::library_folders);
+            view! { <div class="wizard-content"><RootFoldersCard suggest=suggest /></div> }.into_any()
+        }
         StepId::Torrent | StepId::Usenet => view! { <DownloadApp wizard=wizard id=id /> }.into_any(),
         StepId::Sites => view! {
             <div class="wizard-content">

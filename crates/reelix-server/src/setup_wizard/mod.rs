@@ -17,6 +17,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+/// How long `reelix setup` waits for Reelix to answer before it stops.
+const WAIT_FOR_REELIX: Duration = Duration::from_secs(120);
+
+use reelix_api_types::content::{ContentKind, ContentRootFolderDto, CreateContentRootFolderRequest};
 use reelix_api_types::install::{
     self, Answers, Context, FEEDBACK_KINDS, Help, PLACEHOLDER_NOTE, Question, Start, StepId,
 };
@@ -142,14 +146,46 @@ pub fn run(config: &Config, opts: Options) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let status = match rt.block_on(api.get::<SetupStatus>("/setup")) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "Reelix is not answering at {base} ({}). Start Reelix first, then run reelix setup again.",
-                e.message
-            );
-            return ExitCode::FAILURE;
+    // Straight after `docker compose up -d`, or a restart after a restore, Reelix takes a little
+    // while to answer: wait for it, up to two minutes, instead of stopping at once.
+    let began = Instant::now();
+    let mut waited = false;
+    let status = loop {
+        match rt.block_on(api.get::<SetupStatus>("/setup")) {
+            Ok(s) => {
+                if waited && !ui.plain {
+                    eprintln!();
+                }
+                break s;
+            }
+            Err(e) if began.elapsed() >= WAIT_FOR_REELIX => {
+                if waited && !ui.plain {
+                    eprintln!();
+                }
+                eprintln!(
+                    "Reelix is not answering at {base} ({}). Start Reelix first, then run reelix setup again.",
+                    e.message
+                );
+                return ExitCode::FAILURE;
+            }
+            Err(_) => {
+                let secs = began.elapsed().as_secs();
+                if ui.plain {
+                    if !waited {
+                        eprintln!(
+                            "Waiting for Reelix to answer at {base}. This can take a minute after it starts."
+                        );
+                    }
+                } else {
+                    eprint!(
+                        "\r\x1b[2KWaiting for Reelix to answer at {base}: {} min {:02} s",
+                        secs / 60,
+                        secs % 60
+                    );
+                }
+                waited = true;
+                std::thread::sleep(Duration::from_secs(2));
+            }
         }
     };
     let mut w = Wizard {
@@ -725,7 +761,7 @@ impl Wizard {
             } else {
                 "The whole report is saved on the server too."
             };
-            out.push_str(&term::clip(note, self.ui.cols));
+            out.push_str(&term::wrap(note, self.ui.cols).join("\r\n"));
             out.push_str(&format!(
                 "\x1b[{};1H{}",
                 self.ui.rows,
@@ -1116,6 +1152,12 @@ impl Wizard {
     /// Follows a run until it ends, on one line that turns while it waits: what is happening and
     /// how far it is, cut to the column. Plain mode prints the count when it changes instead.
     fn follow_run(&mut self, label: &str) -> Result<MigrateRunDto, String> {
+        // Keys pressed while it waits are not shown (an Enter would push the line down).
+        let _quiet = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            term::Quiet::start().ok()
+        } else {
+            None
+        };
         let began = Instant::now();
         let mut turn = 0;
         let mut count = String::new();
@@ -1230,54 +1272,87 @@ impl Wizard {
         }
     }
 
+    /// Library folders: one for each kind followed, from the list the browser wizard offers too
+    /// ([`install::library_folders`]), each suggested inside `/data`.
     fn folders(&mut self) -> Flow {
-        let existing = self
-            .call(
-                self.rt
-                    .block_on(self.api.get::<Vec<RootFolderDto>>("/rootfolders")),
-            )
-            .unwrap_or_default();
-        for f in &existing {
-            self.say(&format!("Already added: {}", f.path));
+        let api = &self.api;
+        let existing = self.rt.block_on(async {
+            let (media, books, music) = futures::join!(
+                api.get::<Vec<RootFolderDto>>("/rootfolders"),
+                api.get::<Vec<ContentRootFolderDto>>("/bookrootfolders"),
+                api.get::<Vec<ContentRootFolderDto>>("/musicrootfolders"),
+            );
+            let mut have: Vec<(String, String)> = Vec::new();
+            for f in media.unwrap_or_default() {
+                let key = if f.media_kind == MediaKind::Movie {
+                    "movie"
+                } else {
+                    "series"
+                };
+                have.push((key.to_owned(), f.path));
+            }
+            for f in books
+                .unwrap_or_default()
+                .into_iter()
+                .chain(music.unwrap_or_default())
+            {
+                have.push((content_key(f.kind).to_owned(), f.path));
+            }
+            have
+        });
+        for (_, path) in &existing {
+            self.say(&format!("Already added: {path}"));
         }
-        let mut kinds = Vec::new();
-        if self.answers.follows(install::Kind::Movies) {
-            kinds.push((MediaKind::Movie, "Movies", "/data/media/movies"));
-        }
-        if self.answers.follows(install::Kind::Series) {
-            kinds.push((MediaKind::Series, "Series", "/data/media/series"));
-        }
-        if kinds.is_empty() {
-            self.say("Books and music folders are set in Settings, then Books and Music.");
+        let wanted = install::library_folders(&self.answers);
+        if wanted.is_empty() {
             return Flow::Next;
         }
-        for (kind, label, default) in kinds {
-            if existing.iter().any(|f| f.media_kind == kind) {
+        for folder in wanted {
+            if existing.iter().any(|(key, _)| key == folder.key) {
                 continue;
             }
             let path = got!(self.text(
-                &format!("Folder for {}", label.to_lowercase()),
+                &format!("Folder for {}", folder.label.to_lowercase()),
                 "As Reelix sees it, inside /data. Type s to skip this one.",
-                default,
+                folder.path,
                 None,
             ));
             if path.eq_ignore_ascii_case("s") {
                 continue;
             }
-            let req = CreateRootFolderRequest {
-                path,
-                media_kind: kind,
-            };
-            if self
-                .call(
-                    self.rt
-                        .block_on(self.api.post::<_, RootFolderDto>("/rootfolders", &req)),
-                )
-                .is_none()
-            {
+            let api = &self.api;
+            let added = self.rt.block_on(async {
+                match folder.key {
+                    "movie" | "series" => {
+                        let req = CreateRootFolderRequest {
+                            path,
+                            media_kind: if folder.key == "movie" {
+                                MediaKind::Movie
+                            } else {
+                                MediaKind::Series
+                            },
+                        };
+                        api.post::<_, RootFolderDto>("/rootfolders", &req)
+                            .await
+                            .map(|_| ())
+                    }
+                    key => {
+                        let (kind, endpoint) = match key {
+                            "ebook" => (ContentKind::Ebook, "/bookrootfolders"),
+                            "audiobook" => (ContentKind::Audiobook, "/bookrootfolders"),
+                            _ => (ContentKind::Music, "/musicrootfolders"),
+                        };
+                        let req = CreateContentRootFolderRequest { path, kind };
+                        api.post::<_, ContentRootFolderDto>(endpoint, &req)
+                            .await
+                            .map(|_| ())
+                    }
+                }
+            });
+            if self.call(added).is_none() {
                 return self.run_step(StepId::Folders);
             }
-            self.say(&format!("{label} folder added."));
+            self.say(&format!("{} folder added.", folder.label));
         }
         Flow::Next
     }
@@ -1725,6 +1800,18 @@ fn parse_numbers(s: &str, max: usize) -> Option<Vec<usize>> {
         }
     }
     Some(out)
+}
+
+/// How the folder lists name a books or music folder's kind.
+fn content_key(kind: ContentKind) -> &'static str {
+    match kind {
+        ContentKind::Ebook => "ebook",
+        ContentKind::Audiobook => "audiobook",
+        ContentKind::Music => "music",
+        ContentKind::Movie => "movie",
+        ContentKind::Series => "series",
+        ContentKind::Radio => "radio",
+    }
 }
 
 #[cfg(test)]

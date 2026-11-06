@@ -147,6 +147,71 @@ pub fn offered(question: &Question, value: &str, ctx: Context) -> bool {
     !(ctx.signed_in && question.key == "start" && value == "restore")
 }
 
+/// A library folder the Library folders step suggests. The browser and the terminal both offer
+/// these, for the kinds the person follows, so the two wizards ask for the same folders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LibraryFolder {
+    /// The folder's kind, as the folder lists name it: `movie`, `series`, `ebook`, `audiobook`
+    /// or `music`.
+    pub key: &'static str,
+    pub label: &'static str,
+    /// Where it is suggested, as Reelix sees it: inside `/data`, the one folder the Docker
+    /// compose file mounts for downloads and media.
+    pub path: &'static str,
+}
+
+const LIBRARY_FOLDERS: [(Kind, LibraryFolder); 5] = [
+    (
+        Kind::Movies,
+        LibraryFolder {
+            key: "movie",
+            label: "Movies",
+            path: "/data/media/movies",
+        },
+    ),
+    (
+        Kind::Series,
+        LibraryFolder {
+            key: "series",
+            label: "Series",
+            path: "/data/media/series",
+        },
+    ),
+    (
+        Kind::Books,
+        LibraryFolder {
+            key: "ebook",
+            label: "Ebooks",
+            path: "/data/media/books",
+        },
+    ),
+    (
+        Kind::Books,
+        LibraryFolder {
+            key: "audiobook",
+            label: "Audiobooks",
+            path: "/data/media/audiobooks",
+        },
+    ),
+    (
+        Kind::Music,
+        LibraryFolder {
+            key: "music",
+            label: "Music",
+            path: "/data/media/music",
+        },
+    ),
+];
+
+/// The folders to suggest, in order, for what the person follows.
+pub fn library_folders(answers: &Answers) -> Vec<LibraryFolder> {
+    LIBRARY_FOLDERS
+        .iter()
+        .filter(|(kind, _)| answers.follows(*kind))
+        .map(|(_, f)| *f)
+        .collect()
+}
+
 /// The steps that will be shown, in order.
 pub fn steps_shown(answers: &Answers, ctx: Context) -> Vec<StepId> {
     flow(answers.start())
@@ -951,6 +1016,19 @@ mod tests {
             out.extend([c.label, c.hint]);
         }
         out
+    }
+
+    #[test]
+    fn library_folders_follow_the_answers() {
+        let mut a = Answers::with_defaults();
+        a.set("follow", "movies,books");
+        let keys: Vec<_> = library_folders(&a).iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["movie", "ebook", "audiobook"]);
+        assert!(
+            library_folders(&a)
+                .iter()
+                .all(|f| f.path.starts_with("/data/media/"))
+        );
     }
 
     #[test]

@@ -252,7 +252,10 @@ impl Ui {
             }
         }
         out.push(String::new());
-        out.push(format!("  {}", self.dim(&clip(&pick.note, w - 2))));
+        // Wrapped, not cut: at 60 columns the usual hint is one character too long.
+        for line in wrap(&pick.note, w - 2) {
+            out.push(format!("  {}", self.dim(&line)));
+        }
         out
     }
 
@@ -541,6 +544,46 @@ impl Drop for Keys {
         let _ = rustix::termios::tcsetattr(io::stdin(), rustix::termios::OptionalActions::Drain, &self.saved);
         print!("\x1b[?25h");
         let _ = io::stdout().flush();
+    }
+}
+
+/// Keys typed while a progress line turns are not shown, so Enter cannot push the line down the
+/// window, and they are thrown away when it ends. Ctrl+C still stops the wizard. Dropping it puts
+/// the terminal back as it was.
+#[cfg(unix)]
+pub struct Quiet {
+    saved: rustix::termios::Termios,
+}
+
+#[cfg(unix)]
+impl Quiet {
+    pub fn start() -> io::Result<Self> {
+        use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+        let stdin = io::stdin();
+        let saved = tcgetattr(&stdin)?;
+        let mut quiet = saved.clone();
+        quiet.local_modes.remove(LocalModes::ICANON | LocalModes::ECHO);
+        tcsetattr(&stdin, OptionalActions::Drain, &quiet)?;
+        Ok(Self { saved })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Quiet {
+    fn drop(&mut self) {
+        use rustix::termios::{OptionalActions, QueueSelector, tcflush, tcsetattr};
+        let _ = tcflush(io::stdin(), QueueSelector::IFlush);
+        let _ = tcsetattr(io::stdin(), OptionalActions::Drain, &self.saved);
+    }
+}
+
+#[cfg(not(unix))]
+pub struct Quiet;
+
+#[cfg(not(unix))]
+impl Quiet {
+    pub fn start() -> io::Result<Self> {
+        Err(io::ErrorKind::Unsupported.into())
     }
 }
 
