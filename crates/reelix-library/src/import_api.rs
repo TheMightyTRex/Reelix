@@ -380,7 +380,7 @@ impl Importer<'_> {
     pub async fn candidates(&self) -> Result<Vec<MediaCandidate>> {
         let svc = self.svc;
         let mut out = Vec::new();
-        let alt = misc::alt_titles_of(&svc.db, MediaKind::Movie).await?;
+        let alt = misc::alt_titles_of(&svc.db, MediaKind::Movie, None).await?;
         for r in sqlx::query_as::<_, (i64, String, Option<i64>, Option<i64>, Option<String>)>(
             "SELECT id, title, year, tmdb_id, imdb_id FROM movies",
         )
@@ -400,7 +400,7 @@ impl Importer<'_> {
                 imdb_id: r.4,
             });
         }
-        let alt = misc::alt_titles_of(&svc.db, MediaKind::Series).await?;
+        let alt = misc::alt_titles_of(&svc.db, MediaKind::Series, None).await?;
         for r in sqlx::query_as::<_, (i64, String, Option<i64>, Option<i64>, Option<i64>, Option<String>)>(
             "SELECT id, title, year, tmdb_id, tvdb_id, imdb_id FROM series",
         )
