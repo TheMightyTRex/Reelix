@@ -20,6 +20,31 @@ impl Text {
     }
 }
 
+/// A series entry: `"Name ; 3"`, or (newer records) `{"series": {"key": "/series/OL…L"}, "position": "3"}`,
+/// which names the series only by its key.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub(super) enum SeriesEntry {
+    Plain(String),
+    Linked {
+        #[allow(dead_code)]
+        series: Key,
+        #[allow(dead_code)]
+        #[serde(default)]
+        position: Option<serde_json::Value>,
+    },
+}
+
+impl SeriesEntry {
+    /// The text form; linked entries carry no name, so they are left out for now.
+    pub(super) fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Plain(s) => Some(s),
+            Self::Linked { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub(super) struct Key {
@@ -121,7 +146,7 @@ pub(super) struct Work {
     pub first_publish_date: Option<String>,
     pub subjects: Vec<String>,
     pub covers: Vec<i64>,
-    pub series: Vec<String>,
+    pub series: Vec<SeriesEntry>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -146,7 +171,7 @@ pub(super) struct Edition {
     pub number_of_pages: Option<u32>,
     pub physical_format: Option<String>,
     pub covers: Vec<i64>,
-    pub series: Vec<String>,
+    pub series: Vec<SeriesEntry>,
     pub works: Vec<Key>,
     pub contributors: Vec<Contributor>,
     pub contributions: Vec<String>,
