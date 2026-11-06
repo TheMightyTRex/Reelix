@@ -511,7 +511,9 @@ mod tests {
             jail.set_env("REELIX_TVDB_BASE_URL", "https://tvdb.test/v4");
             let cfg = load(&CliOverrides::default())?;
             assert_eq!(cfg.tvdb_base_url.as_deref(), Some("https://tvdb.test/v4"));
-            jail.set_env("REELIX_TMDB_BASE_URL", "ftp://nope");
+            // An address that is not http(s) is refused. Set in the file, not the environment: tests
+            // that run alongside read the process environment.
+            jail.create_file("data/config.toml", "[metadata]\ntmdb_base_url = \"ftp://nope\"\n")?;
             assert!(load(&CliOverrides::default()).is_err());
             Ok(())
         });
