@@ -13,6 +13,13 @@ switched off and a slimmer image. It is not part of upstream Reelix.
 
 Build it: `docker build -f docker/Dockerfile.lite -t reelix:lite .`
 
+## The full image, for Starboard
+
+Starboard offers the lite image by default and the full version as a choice. It uses upstream's own image,
+`ghcr.io/demonzoned/reelix:latest`, when that can be downloaded without signing in. Until then, a run of the Lite
+workflow started by hand with **publish_full** ticked publishes upstream's release, built from upstream's own
+`docker/Dockerfile` with nothing from this branch, as `ghcr.io/themightytrex/reelix:full`.
+
 ## What differs from upstream
 
 Only these, so each upstream release merges cleanly:

@@ -16,6 +16,10 @@ on:
         description: "Publish ghcr.io/themightytrex/reelix:lite after the checks pass"
         type: boolean
         default: false
+      publish_full:
+        description: "Also publish upstream's full image, unchanged, as ghcr.io/themightytrex/reelix:full (while upstream's own image cannot be downloaded without signing in)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -99,5 +103,20 @@ jobs:
           tag="${{ steps.merge.outputs.tag }}"
           for t in lite "${tag#v}-lite"; do
             docker tag reelix:lite "ghcr.io/themightytrex/reelix:$t"
+            docker push "ghcr.io/themightytrex/reelix:$t"
+          done
+
+      # Upstream's own image (ghcr.io/demonzoned/reelix) is the first choice for the full version, but on
+      # 6 November 2026 it could not be downloaded without signing in. Until it can, Starboard falls back to this
+      # copy: upstream's release tag and docker/Dockerfile exactly as they are, nothing from fork/lite.
+      - name: Publish the full image
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_full
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          tag="${{ steps.merge.outputs.tag }}"
+          git worktree add --detach ../upstream-full "$tag"
+          docker build -f ../upstream-full/docker/Dockerfile -t reelix:full ../upstream-full
+          for t in full "${tag#v}"; do
+            docker tag reelix:full "ghcr.io/themightytrex/reelix:$t"
             docker push "ghcr.io/themightytrex/reelix:$t"
           done
