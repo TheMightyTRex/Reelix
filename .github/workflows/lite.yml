@@ -34,6 +34,10 @@ jobs:
         with:
           ref: fork/lite
           fetch-depth: 0
+          # Upstream releases sometimes change its own workflow files, and GitHub only lets a token with the
+          # "workflows" permission push those. Add a fine-grained token as the LITE_PUSH_TOKEN secret (this
+          # repository; Contents and Workflows: read and write). Without it, such a merge cannot be pushed.
+          token: ${{ secrets.LITE_PUSH_TOKEN || github.token }}
 
       - name: Merge upstream's newest release
         id: merge
