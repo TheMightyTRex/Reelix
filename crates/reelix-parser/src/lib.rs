@@ -33,5 +33,5 @@ pub use model::*;
 pub use music::{MusicSource, ParsedMusic, music_quality, parse_music};
 pub use parser::parse;
 pub use path::parse_path;
-pub use radio::{ParsedRadio, parse_radio, radio_codec, radio_quality};
+pub use radio::{ParsedRadio, is_bbc_pid, parse_radio, radio_codec, radio_quality};
 pub use title::clean_title;

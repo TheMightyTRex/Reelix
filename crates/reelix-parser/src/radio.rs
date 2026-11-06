@@ -5,7 +5,8 @@
 //! `04 Nov 2026`), BBC style `Show Series 95 Episode 2`, dotted scene names
 //! (`The.Infinite.Monkey.Cage.S27E01.Space.Junk.WEB.AAC-GRP`), a station in front
 //! (`BBC.Radio.4.The.Archers…`, `[BBC R4] Show …`) and audio tags anywhere
-//! (`(128kbps)`, `[64kbps opus]`, `.mp3`).
+//! (`(128kbps)`, `[64kbps opus]`, `.mp3`), and get_iplayer file names with underscores and
+//! the BBC programme id (`The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a`).
 //!
 //! Radio ranks with the audiobook qualities ([`QualityFamily::Audiobook`]): MP3 →
 //! `AudiobookMp3`, AAC/M4A/M4B → `AudiobookM4b`, FLAC → `AudiobookFlac`, anything else
@@ -37,6 +38,9 @@ pub struct ParsedRadio {
     /// Audiobook family.
     pub quality: QualityModel,
     pub release_group: Option<String>,
+    /// BBC programme id in the name (`b09zv5m0`), as get_iplayer writes it; lower case.
+    #[serde(default)]
+    pub pid: Option<String>,
 }
 
 impl ParsedRadio {
@@ -53,9 +57,13 @@ impl ParsedRadio {
         r
     }
 
-    /// Whether the title says which episode it is (numbers, a date or an episode title).
+    /// Whether the title says which episode it is (numbers, a date, an episode title or a BBC
+    /// programme id).
     pub fn identifies_episode(&self) -> bool {
-        self.episode.is_some() || self.air_date.is_some() || self.episode_title.is_some()
+        self.episode.is_some()
+            || self.air_date.is_some()
+            || self.episode_title.is_some()
+            || self.pid.is_some()
     }
 }
 
@@ -308,6 +316,30 @@ fn tidy_title(s: &str, t: &mut Tags) -> Option<String> {
     )
 }
 
+/// Whether `s` is shaped like a BBC programme id: 8 characters, `b`, `p`, `m` or `w` then
+/// digits and consonants (`b09zv5m0`). Case is ignored.
+pub fn is_bbc_pid(s: &str) -> bool {
+    re!(PID, r"(?i)^[bpmw][0-9b-df-hj-np-tv-z]{7}$");
+    PID.is_match(s)
+}
+
+/// The BBC programme id in a name and the byte range to remove: the id with get_iplayer's
+/// version word after it (`_original`, `_editorial`, …) and brackets around it. An id needs
+/// a digit, so an eight-letter word without vowels is never taken for one.
+fn find_pid(s: &str) -> Option<(String, usize, usize)> {
+    re!(
+        PID_IN,
+        r"(?i)(?:^|[^a-z0-9])([\[\(]?([bpmw][0-9b-df-hj-np-tv-z]{7})(?:[ _.\-]+(?:original|editorial|shortened|lengthened|signed|audiodescribed|opensubtitled|default))?[\]\)]?)(?:$|[^a-z0-9])"
+    );
+    PID_IN.captures_iter(s).find_map(|c| {
+        let (all, pid) = (c.get(1)?, c.get(2)?);
+        pid.as_str()
+            .bytes()
+            .any(|b| b.is_ascii_digit())
+            .then(|| (pid.as_str().to_ascii_lowercase(), all.start(), all.end()))
+    })
+}
+
 /// Parses a radio release title. Never panics.
 pub fn parse_radio(title: &str) -> ParsedRadio {
     let mut t = Tags::default();
@@ -325,6 +357,15 @@ pub fn parse_radio(title: &str) -> ParsedRadio {
             t.codec.get_or_insert(c);
         }
         s.truncate(m.start());
+    }
+
+    // get_iplayer's BBC programme id (`…_Episode_3_b09zv5m0_original`): kept, and taken out
+    // of the name so it is not read as part of the episode title.
+    let mut pid = None;
+    if let Some((p, a, b)) = find_pid(&s) {
+        pid = Some(p);
+        let sep = if s.contains(' ') { " " } else { "_" };
+        s = format!("{}{sep}{}", &s[..a], &s[b..]);
     }
 
     // Bracket groups: audio tags are dropped, a leading non-tag group is the station, a date
@@ -453,6 +494,7 @@ pub fn parse_radio(title: &str) -> ParsedRadio {
         bitrate_kbps: t.bitrate,
         quality: QualityModel::new(radio_quality(t.codec)),
         release_group: group,
+        pid,
     }
 }
 
@@ -563,6 +605,55 @@ mod tests {
         let p = parse_radio("Specials Show S00E01 Christmas Special");
         assert_eq!((p.series, p.episode), (Some(0), Some(1)));
         assert_eq!(p.episode_title.as_deref(), Some("Christmas Special"));
+    }
+
+    #[test]
+    fn get_iplayer_names_carry_the_pid() {
+        let p = parse_radio("The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a");
+        assert_eq!(p.show, "The Unbelievable Truth");
+        assert_eq!((p.series, p.episode), (Some(20), Some(3)));
+        assert_eq!(p.episode_title, None);
+        assert_eq!(p.pid.as_deref(), Some("b09zv5m0"));
+        assert_eq!(p.codec, Some(AudioCodec::Aac));
+        assert_eq!(p.release_group, None);
+
+        let p = parse_radio("Desert_Island_Discs_-_Dolly_Parton_b006qnmr_default.m4a");
+        assert_eq!(p.show, "Desert Island Discs");
+        assert_eq!(p.episode_title.as_deref(), Some("Dolly Parton"));
+        assert_eq!(p.pid.as_deref(), Some("b006qnmr"));
+
+        // A name with only the id still says which episode it is.
+        let p = parse_radio("Front_Row_m0024xyz_original.m4a");
+        assert_eq!(
+            (p.show.as_str(), p.pid.as_deref()),
+            ("Front Row", Some("m0024xyz"))
+        );
+        assert!(p.identifies_episode());
+
+        let p = parse_radio("In Our Time - Black Holes [P0BCD123] (128kbps)");
+        assert_eq!(p.show, "In Our Time");
+        assert_eq!(p.episode_title.as_deref(), Some("Black Holes"));
+        assert_eq!(p.pid.as_deref(), Some("p0bcd123"));
+
+        // Underscore names without an id parse the same way.
+        let p = parse_radio("Just_a_Minute_-_Series_95_Episode_2.mp3");
+        assert_eq!(p.show, "Just a Minute");
+        assert_eq!((p.series, p.episode, p.pid.as_deref()), (Some(95), Some(2), None));
+
+        // Words are never ids: no digit, a vowel, or the wrong length.
+        for name in [
+            "Show - Brrrrrrr",
+            "Show - Building",
+            "Show - b09zv5m",
+            "Show - b09zv5m0x",
+        ] {
+            assert_eq!(parse_radio(name).pid, None, "{name}");
+        }
+        assert!(is_bbc_pid("b09zv5m0"));
+        assert!(is_bbc_pid("M0024XYZ"));
+        assert!(!is_bbc_pid("a09zv5m0"));
+        assert!(!is_bbc_pid("b09zv5m0a"));
+        assert!(!is_bbc_pid("ep-1"));
     }
 
     #[test]

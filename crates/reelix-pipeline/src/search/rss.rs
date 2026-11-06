@@ -1,6 +1,7 @@
 //! RSS sync: latest releases from RSS-enabled indexers, mapped to monitored library media and
-//! grabbed when they beat what's there (missing, or cutoff unmet). Releases in Audio/Other or
-//! Audio/Audiobook (or without categories) are first matched against wanted radio episodes.
+//! grabbed when they beat what's there (missing, or cutoff unmet). Releases in the radio
+//! categories (Audio/MP3, Audio/Audiobook, Audio/Other) or without categories are first matched
+//! against wanted radio episodes; the rest go on to the books and music libraries.
 
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};

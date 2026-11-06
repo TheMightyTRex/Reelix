@@ -110,7 +110,8 @@ pub fn album(t: &reelix_music::AlbumTarget) -> SearchQuery {
     q
 }
 
-/// Radio episode queries in the radio categories (Audio/Other): `Show S20E03`, the broadcast
+/// Radio episode queries in the radio categories (Audio/MP3, Audio/Audiobook and Audio/Other,
+/// `DEFAULT_RADIO`): `Show S20E03`, the broadcast
 /// date and the episode title ([`reelix_radio::RadioTarget::search_terms`]).
 pub fn radio(t: &reelix_radio::RadioTarget) -> Vec<SearchQuery> {
     t.search_terms()

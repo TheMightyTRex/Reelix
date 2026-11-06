@@ -14,11 +14,14 @@ use reelix_api_types::content::ContentSearchKind;
 use reelix_api_types::radio::{RadioEpisodeStatus, RadioSearchRequest};
 use reelix_db::NewJob;
 use reelix_import::matching::{normalize_title, similarity};
-use reelix_parser::{ParsedRadio, QualityFamily};
+use reelix_parser::{ParsedRadio, QualityFamily, is_bbc_pid};
 
 use crate::error::{RadioError, Result};
 use crate::wanted::WantedEpisode;
 use crate::{RadioService, kinds, repo};
+
+/// The provider whose episode ids are BBC programme ids.
+const BBC_PROVIDER: &str = crate::providers::bbc::ID;
 
 /// One episode to search for.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +46,13 @@ impl RadioTarget {
         self.episode
             .number
             .map(|n| format!("S{:02}E{n:02}", self.episode.series_number))
+    }
+
+    /// The BBC programme id of a BBC episode (its external id), when it is one.
+    pub fn bbc_pid(&self) -> Option<&str> {
+        let e = &self.episode;
+        let id = e.external_id.trim();
+        (e.provider == BBC_PROVIDER && is_bbc_pid(id)).then_some(id)
     }
 
     /// Playing time in minutes for the size check (`None` = unknown, no size check).
@@ -74,9 +84,20 @@ impl RadioTarget {
         out
     }
 
-    /// Whether a parsed release is this episode: the show must match, then the numbers
-    /// (series + episode), else the broadcast date (one day either way), else the episode title.
+    /// Whether a parsed release is this episode. A BBC programme id in the name decides for a
+    /// BBC episode (the same id matches whatever the name says; another id is refused).
+    /// Otherwise the show must match, then the numbers (series + episode), else the broadcast
+    /// date (one day either way), else the episode title.
     pub fn check_release(&self, p: &ParsedRadio) -> std::result::Result<(), String> {
+        if let (Some(got), Some(want)) = (p.pid.as_deref(), self.bbc_pid()) {
+            return if got.eq_ignore_ascii_case(want) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Wrong episode: release is BBC programme {got}, wanted {want}"
+                ))
+            };
+        }
         if !show_matches(&self.episode.show_title, p) {
             return Err(format!(
                 "Wrong show: {:?} is not {}",
@@ -303,6 +324,13 @@ mod tests {
 
     use super::*;
 
+    fn bbc(show: &str, series: u32, number: Option<u32>, pid: &str) -> RadioTarget {
+        let mut t = target(show, series, number, "Episode", None);
+        t.episode.provider = "bbc".into();
+        t.episode.external_id = pid.into();
+        t
+    }
+
     fn target(
         show: &str,
         series: u32,
@@ -315,6 +343,7 @@ mod tests {
                 episode_id: 1,
                 show_id: 1,
                 show_title: show.into(),
+                provider: "rss".into(),
                 station_name: Some("BBC Radio 4".into()),
                 series_number: series,
                 number,
@@ -392,5 +421,60 @@ mod tests {
         let hit = match_release(&targets, &parse_radio("The News Quiz S20E03")).unwrap();
         assert_eq!(hit.episode.show_title, "The News Quiz");
         assert!(match_release(&targets, &parse_radio("Desert Island Discs")).is_none());
+    }
+
+    #[test]
+    fn bbc_programme_ids_decide() {
+        let name = "The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a";
+        let p = parse_radio(name);
+        // The same id matches even when the show is named differently.
+        assert!(
+            bbc("Something Else", 1, Some(1), "b09zv5m0")
+                .check_release(&p)
+                .is_ok()
+        );
+        assert!(
+            bbc("The Unbelievable Truth", 20, Some(3), "B09ZV5M0")
+                .check_release(&p)
+                .is_ok()
+        );
+        // Another id is refused even when the show and numbers fit.
+        assert!(
+            bbc("The Unbelievable Truth", 20, Some(3), "b09zv5m1")
+                .check_release(&p)
+                .unwrap_err()
+                .contains("BBC programme b09zv5m0")
+        );
+        // Without an id in the name, BBC episodes match by show and numbers as before.
+        let t = bbc("The Unbelievable Truth", 20, Some(3), "b09zv5m0");
+        assert!(
+            t.check_release(&parse_radio("The Unbelievable Truth S20E03"))
+                .is_ok()
+        );
+        assert!(
+            t.check_release(&parse_radio("The Unbelievable Truth S20E04"))
+                .is_err()
+        );
+        // Episodes of other providers ignore the id and match by show and numbers.
+        let t = target("The Unbelievable Truth", 20, Some(3), "Episode 3", None);
+        assert!(t.check_release(&p).is_ok());
+        assert!(
+            target("Other Show", 20, Some(3), "Episode 3", None)
+                .check_release(&p)
+                .is_err()
+        );
+        // A BBC episode whose external id is not a programme id falls back to the name.
+        let t = bbc("The Unbelievable Truth", 20, Some(3), "not-a-pid");
+        assert_eq!(t.bbc_pid(), None);
+        assert!(t.check_release(&p).is_ok());
+
+        // RSS sync: the id picks the right episode among several of the same show.
+        let targets = vec![
+            bbc("The Unbelievable Truth", 20, Some(2), "b09zv5l9"),
+            bbc("The Unbelievable Truth", 20, Some(3), "b09zv5m0"),
+        ];
+        let hit = match_release(&targets, &parse_radio("Front_Row_b09zv5m0_original.m4a")).unwrap();
+        assert_eq!(hit.episode.number, Some(3));
+        assert!(match_release(&targets, &parse_radio("Front_Row_b09zv5m9_original.m4a")).is_none());
     }
 }

@@ -101,8 +101,12 @@ pub const DEFAULT_AUDIOBOOK: &[u32] = &[AUDIO_AUDIOBOOK];
 pub const DEFAULT_BOOK: &[u32] = &[BOOKS, BOOKS_EBOOK, AUDIO_AUDIOBOOK];
 /// Default music categories (Audio, MP3, Lossless). Audio/Video and audiobooks are excluded.
 pub const DEFAULT_MUSIC: &[u32] = &[AUDIO, AUDIO_MP3, AUDIO_LOSSLESS];
-/// Default radio categories (Audio/Other: radio shows and podcasts have no category of their own).
-pub const DEFAULT_RADIO: &[u32] = &[AUDIO_OTHER];
+/// Default radio categories. Radio shows and podcasts have no category of their own, so
+/// indexers file them as Audio/Other, Audio/MP3 or Audio/Audiobook (MyAnonamouse's Radio
+/// categories map to Audio/Audiobook in Prowlarr and Jackett). Releases still have to match a
+/// wanted episode, so music and audiobooks found here are not grabbed as radio. The Audio parent
+/// is left out: on many indexers it would also return Lossless and Audio/Video.
+pub const DEFAULT_RADIO: &[u32] = &[AUDIO_MP3, AUDIO_AUDIOBOOK, AUDIO_OTHER];
 
 /// Default search categories for a content kind (`None` = format-less book search).
 pub fn defaults_for(kind: Option<ContentKind>) -> &'static [u32] {
@@ -260,6 +264,15 @@ mod tests {
         assert!(!is_excluded(Some(Music), DEFAULT_MUSIC, &[3040]));
         assert!(!is_excluded(Some(Audiobook), DEFAULT_AUDIOBOOK, &[3030]));
         assert!(!is_excluded(Some(Movie), &[], &[7010]));
+
+        // Radio: Audio/MP3, Audio/Audiobook and Audio/Other; Audio/Video stays out.
+        assert_eq!(defaults_for(Some(Radio)), [3010, 3030, 3050]);
+        assert!(!defaults_for(Some(Radio)).contains(&AUDIO_VIDEO));
+        assert!(is_excluded(Some(Radio), DEFAULT_RADIO, &[3020]));
+        assert!(is_excluded(Some(Radio), DEFAULT_RADIO, &[3000, 3020]));
+        for cat in [3010, 3030, 3050] {
+            assert!(!is_excluded(Some(Radio), DEFAULT_RADIO, &[3000, cat]), "{cat}");
+        }
 
         assert_eq!(content_kind_of(&[3000, 3030]), Some(Audiobook));
         assert_eq!(content_kind_of(&[7000, 7020]), Some(Ebook));

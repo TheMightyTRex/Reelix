@@ -478,11 +478,96 @@ pub fn map_to_radio(r: &ReleaseInfo, parsed: &ParsedRadio, t: &RadioTarget) -> R
     t.check_release(parsed)
 }
 
-/// Whether a release's categories may hold radio (Audio/Other, Audio/Audiobook, or none).
+/// Whether a release's categories may hold radio (the radio search categories, Audio/MP3,
+/// Audio/Audiobook and Audio/Other, or none). RSS sync tries these against the wanted episodes
+/// first; a release that is no wanted episode goes on to the books and music libraries.
 pub fn may_be_radio(r: &ReleaseInfo) -> bool {
-    use reelix_indexers::categories::{AUDIO_AUDIOBOOK, AUDIO_OTHER};
-    r.categories.is_empty()
-        || r.categories
-            .iter()
-            .any(|c| matches!(*c, AUDIO_OTHER | AUDIO_AUDIOBOOK))
+    use reelix_indexers::categories::DEFAULT_RADIO;
+    r.categories.is_empty() || r.categories.iter().any(|c| DEFAULT_RADIO.contains(c))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use reelix_core::Protocol;
+    use reelix_parser::parse_radio;
+    use reelix_radio::WantedEpisode;
+
+    use super::*;
+
+    fn wanted(provider: &str, external_id: &str) -> RadioTarget {
+        RadioTarget {
+            episode: WantedEpisode {
+                episode_id: 1,
+                show_id: 1,
+                show_title: "The Unbelievable Truth".into(),
+                provider: provider.into(),
+                station_name: Some("BBC Radio 4".into()),
+                series_number: 20,
+                number: Some(3),
+                title: "Episode 3".into(),
+                first_broadcast: Some(chrono::Utc.with_ymd_and_hms(2026, 11, 4, 18, 30, 0).unwrap()),
+                external_id: external_id.into(),
+                quality_profile_id: None,
+                root_folder_id: None,
+            },
+            quality_profile_id: 1,
+            tags: vec![],
+            monitored: true,
+            duration_secs: Some(28 * 60),
+        }
+    }
+
+    fn release(title: &str, categories: &[u32]) -> ReleaseInfo {
+        let mut r = ReleaseInfo::new(Protocol::Torrent, 1, "Idx");
+        r.title = title.into();
+        r.categories = categories.to_vec();
+        r
+    }
+
+    fn check(title: &str, categories: &[u32], t: &RadioTarget) -> Result<(), String> {
+        map_to_radio(&release(title, categories), &parse_radio(title), t)
+    }
+
+    #[test]
+    fn audiobook_and_mp3_categories_hold_radio() {
+        let t = wanted("rss", "ep-1");
+        // A wanted episode filed as Audio/Audiobook (MyAnonamouse's Radio categories) or
+        // Audio/MP3 is found.
+        for cats in [&[3000, 3030][..], &[3030], &[3010], &[3050], &[]] {
+            let r = release("The Unbelievable Truth S20E03 MP3", cats);
+            assert!(may_be_radio(&r), "{cats:?}");
+            assert!(check(&r.title, cats, &t).is_ok(), "{cats:?}");
+        }
+        // Unrelated audiobooks and music in the same categories are not the episode.
+        for (title, cats) in [
+            ("Stephen Fry - Mythos (Unabridged) 2017 MP3", &[3030][..]),
+            (
+                "Terry Pratchett - Guards! Guards! [BBC Radio Full Cast Drama] MP3",
+                &[3030],
+            ),
+            ("The Unbelievable Truth - The Complete Series 1-10", &[3030]),
+            ("Radiohead - OK Computer (1997) MP3 320", &[3010]),
+        ] {
+            assert!(check(title, cats, &t).is_err(), "{title}");
+        }
+        // Books and films are refused whatever the name says; lossless and video are not radio
+        // categories.
+        assert!(check("The Unbelievable Truth S20E03", &[7020], &t).is_err());
+        assert!(check("The Unbelievable Truth S20E03", &[2040], &t).is_err());
+        assert!(!may_be_radio(&release("x", &[3040])));
+        assert!(!may_be_radio(&release("x", &[3020])));
+        assert!(!may_be_radio(&release("x", &[7020])));
+    }
+
+    #[test]
+    fn bbc_programme_ids_in_audiobook_categories() {
+        let name = "The_Unbelievable_Truth_-_Series_20_Episode_3_b09zv5m0_original.m4a";
+        assert!(check(name, &[3030], &wanted("bbc", "b09zv5m0")).is_ok());
+        assert!(
+            check(name, &[3030], &wanted("bbc", "b09zv5m1"))
+                .unwrap_err()
+                .contains("BBC programme")
+        );
+    }
 }
