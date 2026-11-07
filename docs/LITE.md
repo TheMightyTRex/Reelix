@@ -51,7 +51,22 @@ left.
 2. tests the lite build;
 3. builds the image with the release in its version label (`org.opencontainers.image.version`, such as
    0.7.1), and checks it starts healthy, has ffprobe and carries that label;
-4. pushes the merged branch.
+4. pushes a new merge to a review branch, `lite-auto/<tag>` (such as `lite-auto/v0.8.7`), not to
+   `fork/lite`.
 
 A clash or failure pushes nothing, and GitHub emails the owner. It warns when upstream changes its own
-Dockerfile. The image is published only from a run started by hand with "publish" ticked.
+Dockerfile.
+
+Upstream's code (its build scripts, tests and Dockerfile) runs only in jobs with a read-only token and no
+secrets. Pushing and publishing happen in separate jobs that run no repository code, and the tag name is
+checked against `^v[0-9]+\.[0-9]+\.[0-9]+$` before any script uses it.
+
+To take in a new upstream release:
+
+1. Review `lite-auto/<tag>` (the run summary says when one is waiting).
+2. Merge it into `fork/lite`: `git merge --ff-only origin/lite-auto/<tag>`, then push `fork/lite`.
+3. Run the Lite workflow by hand with **publish** ticked.
+
+The image is published only from a run started by hand with "publish" ticked, and only for a release
+`fork/lite` already has: a run that would have to merge a new release first refuses to publish, so only
+reviewed code reaches `ghcr.io/themightytrex/reelix:lite`.
