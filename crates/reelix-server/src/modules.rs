@@ -48,6 +48,7 @@ pub struct Modules {
 
 impl Modules {
     pub async fn build(deps: Deps) -> anyhow::Result<Self> {
+        deps.config.warn_about_plain_http_metadata();
         // providers
         let providers = reelix_providers::ProviderService::new(
             deps.db.clone(),
