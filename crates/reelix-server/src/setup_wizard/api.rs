@@ -82,19 +82,22 @@ impl Api {
         .await
     }
 
-    /// Sends a file as the raw body, with the set-up code when there is one.
-    pub async fn post_bytes<T: DeserializeOwned>(
+    /// Sends a file as the raw body, read as it goes rather than loaded into memory first, with the
+    /// set-up code when there is one.
+    pub async fn post_file<T: DeserializeOwned>(
         &self,
         path: &str,
-        bytes: Vec<u8>,
+        file: tokio::fs::File,
+        len: u64,
         setup_code: &str,
     ) -> Result<T, ApiError> {
         let mut req = self
             .http
             .post(format!("{}{path}", self.base))
             .header(reqwest::header::CONTENT_TYPE, "application/zip")
+            .header(reqwest::header::CONTENT_LENGTH, len)
             .header(reelix_api_types::CSRF_HEADER, "1")
-            .body(bytes);
+            .body(reqwest::Body::from(file));
         if !setup_code.is_empty() {
             req = req.header("x-reelix-setup-token", setup_code);
         }
