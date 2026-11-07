@@ -11,6 +11,7 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 ### Added
 - **Films and series without a TMDB key.** With no TMDB key set, Reelix now uses open data instead of stopping: films from Wikidata (found by their TMDB or IMDb id) with the summary from Wikipedia, and series from TVmaze (found by their TVDB or IMDb id, or their TMDB id through Wikidata) with every season, episode and air date. Migrations from Radarr and Sonarr no longer skip the library. TMDB is still used when a key is set; posters for films, collections, people and discover feeds still need it. Data: Wikidata (CC0), Wikipedia and TVmaze (CC BY-SA 4.0).
 - **Small files in the library are no longer skipped as samples.** A library scan treated any video under 3 MB per minute of running time (and under 70 MB) as a sample, so older low-bitrate episodes and films (20 MB for a 22-minute episode) showed as missing. Files already in a library folder are now skipped only when their name or folder says "sample"; imports from downloads keep the size rule.
+- **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
 
 ## [0.8.6] - 2026-11-06
 
