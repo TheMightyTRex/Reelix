@@ -34,6 +34,7 @@ reelix-api.workspace = true
 reelix-api-types.workspace = true
 reelix-books.workspace = true
 reelix-core = { workspace = true, features = ["bus"] }
+reelix-decision.workspace = true
 reelix-db.workspace = true
 reelix-direct = { workspace = true, optional = true }
 reelix-jobs.workspace = true
@@ -49,14 +50,17 @@ reelix-notify.workspace = true
 reelix-parser.workspace = true
 reelix-providers.workspace = true
 reelix-requests.workspace = true
+qrcodegen.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+rpassword.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 tar.workspace = true
+terminal_size.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
@@ -67,6 +71,9 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 zip.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-service.workspace = true
