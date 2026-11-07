@@ -16,6 +16,8 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 ### Fixed
 - **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
 - **Other addresses for TMDB and TVDB.** `metadata.tmdb_base_url` and `metadata.tvdb_base_url` in `config.toml` (or `REELIX_TMDB_BASE_URL` and `REELIX_TVDB_BASE_URL`) point Reelix at a mirror, a caching proxy or a test stand-in. Until now only the test suite could change them.
+### Fixed
+- **Migration: a profile name used by another kind no longer fails.** Quality profile names are unique across films and series, music and books, so migrating Lidarr after Radarr failed on Lidarr's "Any" ("a quality profile named Any already exists") and skipped the artists using it. Such a profile is now created as "Any (Lidarr)", and the preview says so. When Reelix already has a profile of the same name and kind, the preview now says that Reelix's own is used and the app's changes to it aren't copied.
 
 ## [0.8.6] - 2026-11-06
 
