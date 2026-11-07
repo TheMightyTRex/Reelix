@@ -11,7 +11,7 @@ use reelix_parser::QualityFamily;
 
 use crate::error::{RadioError, Result};
 use crate::provider::{ProviderError, RadioProvider, SearchPrefs, ShowData, ShowFetch};
-use crate::repo::{self, shows::NewShow};
+use crate::repo::{self, batch::Batches, shows::NewShow};
 use crate::status::{episode_status, monitored_by_follow};
 use crate::{RadioService, entities, keys};
 
@@ -268,7 +268,7 @@ impl RadioService {
                 e.first_broadcast,
                 now,
             );
-            let status_changed = repo::episodes::set_status(&self.db, e.id, status).await?;
+            let status_changed = repo::episodes::set_status(self.db.pool(), e.id, status).await?;
             if flag_changed || status_changed {
                 any = true;
                 self.emit(entities::EPISODE, "updated", e.id);
@@ -296,6 +296,7 @@ impl RadioService {
         let show = repo::shows::require(&self.db, show_id).await?;
         let now = self.now();
         let mut changed = Vec::new();
+        let mut batch = Batches::new(&self.db);
         for e in repo::episodes::for_show(&self.db, show_id).await? {
             let s = episode_status(
                 e.file_id.is_some(),
@@ -304,10 +305,14 @@ impl RadioService {
                 e.first_broadcast,
                 now,
             );
-            if repo::episodes::set_status(&self.db, e.id, s).await? {
+            if repo::episodes::set_status(batch.conn().await?, e.id, s).await? {
                 changed.push(e.id);
-                self.emit(entities::EPISODE, "updated", e.id);
             }
+            batch.wrote().await?;
+        }
+        batch.commit().await?;
+        for id in &changed {
+            self.emit(entities::EPISODE, "updated", *id);
         }
         Ok(changed)
     }

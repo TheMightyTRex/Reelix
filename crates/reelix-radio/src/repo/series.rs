@@ -112,7 +112,7 @@ pub async fn mark_removed(db: &Db, ids: &[i64]) -> Result<()> {
 }
 
 /// A number Reelix gave (broadcast order).
-pub async fn set_derived_number(db: &Db, id: i64, number: u32) -> Result<()> {
+pub async fn set_derived_number<'e, E: sqlx::SqliteExecutor<'e>>(ex: E, id: i64, number: u32) -> Result<()> {
     sqlx::query(
         "UPDATE radio_series SET number = ?, number_source = 'broadcast_order', updated_at = ? \
          WHERE id = ? AND number_source = 'broadcast_order' AND number IS NOT ?",
@@ -121,7 +121,7 @@ pub async fn set_derived_number(db: &Db, id: i64, number: u32) -> Result<()> {
     .bind(now_ms())
     .bind(id)
     .bind(i64::from(number))
-    .execute(db.pool())
+    .execute(ex)
     .await?;
     Ok(())
 }

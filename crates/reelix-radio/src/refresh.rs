@@ -13,6 +13,7 @@ use reelix_api_types::radio::{RadioNumberSource, RadioSeriesKind};
 
 use crate::error::{RadioError, Result};
 use crate::provider::{SeriesData, ShowData, ShowFetch};
+use crate::repo::batch::Batches;
 use crate::status::{is_settled, monitored_by_follow};
 use crate::{RadioService, entities, repo};
 
@@ -148,23 +149,34 @@ impl RadioService {
             .collect();
         let mut seen: HashSet<&str> = HashSet::new();
         let mut added = 0;
+        let mut created = Vec::new();
+        let mut batch = Batches::new(&self.db);
         for e in &data.episodes {
             if !seen.insert(e.external_id.as_str()) {
                 continue; // feeds sometimes repeat an item
             }
             let series_id = series_ids[&e.series_external_id];
             match saved.get(&e.external_id) {
-                Some((eid, _)) => repo::episodes::update_from_source(&self.db, *eid, series_id, e).await?,
+                Some((eid, _)) => {
+                    repo::episodes::update_from_source(batch.conn().await?, *eid, series_id, e).await?;
+                }
                 None => {
                     let monitored =
                         monitored_by_follow(show.follow, show.followed_at, e.first_broadcast, !initial);
-                    let eid = repo::episodes::insert(&self.db, id, series_id, e, monitored).await?;
+                    let eid =
+                        repo::episodes::insert(batch.conn().await?, id, series_id, e, monitored).await?;
                     added += 1;
                     if !initial {
-                        self.emit(entities::EPISODE, "created", eid);
+                        created.push(eid);
                     }
                 }
             }
+            batch.wrote().await?;
+        }
+        batch.commit().await?;
+        // Announced once saved, so a listener that reads the episode finds it.
+        for eid in created {
+            self.emit(entities::EPISODE, "created", eid);
         }
         if data.complete {
             let gone: Vec<i64> = saved
@@ -207,12 +219,14 @@ impl RadioService {
             .map(|s| (first_of(s.id), s.id))
             .collect();
         todo.sort_by_key(|(first, sid)| (first.is_none(), *first, *sid));
+        let mut batch = Batches::new(&self.db);
         let mut next = 1;
         for (_, sid) in todo {
             while used.contains(&next) {
                 next += 1;
             }
-            repo::series::set_derived_number(&self.db, sid, next).await?;
+            repo::series::set_derived_number(batch.conn().await?, sid, next).await?;
+            batch.wrote().await?;
             used.insert(next);
         }
 
@@ -233,10 +247,12 @@ impl RadioService {
                 while used.contains(&next) {
                     next += 1;
                 }
-                repo::episodes::set_derived_number(&self.db, e.id, next).await?;
+                repo::episodes::set_derived_number(batch.conn().await?, e.id, next).await?;
+                batch.wrote().await?;
                 used.insert(next);
             }
         }
+        batch.commit().await?;
         Ok(())
     }
 

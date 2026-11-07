@@ -1,5 +1,6 @@
 //! Radio repositories (runtime `sqlx` queries over [`reelix_db::Db`]).
 
+pub mod batch;
 pub mod episodes;
 pub mod files;
 pub mod series;
