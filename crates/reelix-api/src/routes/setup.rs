@@ -295,21 +295,21 @@ mod tests {
             "[::1]:7700",
             "[::1]",
             "192.168.1.10:7700",
-            "t-rex-server:7700",
+            "media-box:7700",
         ] {
-            assert!(host_allowed(ok, Some("t-rex-server")), "{ok}");
+            assert!(host_allowed(ok, Some("media-box")), "{ok}");
         }
         for bad in [
             "attacker.example:7700",
             "attacker.example",
             "localhost.attacker.example",
-            "t-rex-server.attacker.example",
+            "media-box.attacker.example",
             "[::1",
             "[::1]x",
             "",
         ] {
-            assert!(!host_allowed(bad, Some("t-rex-server")), "{bad}");
+            assert!(!host_allowed(bad, Some("media-box")), "{bad}");
         }
-        assert!(!host_allowed("t-rex-server", None));
+        assert!(!host_allowed("media-box", None));
     }
 }
