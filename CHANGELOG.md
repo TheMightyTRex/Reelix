@@ -6,14 +6,14 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
-### Fixed
-- **Reelix starts when its data folder is on a mergerfs pool or another file system without shared memory.** It stopped at once with "migration error ... (code: 5386) disk I/O error", because SQLite's write-ahead log needs a memory-mapped `-shm` file, and mergerfs with `cache.files=off` (its default) cannot map one. Reelix now falls back to a rollback journal and logs a warning. A local disk is still faster.
 ### Added
 - **Films and series without a TMDB key.** With no TMDB key set, Reelix now uses open data instead of stopping: films from Wikidata (found by their TMDB or IMDb id) with the summary from Wikipedia, and series from TVmaze (found by their TVDB or IMDb id, or their TMDB id through Wikidata) with every season, episode and air date. Migrations from Radarr and Sonarr no longer skip the library. TMDB is still used when a key is set; posters for films, collections, people and discover feeds still need it. Data: Wikidata (CC0), Wikipedia and TVmaze (CC BY-SA 4.0).
+- **Other addresses for TMDB and TVDB.** `metadata.tmdb_base_url` and `metadata.tvdb_base_url` in `config.toml` (or `REELIX_TMDB_BASE_URL` and `REELIX_TVDB_BASE_URL`) point Reelix at a mirror, a caching proxy or a test stand-in. Until now only the test suite could change them.
+
+### Fixed
+- **Reelix starts when its data folder is on a mergerfs pool or another file system without shared memory.** It stopped at once with "migration error ... (code: 5386) disk I/O error", because SQLite's write-ahead log needs a memory-mapped `-shm` file, and mergerfs with `cache.files=off` (its default) cannot map one. Reelix now falls back to a rollback journal and logs a warning. A local disk is still faster.
 - **Small files in the library are no longer skipped as samples.** A library scan treated any video under 3 MB per minute of running time (and under 70 MB) as a sample, so older low-bitrate episodes and films (20 MB for a 22-minute episode) showed as missing. Files already in a library folder are now skipped only when their name or folder says "sample"; imports from downloads keep the size rule.
 - **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
-### Added
-- **Other addresses for TMDB and TVDB.** `metadata.tmdb_base_url` and `metadata.tvdb_base_url` in `config.toml` (or `REELIX_TMDB_BASE_URL` and `REELIX_TVDB_BASE_URL`) point Reelix at a mirror, a caching proxy or a test stand-in. Until now only the test suite could change them.
 - **Migration: a profile name used by another kind no longer fails.** Quality profile names are unique across films and series, music and books, so migrating Lidarr after Radarr failed on Lidarr's "Any" ("a quality profile named Any already exists") and skipped the artists using it. Such a profile is now created as "Any (Lidarr)", and the preview says so. When Reelix already has a profile of the same name and kind, the preview now says that Reelix's own is used and the app's changes to it aren't copied.
 
 ## [0.8.6] - 2026-11-06
