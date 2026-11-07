@@ -457,6 +457,9 @@ async fn small_files_already_in_the_library_are_not_samples() {
     assert_eq!(r.added, 1, "{r:?}");
     let m2 = e.svc.get_movie(m.id).await.unwrap();
     assert!(m2.movie_file.unwrap().file.path.ends_with("SDTV.wmv"));
+}
+
+#[tokio::test]
 async fn a_series_the_source_cannot_find_by_tmdb_id_is_found_by_tvdb_and_not_deleted() {
     // Open data (no TMDB key) can't always turn a TMDB id into a show; the TVDB id is tried next,
     // the known TMDB id is kept, and a refresh doesn't mark the series deleted.
