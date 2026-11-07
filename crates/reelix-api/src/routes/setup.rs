@@ -32,8 +32,67 @@ pub async fn require_setup_token(state: AppState) -> ApiResult<AppState> {
 }
 
 /// Whether `meta` must present the setup token.
+///
+/// A request from the server itself needs no code, but only when its `Host` is a name for this
+/// computer. A page on another site can point its own name at 127.0.0.1 (DNS rebinding) and then
+/// send any header it likes from the browser on the server; its `Host` is still its own name, so
+/// such a request must give the code like any other. Requests from other computers (including
+/// Docker's bridge, a reverse proxy and the host's own LAN address) always need the code, so any
+/// `Host` is accepted from them.
 fn token_required(state: &AppState, meta: &RequestMeta) -> bool {
-    state.inner.setup_token.is_some() && !meta.is_local()
+    state.inner.setup_token.is_some() && !(meta.is_local() && host_is_this_computer(&meta.headers))
+}
+
+/// Whether the `Host` header names this computer: `localhost` or a name under `.localhost`, an IP
+/// address (a rebinding page cannot use one), or this computer's own name, which Debian points at
+/// 127.0.1.1. No `Host` at all is accepted too: every browser sends one.
+fn host_is_this_computer(headers: &HeaderMap) -> bool {
+    let Some(host) = headers.get(header::HOST) else {
+        return true;
+    };
+    let Ok(host) = host.to_str() else {
+        return false;
+    };
+    host_allowed(host, own_hostname().as_deref())
+}
+
+/// [`host_is_this_computer`] for one `Host` value, with this computer's name (if known).
+fn host_allowed(host: &str, own_name: Option<&str>) -> bool {
+    let host = host.trim().trim_end_matches('.');
+    // Without the port: "[::1]:7700", "127.0.0.1:7700", "localhost:7700".
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        match rest.split_once(']') {
+            Some((inside, port)) if port.is_empty() || port.starts_with(':') => {
+                return inside.parse::<std::net::Ipv6Addr>().is_ok();
+            }
+            _ => return false,
+        }
+    } else {
+        match host.rsplit_once(':') {
+            Some((name, port)) if port.chars().all(|c| c.is_ascii_digit()) => name,
+            _ => host,
+        }
+    };
+    let name = name.trim_end_matches('.').to_ascii_lowercase();
+    if name.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    if name == "localhost" || name.ends_with(".localhost") {
+        return true;
+    }
+    own_name.is_some_and(|own| {
+        let own = own.trim().trim_end_matches('.').to_ascii_lowercase();
+        !own.is_empty() && name == own
+    })
+}
+
+/// This computer's name, from the kernel (Linux) or `HOSTNAME`.
+fn own_hostname() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .map(|h| h.trim().to_owned())
+        .filter(|h| !h.is_empty())
 }
 
 /// Whether first-run setup is still required.
@@ -117,6 +176,19 @@ fn token_matches(state: &AppState, given: Option<&str>) -> bool {
 }
 
 fn wrong_token(meta: &RequestMeta) -> ApiError {
+    if meta.is_local() && !host_is_this_computer(&meta.headers) {
+        tracing::warn!(
+            ip = ?meta.ip,
+            host = ?meta.headers.get(header::HOST),
+            "first-run setup refused: the address is not a name for this computer"
+        );
+        return ApiError::Validation {
+            status: StatusCode::FORBIDDEN,
+            message: "open Reelix at http://localhost to set it up from this computer, or enter the \
+                      setup token printed in the server log"
+                .into(),
+        };
+    }
     tracing::warn!(ip = ?meta.ip, "first-run setup attempted without a valid setup token");
     ApiError::Validation {
         status: StatusCode::FORBIDDEN,
@@ -204,5 +276,40 @@ fn validate_email(e: &str) -> ApiResult<()> {
         Ok(())
     } else {
         Err(ApiError::validation("email address is invalid"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_allowed;
+
+    #[test]
+    fn only_names_for_this_computer_skip_the_setup_code() {
+        for ok in [
+            "localhost",
+            "localhost:7700",
+            "LOCALHOST.",
+            "reelix.localhost:7700",
+            "127.0.0.1:7700",
+            "127.0.1.1",
+            "[::1]:7700",
+            "[::1]",
+            "192.168.1.10:7700",
+            "t-rex-server:7700",
+        ] {
+            assert!(host_allowed(ok, Some("t-rex-server")), "{ok}");
+        }
+        for bad in [
+            "attacker.example:7700",
+            "attacker.example",
+            "localhost.attacker.example",
+            "t-rex-server.attacker.example",
+            "[::1",
+            "[::1]x",
+            "",
+        ] {
+            assert!(!host_allowed(bad, Some("t-rex-server")), "{bad}");
+        }
+        assert!(!host_allowed("t-rex-server", None));
     }
 }
