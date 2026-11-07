@@ -13,6 +13,14 @@ switched off and a slimmer image. It is not part of upstream Reelix.
 
 Build it: `docker build -f docker/Dockerfile.lite -t reelix:lite .`
 
+## How Starboard uses it
+
+Starboard's Install apps offers three installs (7 November 2026). **Basics** uses this lite image; **Full install**
+and **Everything** use the full image below, and fall back to Lite when it cannot be downloaded. Settings, Your install
+in Starboard switches between them either way, keeping Reelix's settings folder. Starboard sets Reelix up over its
+API: the admin account, a manager key for itself, the library folders, qBittorrent and NZBGet (the default Usenet
+app; SABnzbd is a choice in Full install and Everything).
+
 ## The full image, for Starboard
 
 Starboard offers the lite image by default and the full version as a choice. A run of the Lite workflow started by
