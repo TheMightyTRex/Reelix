@@ -16,6 +16,10 @@ on:
         description: "Publish ghcr.io/themightytrex/reelix:lite after the checks pass"
         type: boolean
         default: false
+      publish_full:
+        description: "Also publish the full image from the fork's main branch (upstream's Dockerfile, with the fork's fixes) as ghcr.io/themightytrex/reelix:full"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -78,6 +82,7 @@ jobs:
           done
           docker inspect -f '{{.State.Health.Status}}' lite | grep -qx healthy
           docker exec lite ffprobe -version | head -1
+          docker exec lite ffmpeg -hide_banner -muxers | grep -q matroska
           test "$(docker image inspect reelix:lite --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "${tag#v}"
           sleep 60
           {
@@ -98,5 +103,26 @@ jobs:
           tag="${{ steps.merge.outputs.tag }}"
           for t in lite "${tag#v}-lite"; do
             docker tag reelix:lite "ghcr.io/themightytrex/reelix:$t"
+            docker push "ghcr.io/themightytrex/reelix:$t"
+          done
+
+      # The full version for Starboard's second Reelix choice (7 November 2026): the fork's main branch, which is
+      # upstream plus the fork's fixes waiting in upstream pull requests, built with upstream's own docker/Dockerfile
+      # (YouTube and Spotify downloads included). So Lite and the full version carry the same fixes.
+      - name: Publish the full image
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_full
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          git fetch --quiet origin master
+          git worktree add --detach ../fork-main origin/master
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' ../fork-main/Cargo.toml | head -1)
+          docker build -f ../fork-main/docker/Dockerfile -t reelix:full ../fork-main
+          docker run -d --name full -e PUID=1000 -e PGID=1000 reelix:full
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' full)" = healthy ] && break; sleep 5
+          done
+          docker inspect -f '{{.State.Health.Status}}' full | grep -qx healthy
+          for t in full "${version}-full"; do
+            docker tag reelix:full "ghcr.io/themightytrex/reelix:$t"
             docker push "ghcr.io/themightytrex/reelix:$t"
           done
