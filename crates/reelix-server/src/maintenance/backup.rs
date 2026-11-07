@@ -745,9 +745,9 @@ mod tests {
         assert_eq!(doc["security"]["secret_key_file"].as_str(), Some("/data/k"));
 
         // A backup's TMDB address does not replace this server's.
-        let current = "[metadata]\ntmdb_base_url = \"https://api.themoviedb.org/3\"\n";
-        let restored = "[metadata]\ntmdb_base_url = \"http://elsewhere.example/3\"\n";
-        let (merged, kept) = merge_restored_config(Some(current), restored).unwrap();
+        let ours = "[metadata]\ntmdb_base_url = \"https://api.themoviedb.org/3\"\n";
+        let theirs = "[metadata]\ntmdb_base_url = \"http://elsewhere.example/3\"\n";
+        let (merged, kept) = merge_restored_config(Some(ours), theirs).unwrap();
         assert_eq!(kept, ["metadata.tmdb_base_url"]);
         assert!(!merged.contains("elsewhere"), "{merged}");
 
