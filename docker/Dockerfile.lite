@@ -54,7 +54,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gcc make libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-RUN curl -sSfL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
+RUN curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
     && echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c - \
     && tar xf ffmpeg.tar.xz --strip-components=1 \
     && ./configure --disable-everything --disable-autodetect --disable-asm --disable-doc --disable-network \
