@@ -13,6 +13,8 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 - **Reelix starts when its data folder is on a mergerfs pool or another file system without shared memory.** It stopped at once with "migration error ... (code: 5386) disk I/O error", because SQLite's write-ahead log needs a memory-mapped `-shm` file, and mergerfs with `cache.files=off` (its default) cannot map one. Reelix now falls back to a rollback journal and logs a warning. A local disk is still faster.
 ### Fixed
 - **Small files in the library are no longer skipped as samples.** A library scan treated any video under 3 MB per minute of running time (and under 70 MB) as a sample, so older low-bitrate episodes and films (20 MB for a 22-minute episode) showed as missing. Files already in a library folder are now skipped only when their name or folder says "sample"; imports from downloads keep the size rule.
+### Fixed
+- **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
 
 ## [0.8.6] - 2026-11-06
 
