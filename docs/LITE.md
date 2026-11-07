@@ -15,10 +15,10 @@ Build it: `docker build -f docker/Dockerfile.lite -t reelix:lite .`
 
 ## The full image, for Starboard
 
-Starboard offers the lite image by default and the full version as a choice. It uses upstream's own image,
-`ghcr.io/demonzoned/reelix:latest`, when that can be downloaded without signing in. Until then, a run of the Lite
-workflow started by hand with **publish_full** ticked publishes upstream's release, built from upstream's own
-`docker/Dockerfile` with nothing from this branch, as `ghcr.io/themightytrex/reelix:full`.
+Starboard offers the lite image by default and the full version as a choice. A run of the Lite workflow started by
+hand with **publish_full** ticked builds the fork's main branch (upstream plus the fork's fixes waiting in upstream
+pull requests) with upstream's own `docker/Dockerfile`, so it has YouTube and Spotify downloads, and publishes it as
+`ghcr.io/themightytrex/reelix:full`. Lite and the full version then carry the same fixes.
 
 ## What differs from upstream
 
