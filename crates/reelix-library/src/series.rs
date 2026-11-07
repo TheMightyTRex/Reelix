@@ -12,7 +12,7 @@ use reelix_api_types::library::{
 use reelix_core::{ContentKind, MediaKind};
 use reelix_db::NewJob;
 use reelix_import::naming::SeriesNaming;
-use reelix_metadata::{ExternalSource, SeriesExternalId, SeriesMetadata};
+use reelix_metadata::{ExternalSource, MetaError, SeriesExternalId, SeriesMetadata};
 
 use crate::content_roots;
 use crate::convert::{images, ratings, series_status, year_u16};
@@ -223,7 +223,7 @@ impl LibraryService {
             }
             (None, None) => return Err(LibraryError::validation("tmdb_id or tvdb_id is required")),
         };
-        let meta = self.metadata.series(ext).await?;
+        let meta = series_metadata(self.metadata.as_ref(), ext, req.tvdb_id).await?;
         let Some(tmdb_id) = meta.tmdb_id else {
             return Err(LibraryError::validation("metadata has no TMDB id"));
         };
@@ -620,5 +620,23 @@ pub(crate) fn series_hit(m: &SeriesMetadata) -> reelix_metadata::SearchHit {
         vote_count: m.ratings.vote_count,
         popularity: m.ratings.popularity,
         adult: false,
+    }
+}
+
+/// A series' metadata by `ext`. When that is a TMDB id the source has no answer for (open data
+/// without a Wikidata link), the TVDB id is tried next and the TMDB id kept.
+pub(crate) async fn series_metadata(
+    metadata: &dyn crate::MetadataSource,
+    ext: SeriesExternalId,
+    tvdb: Option<u32>,
+) -> std::result::Result<SeriesMetadata, MetaError> {
+    match (metadata.series(ext.clone()).await, ext, tvdb) {
+        (Err(MetaError::NotFound | MetaError::Unsupported(_)), SeriesExternalId::Tmdb(t), Some(tv)) => {
+            let mut m = metadata.series(SeriesExternalId::Tvdb(tv)).await?;
+            m.tmdb_id.get_or_insert(t);
+            m.external_ids.tmdb.get_or_insert(t);
+            Ok(m)
+        }
+        (result, _, _) => result,
     }
 }

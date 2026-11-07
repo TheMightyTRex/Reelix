@@ -240,8 +240,18 @@ impl OpenData {
         })
     }
 
-    /// A film by its TMDB id.
+    /// A film by its TMDB id. A film open data does not have is `Unsupported`, not `NotFound`:
+    /// refreshing treats `NotFound` as "removed from TMDB" and would mark the film as deleted.
     pub async fn movie(&self, tmdb_id: TmdbId) -> Result<MovieMetadata, MetaError> {
+        self.movie_lookup(tmdb_id).await.map_err(|e| {
+            unlisted(
+                e,
+                "this film is not on Wikidata; add a TMDB key in Settings → Metadata",
+            )
+        })
+    }
+
+    async fn movie_lookup(&self, tmdb_id: TmdbId) -> Result<MovieMetadata, MetaError> {
         let rows = self
             .sparql(self.film_query(&format!(r#"?item wdt:P4947 "{tmdb_id}"."#), 50))
             .await?;
@@ -432,6 +442,12 @@ impl OpenData {
     /// A series with every season and episode. Specials (TVmaze episodes with no number) become
     /// season 0, numbered in air date order.
     pub async fn series(&self, id: SeriesExternalId) -> Result<SeriesMetadata, MetaError> {
+        self.series_lookup(id).await.map_err(|e| {
+            unlisted(e, "this series is not on TVmaze, or has no TMDB link on Wikidata; add a TMDB key in Settings → Metadata")
+        })
+    }
+
+    async fn series_lookup(&self, id: SeriesExternalId) -> Result<SeriesMetadata, MetaError> {
         let (show, tmdb_id) = self.show(&id).await?;
         let show_id = show
             .get("id")
@@ -688,6 +704,14 @@ impl OpenData {
     }
 }
 
+/// `NotFound` from open data means "not listed there", not "deleted": see [`OpenData::movie`].
+fn unlisted(e: MetaError, why: &'static str) -> MetaError {
+    match e {
+        MetaError::NotFound => MetaError::Unsupported(why),
+        other => other,
+    }
+}
+
 fn str_of(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(String::from)
 }
@@ -856,7 +880,11 @@ mod tests {
             )
             .mount(&server)
             .await;
-        assert!(matches!(client(&server).movie(1).await, Err(MetaError::NotFound)));
+        // Not "not found": a refresh would take that as removed from TMDB and mark the film deleted.
+        assert!(matches!(
+            client(&server).movie(1).await,
+            Err(MetaError::Unsupported(_))
+        ));
     }
 
     fn show() -> Value {
