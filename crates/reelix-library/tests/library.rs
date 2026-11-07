@@ -445,6 +445,18 @@ async fn add_movie_list_edit_and_conflicts() {
 }
 
 #[tokio::test]
+async fn small_files_already_in_the_library_are_not_samples() {
+    // An old low-bitrate copy (15 MB for a 136-minute film) is the film's file; a file named as a
+    // sample still is not.
+    let e = env().await;
+    let m = e.svc.add_movie(add_movie_req(&e, 603)).await.unwrap();
+    let folder = Path::new(&m.path);
+    write(&folder.join("The Matrix (1999) SDTV.wmv"), 15);
+    write(&folder.join("The Matrix (1999) sample.mkv"), 1);
+    let r = e.svc.scan_movie(m.id).await.unwrap();
+    assert_eq!(r.added, 1, "{r:?}");
+    let m2 = e.svc.get_movie(m.id).await.unwrap();
+    assert!(m2.movie_file.unwrap().file.path.ends_with("SDTV.wmv"));
 async fn a_series_the_source_cannot_find_by_tmdb_id_is_found_by_tvdb_and_not_deleted() {
     // Open data (no TMDB key) can't always turn a TMDB id into a show; the TVDB id is tried next,
     // the known TMDB id is kept, and a refresh doesn't mark the series deleted.
