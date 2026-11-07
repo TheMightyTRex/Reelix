@@ -331,14 +331,17 @@ impl<'a> Engine<'a> {
                     MigrateCategory::QualityProfile,
                     &p.name,
                     MigrateAction::Existing,
-                    None,
+                    Some(format!(
+                        "Reelix's profile of this name is used; changes made to it in {} aren't copied",
+                        kind.label()
+                    )),
                 );
                 continue;
             }
             if !self.creates(MigrateCategory::QualityProfile) {
                 continue;
             }
-            let (profile, unmapped) = match quality::convert(kind, p) {
+            let (mut profile, unmapped) = match quality::convert(kind, p) {
                 Ok(v) => v,
                 Err(why) => {
                     self.skip(key, MigrateCategory::QualityProfile, &p.name, why);
@@ -346,6 +349,21 @@ impl<'a> Engine<'a> {
                 }
             };
             let mut detail = Vec::new();
+            // Profile names are unique across every kind (films and series, music, books): a
+            // music profile "Any" from Lidarr can't share the name of Radarr's "Any".
+            let taken = repo
+                .list_all()
+                .await
+                .map_err(err)?
+                .iter()
+                .any(|e| e.name.eq_ignore_ascii_case(&profile.name));
+            if taken {
+                profile.name = format!("{} ({})", p.name, kind.label());
+                detail.push(format!(
+                    "named \"{}\": a profile of another kind already uses \"{}\"",
+                    profile.name, p.name
+                ));
+            }
             if !unmapped.is_empty() {
                 detail.push(format!("no Reelix equivalent for {}", unmapped.join(", ")));
             }
