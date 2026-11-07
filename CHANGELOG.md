@@ -15,6 +15,7 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 - **Small files in the library are no longer skipped as samples.** A library scan treated any video under 3 MB per minute of running time (and under 70 MB) as a sample, so older low-bitrate episodes and films (20 MB for a 22-minute episode) showed as missing. Files already in a library folder are now skipped only when their name or folder says "sample"; imports from downloads keep the size rule.
 ### Fixed
 - **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
+- **Other addresses for TMDB and TVDB.** `metadata.tmdb_base_url` and `metadata.tvdb_base_url` in `config.toml` (or `REELIX_TMDB_BASE_URL` and `REELIX_TVDB_BASE_URL`) point Reelix at a mirror, a caching proxy or a test stand-in. Until now only the test suite could change them.
 
 ## [0.8.6] - 2026-11-06
 
