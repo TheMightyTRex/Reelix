@@ -1,10 +1,15 @@
 # Keeps the fork's lite version in step with upstream (TheMightyTRex/Reelix, 4 November 2026).
 #
-# Every day, and by hand: merge upstream's newest release tag into fork/lite, test the lite build, build
+# Every day, and by hand: merge upstream's newest release tag onto fork/lite, test the lite build, build
 # docker/Dockerfile.lite, start it and check it answers and has ffprobe. A merge clash or a failed check stops
 # the run, and GitHub emails the owner about the failed run; nothing is pushed or published.
 #
-# Publishing ghcr.io/themightytrex/reelix:lite happens only on a run started by hand with "publish" ticked.
+# Security (7 November 2026): upstream's code (build scripts, tests, Dockerfile) only runs in the "check" and
+# "full" jobs, which have a read-only token, no secrets and no stored git credentials. A new upstream merge is
+# pushed to a review branch, lite-auto/<tag>, never straight to fork/lite; the owner reviews it and merges it
+# into fork/lite by hand. Publishing happens only on a run started by hand with "publish" ticked, and only for
+# a release fork/lite already has, so only reviewed code is published. Upstream chooses tag names, so the tag
+# is checked against ^v[0-9]+\.[0-9]+\.[0-9]+$ and only reaches scripts through env:.
 name: Lite
 
 on:
@@ -13,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish ghcr.io/themightytrex/reelix:lite after the checks pass"
+        description: "Publish ghcr.io/themightytrex/reelix:lite after the checks pass (only a release fork/lite already has)"
         type: boolean
         default: false
       publish_full:
@@ -22,26 +27,30 @@ on:
         default: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 concurrency:
   group: lite
   cancel-in-progress: false
 
 jobs:
-  update:
+  # Runs upstream's code: read-only token, no secrets.
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.merge.outputs.tag }}
+      changed: ${{ steps.merge.outputs.changed }}
+      base: ${{ steps.merge.outputs.base }}
+      tree: ${{ steps.merge.outputs.tree }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: fork/lite
           fetch-depth: 0
-          # Upstream releases sometimes change its own workflow files, and GitHub only lets a token with the
-          # "workflows" permission push those. Add a fine-grained token as the LITE_PUSH_TOKEN secret (this
-          # repository; Contents and Workflows: read and write). Without it, such a merge cannot be pushed.
-          token: ${{ secrets.LITE_PUSH_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Merge upstream's newest release
         id: merge
@@ -50,21 +59,27 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/demonzoned/Reelix.git
           git fetch --quiet upstream --tags
-          tag=$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)
+          # Only plain release tags: a crafted tag name must never run as code.
+          tag=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::No upstream release tag of the form v1.2.3 was found."; exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor "$tag" HEAD; then
             echo "Already has $tag"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           prev=$(git describe --tags --abbrev=0 --match 'v*.*.*' HEAD 2>/dev/null || true)
           git merge --no-edit "$tag" -m "Merge upstream $tag into fork/lite"
           echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           # Upstream's runtime image may have gained a tool the lite image also needs.
           if [ -n "$prev" ] && ! git diff --quiet "$prev" "$tag" -- docker/Dockerfile docker/entrypoint.sh; then
             echo "::warning::Upstream changed docker/Dockerfile or entrypoint.sh between $prev and $tag. Check Dockerfile.lite still has what it needs."
             git diff --stat "$prev" "$tag" -- docker/ >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       - name: Test the lite build
         run: |
@@ -73,9 +88,10 @@ jobs:
           cargo test --locked -p reelix-api --no-default-features
 
       - name: Build and check the lite image
+        env:
+          TAG: ${{ steps.merge.outputs.tag }}
         run: |
-          tag="${{ steps.merge.outputs.tag }}"
-          docker build -f docker/Dockerfile.lite --build-arg VERSION="${tag#v}" -t reelix:lite .
+          docker build -f docker/Dockerfile.lite --build-arg VERSION="${TAG#v}" -t reelix:lite .
           docker run -d --name lite -e PUID=1000 -e PGID=1000 reelix:lite
           for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' lite)" = healthy ] && break; sleep 5
@@ -83,46 +99,164 @@ jobs:
           docker inspect -f '{{.State.Health.Status}}' lite | grep -qx healthy
           docker exec lite ffprobe -version | head -1
           docker exec lite ffmpeg -hide_banner -muxers | grep -q matroska
-          test "$(docker image inspect reelix:lite --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "${tag#v}"
+          test "$(docker image inspect reelix:lite --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "${TAG#v}"
           sleep 60
           {
             echo "### Lite image"
-            echo "- Upstream: ${{ steps.merge.outputs.tag }}"
+            echo "- Upstream: $TAG"
             echo "- Size: $(docker image inspect reelix:lite --format '{{.Size}}' | awk '{printf "%.0f MB", $1/1e6}')"
             echo "- Idle: $(docker stats --no-stream --format '{{.MemUsage}}, {{.CPUPerc}} processor' lite)"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Push the merged branch
-        if: steps.merge.outputs.changed == 'true'
-        run: git push origin HEAD:fork/lite
+      # Only a release fork/lite already has is kept for publishing: a new merge waits for review.
+      - name: Save the lite image for publishing
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && steps.merge.outputs.changed == 'false'
+        run: docker save reelix:lite | gzip > lite-image.tar.gz
 
-      - name: Publish the image
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          tag="${{ steps.merge.outputs.tag }}"
-          for t in lite "${tag#v}-lite"; do
-            docker tag reelix:lite "ghcr.io/themightytrex/reelix:$t"
-            docker push "ghcr.io/themightytrex/reelix:$t"
-          done
+      - if: github.event_name == 'workflow_dispatch' && inputs.publish && steps.merge.outputs.changed == 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lite-image
+          path: lite-image.tar.gz
+          retention-days: 1
 
-      # The full version for Starboard's second Reelix choice (7 November 2026): the fork's main branch, which is
-      # upstream plus the fork's fixes waiting in upstream pull requests, built with upstream's own docker/Dockerfile
-      # (YouTube and Spotify downloads included). So Lite and the full version carry the same fixes.
-      - name: Publish the full image
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_full
+  # The full version for Starboard's second Reelix choice (7 November 2026): the fork's main branch, which is
+  # upstream plus the fork's fixes waiting in upstream pull requests, built with upstream's own docker/Dockerfile
+  # (YouTube and Spotify downloads included). So Lite and the full version carry the same fixes. It is a job of
+  # its own, on a fresh runner, so nothing an unreviewed upstream merge ran in the check job can touch it.
+  full:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_full
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          persist-credentials: false
+
+      - name: Build and check the full image
+        id: build
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          git fetch --quiet origin master
-          git worktree add --detach ../fork-main origin/master
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' ../fork-main/Cargo.toml | head -1)
-          docker build -f ../fork-main/docker/Dockerfile -t reelix:full ../fork-main
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Unexpected version in Cargo.toml."; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          docker build -f docker/Dockerfile -t reelix:full .
           docker run -d --name full -e PUID=1000 -e PGID=1000 reelix:full
           for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' full)" = healthy ] && break; sleep 5
           done
           docker inspect -f '{{.State.Health.Status}}' full | grep -qx healthy
-          for t in full "${version}-full"; do
+          docker save reelix:full | gzip > full-image.tar.gz
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: full-image
+          path: full-image.tar.gz
+          retention-days: 1
+
+  # Pushes a new upstream merge to a review branch. It runs no repository code: it repeats the merge (git only)
+  # and checks that it gives the tree the check job tested.
+  push:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.check.outputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push the merge to a review branch
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+          TREE: ${{ needs.check.outputs.tree }}
+          # Upstream releases sometimes change its own workflow files, and GitHub only lets a token with the
+          # "workflows" permission push those. Add a fine-grained token as the LITE_PUSH_TOKEN secret (this
+          # repository; Contents and Workflows: read and write). Without it, such a merge cannot be pushed.
+          PUSH_TOKEN: ${{ secrets.LITE_PUSH_TOKEN || github.token }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Unexpected tag name."; exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --quiet https://github.com/demonzoned/Reelix.git "refs/tags/$TAG:refs/tags/$TAG"
+          git merge --no-edit "$TAG" -m "Merge upstream $TAG into fork/lite"
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "$TREE" ]; then
+            echo "::error::The merge differs from the one the check job tested, so nothing was pushed."; exit 1
+          fi
+          branch="lite-auto/$TAG"
+          git push --force "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
+          echo "::warning::Upstream $TAG is merged on $branch for review. Check it, merge it into fork/lite, then run this workflow with publish ticked."
+          {
+            echo "### Waiting for review"
+            echo "- Upstream $TAG is merged and tested on \`$branch\`."
+            echo "- Review it, merge it into \`fork/lite\` (git merge --ff-only), then run this workflow with publish ticked."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Pushes the images the check and full jobs built and saved. It runs no repository code.
+  publish:
+    needs: [check, full]
+    if: >-
+      !cancelled() && github.event_name == 'workflow_dispatch' && (inputs.publish || inputs.publish_full)
+      && needs.check.result == 'success' && (needs.full.result == 'success' || needs.full.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      packages: write
+    steps:
+      - name: Refuse a release fork/lite does not have yet
+        if: inputs.publish && needs.check.outputs.changed == 'true'
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          echo "::error::Upstream $TAG is not on fork/lite yet. Review lite-auto/$TAG, merge it into fork/lite, then run this again."
+          exit 1
+
+      - name: Log in to the GitHub container registry
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - if: inputs.publish
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lite-image
+
+      - name: Publish the lite image
+        if: inputs.publish
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          gunzip -c lite-image.tar.gz | docker load
+          for t in lite "${TAG#v}-lite"; do
+            docker tag reelix:lite "ghcr.io/themightytrex/reelix:$t"
+            docker push "ghcr.io/themightytrex/reelix:$t"
+          done
+
+      - if: inputs.publish_full
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: full-image
+
+      - name: Publish the full image
+        if: inputs.publish_full
+        env:
+          VERSION: ${{ needs.full.outputs.version }}
+        run: |
+          gunzip -c full-image.tar.gz | docker load
+          for t in full "${VERSION}-full"; do
             docker tag reelix:full "ghcr.io/themightytrex/reelix:$t"
             docker push "ghcr.io/themightytrex/reelix:$t"
           done
