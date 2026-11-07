@@ -60,8 +60,8 @@ RUN set -eu; \
     esac; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl unzip; \
-    curl -fsSL --retry 3 -o /usr/local/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${ytdlp}"; \
-    curl -fsSL --retry 3 -o /tmp/deno.zip "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${deno}.zip"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /usr/local/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${ytdlp}"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /tmp/deno.zip "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${deno}.zip"; \
     printf '%s  %s\n' "${ytdlp_sha}" /usr/local/bin/yt-dlp "${deno_sha}" /tmp/deno.zip | sha256sum -c -; \
     unzip -q /tmp/deno.zip -d /usr/local/bin; \
     rm /tmp/deno.zip; \
