@@ -993,18 +993,29 @@ impl Wizard {
             "",
             None,
         ));
-        let bytes = match std::fs::read(path.trim()) {
-            Ok(b) => b,
+        // The file is sent as it is read: a backup can be up to 2 GiB, too much to hold in memory.
+        let opened = self.rt.block_on(async {
+            let file = tokio::fs::File::open(path.trim()).await?;
+            let len = file.metadata().await?.len();
+            Ok::<_, std::io::Error>((file, len))
+        });
+        let (file, len) = match opened {
+            Ok(v) => v,
             Err(e) => {
                 self.last_error = Some(format!("Reelix cannot read that file: {e}"));
                 return self.run_step(StepId::Restore);
             }
         };
+        if len > MAX_BACKUP_BYTES {
+            self.last_error = Some("That file is larger than 2 GiB, the most Reelix restores.".into());
+            return self.run_step(StepId::Restore);
+        }
         let code = self.code.trim().to_owned();
-        let res = self.rt.block_on(
-            self.api
-                .post_bytes::<PendingRestoreDto>("/setup/restore", bytes, &code),
-        );
+        let res =
+            self.rt.block_on(
+                self.api
+                    .post_file::<PendingRestoreDto>("/setup/restore", file, len, &code),
+            );
         match res {
             Ok(_) => {
                 self.floor = Some(StepId::Restore);
@@ -1046,11 +1057,14 @@ impl Wizard {
                 "",
                 None,
             ));
+            // Each app has its own key: "press Enter to keep it" must never offer one app's key to
+            // another. It is kept only while this app is being brought over.
+            let key_slot = arr_key_slot(source);
             let api_key = got!(self.text(
                 &format!("{}'s API key", source.label()),
                 "In the app: Settings, then General, then Security.",
                 "",
-                Some("arr-key"),
+                Some(key_slot),
             ));
             let connection = MigrateConnection {
                 source,
@@ -1086,6 +1100,7 @@ impl Wizard {
             ];
             let reply = got!(self.ask(&lines, "› Your choice [1]: ", "recommended", false));
             if reply.trim() == "2" {
+                self.secrets.remove(key_slot);
                 continue;
             }
             let req = MigrateRunRequest {
@@ -1146,6 +1161,7 @@ impl Wizard {
                     }
                 }
             }
+            self.secrets.remove(key_slot);
         }
     }
 
@@ -1814,8 +1830,33 @@ fn content_key(kind: ContentKind) -> &'static str {
     }
 }
 
+/// The largest backup Reelix restores (the server refuses more).
+const MAX_BACKUP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Where the wizard keeps an app's API key while that app is being brought over: one place per
+/// app, so one app's key is never offered for another.
+fn arr_key_slot(source: SourceKind) -> &'static str {
+    match source {
+        SourceKind::Radarr => "arr-key-radarr",
+        SourceKind::Sonarr => "arr-key-sonarr",
+        SourceKind::Prowlarr => "arr-key-prowlarr",
+        SourceKind::Readarr => "arr-key-readarr",
+        SourceKind::Lidarr => "arr-key-lidarr",
+        SourceKind::Jellyseerr => "arr-key-jellyseerr",
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn each_app_keeps_its_own_api_key() {
+        let slots: std::collections::HashSet<_> = super::SourceKind::ALL
+            .iter()
+            .map(|s| super::arr_key_slot(*s))
+            .collect();
+        assert_eq!(slots.len(), super::SourceKind::ALL.len());
+    }
+
     #[test]
     fn plain_http_to_another_computer_is_noticed() {
         assert!(super::plain_http_elsewhere("http://192.168.1.20:7700"));
