@@ -348,6 +348,44 @@ async fn dropped_items_are_kept_and_come_back() {
     assert_eq!(c.svc.show_episodes(show.id).await.unwrap().episodes.len(), 4);
 }
 
+/// A long-running show (hundreds of episodes) is saved, numbered and given statuses in batches
+/// of transactions: every episode is there after the first read and after a refresh, numbered in
+/// broadcast order, with a status (RFX-71).
+#[tokio::test]
+async fn a_show_with_hundreds_of_episodes_is_saved_in_batches() {
+    let c = ctx().await;
+    c.fake.set(|d| {
+        d.episodes = (0..250u32)
+            .map(|i| {
+                let at = day(1, 1) + chrono::Duration::days(i64::from(i));
+                ep(&format!("d{i:03}"), "s2", None, Some(at))
+            })
+            .collect();
+    });
+    let show = add(&c, RadioFollow::All).await;
+    for round in 0..2 {
+        if round == 1 {
+            c.fake.set(|d| d.episodes[0].title = "Renamed".into());
+            c.svc.refresh_show(show.id).await.unwrap();
+        }
+        let eps = c.svc.show_episodes(show.id).await.unwrap().episodes;
+        assert_eq!(eps.len(), 250, "round {round}");
+        for i in 0..250u32 {
+            let e = by_ext(&eps, &format!("d{i:03}"));
+            assert_eq!(e.number, Some(i + 1), "round {round}: d{i:03}");
+            let broadcast = e.first_broadcast.unwrap();
+            let expected = if broadcast <= day(4, 1) {
+                RadioEpisodeStatus::Wanted
+            } else {
+                RadioEpisodeStatus::NotReleased
+            };
+            assert_eq!(e.status, expected, "round {round}: d{i:03}");
+        }
+    }
+    let eps = c.svc.show_episodes(show.id).await.unwrap().episodes;
+    assert_eq!(by_ext(&eps, "d000").title, "Renamed");
+}
+
 #[tokio::test]
 async fn settled_series_are_skipped() {
     let c = ctx().await;

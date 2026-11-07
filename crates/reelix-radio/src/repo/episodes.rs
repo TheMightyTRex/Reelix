@@ -2,8 +2,8 @@
 
 use reelix_api_types::radio::{RadioEpisodeDto, RadioEpisodeStatus, RadioNumberSource};
 use reelix_db::{Db, now_ms};
-use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, SqliteExecutor};
 
 use super::placeholders;
 use crate::convert::{enum_str, from_ms_opt, ms, parse_enum, u32_opt};
@@ -100,7 +100,13 @@ pub async fn for_file(db: &Db, file_id: i64) -> Result<Option<RadioEpisodeDto>> 
     row.as_ref().map(map).transpose()
 }
 
-pub async fn insert(db: &Db, show_id: i64, series_id: i64, e: &EpisodeData, monitored: bool) -> Result<i64> {
+pub async fn insert<'e, E: SqliteExecutor<'e>>(
+    ex: E,
+    show_id: i64,
+    series_id: i64,
+    e: &EpisodeData,
+    monitored: bool,
+) -> Result<i64> {
     let now = now_ms();
     let source = if e.number.is_some() {
         RadioNumberSource::Source
@@ -126,14 +132,19 @@ pub async fn insert(db: &Db, show_id: i64, series_id: i64, e: &EpisodeData, moni
     .bind(&e.guid)
     .bind(now)
     .bind(now)
-    .execute(db.pool())
+    .execute(ex)
     .await?;
     Ok(res.last_insert_rowid())
 }
 
 /// Copies the provider's current episode fields; values it no longer gives are kept. The
 /// episode is listed again, so it is no longer removed.
-pub async fn update_from_source(db: &Db, id: i64, series_id: i64, e: &EpisodeData) -> Result<()> {
+pub async fn update_from_source<'e, E: SqliteExecutor<'e>>(
+    ex: E,
+    id: i64,
+    series_id: i64,
+    e: &EpisodeData,
+) -> Result<()> {
     let source = e.number.is_some();
     sqlx::query(
         "UPDATE radio_episodes SET series_id = ?, \
@@ -157,7 +168,7 @@ pub async fn update_from_source(db: &Db, id: i64, series_id: i64, e: &EpisodeDat
     .bind(&e.guid)
     .bind(now_ms())
     .bind(id)
-    .execute(db.pool())
+    .execute(ex)
     .await?;
     Ok(())
 }
@@ -180,7 +191,7 @@ pub async fn mark_removed(db: &Db, ids: &[i64]) -> Result<()> {
 }
 
 /// A number Reelix gave (broadcast order); source numbers are never overwritten.
-pub async fn set_derived_number(db: &Db, id: i64, number: u32) -> Result<()> {
+pub async fn set_derived_number<'e, E: SqliteExecutor<'e>>(ex: E, id: i64, number: u32) -> Result<()> {
     sqlx::query(
         "UPDATE radio_episodes SET number = ?, updated_at = ? \
          WHERE id = ? AND number_source = 'broadcast_order' AND number IS NOT ?",
@@ -189,7 +200,7 @@ pub async fn set_derived_number(db: &Db, id: i64, number: u32) -> Result<()> {
     .bind(now_ms())
     .bind(id)
     .bind(i64::from(number))
-    .execute(db.pool())
+    .execute(ex)
     .await?;
     Ok(())
 }
@@ -206,7 +217,11 @@ pub async fn set_monitored(db: &Db, id: i64, monitored: bool) -> Result<()> {
 }
 
 /// Saves a status; true when it changed.
-pub async fn set_status(db: &Db, id: i64, status: RadioEpisodeStatus) -> Result<bool> {
+pub async fn set_status<'e, E: SqliteExecutor<'e>>(
+    ex: E,
+    id: i64,
+    status: RadioEpisodeStatus,
+) -> Result<bool> {
     let s = enum_str(&status);
     let res =
         sqlx::query("UPDATE radio_episodes SET status = ?, updated_at = ? WHERE id = ? AND status <> ?")
@@ -214,7 +229,7 @@ pub async fn set_status(db: &Db, id: i64, status: RadioEpisodeStatus) -> Result<
             .bind(now_ms())
             .bind(id)
             .bind(&s)
-            .execute(db.pool())
+            .execute(ex)
             .await?;
     Ok(res.rows_affected() > 0)
 }
