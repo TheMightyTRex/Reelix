@@ -445,6 +445,41 @@ async fn add_movie_list_edit_and_conflicts() {
 }
 
 #[tokio::test]
+async fn a_series_the_source_cannot_find_by_tmdb_id_is_found_by_tvdb_and_not_deleted() {
+    // Open data (no TMDB key) can't always turn a TMDB id into a show; the TVDB id is tried next,
+    // the known TMDB id is kept, and a refresh doesn't mark the series deleted.
+    let e = env().await;
+    let mut s = show(7000, vec![season(1, vec![episode(1, 1, "2020-01-01")])]);
+    s.tmdb_id = None; // the source doesn't know the TMDB id
+    s.tvdb_id = Some(8000);
+    e.meta.series.lock().unwrap().insert(0, s);
+    let added = e
+        .svc
+        .add_series(AddSeriesRequest {
+            tmdb_id: Some(7000),
+            tvdb_id: Some(8000),
+            quality_profile_id: 1,
+            root_folder_id: e.tv_root_id,
+            monitor: SeriesMonitor::All,
+            seasons: None,
+            series_type: SeriesType::Standard,
+            season_folder: true,
+            monitor_new_items: NewItemMonitor::All,
+            tags: vec![],
+            search_on_add: false,
+            search_cutoff_unmet: false,
+            path: None,
+            added_by_request_id: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(added.tmdb_id, Some(7000));
+    e.svc.refresh_series(added.id).await.unwrap();
+    let after = e.svc.get_series(added.id).await.unwrap();
+    assert_ne!(format!("{:?}", after.status).to_lowercase(), "deleted");
+}
+
+#[tokio::test]
 async fn scan_rename_and_delete_movie_files() {
     let e = env().await;
     let m = e.svc.add_movie(add_movie_req(&e, 603)).await.unwrap();
