@@ -81,7 +81,8 @@ impl OpenData {
             inner: Arc::new(Inner {
                 http,
                 opts,
-                cache: TtlCache::new(2048),
+                // At most 32 MiB of answers: the lightweight goal matters more than a few re-fetches.
+                cache: TtlCache::new(2048).with_max_bytes(32 * 1024 * 1024),
                 // TVmaze: 20 calls per 10 seconds per address. Wikidata asks for few parallel queries.
                 tvmaze: RateLimiter::new(18, Duration::from_secs(10)),
                 wikidata: RateLimiter::new(5, Duration::from_secs(1)),
@@ -128,10 +129,13 @@ impl OpenData {
         if !st.is_success() {
             return Err(MetaError::Status {
                 status: st.as_u16(),
-                message: resp.text().await.unwrap_or_default(),
+                message: error_text(resp).await,
             });
         }
-        let v: Value = resp.json().await.map_err(|e| MetaError::Decode(e.to_string()))?;
+        let body = body_up_to(resp, MAX_BODY)
+            .await?
+            .ok_or_else(|| MetaError::Decode(format!("the answer is larger than {} MiB", MAX_BODY >> 20)))?;
+        let v: Value = serde_json::from_slice(&body)?;
         let v = Arc::new(v);
         self.inner.cache.insert(key, v.clone(), self.inner.opts.cache_ttl);
         Ok(v)
@@ -210,7 +214,7 @@ impl OpenData {
     }
 
     async fn summary(&self, article: Option<&String>) -> Option<String> {
-        let title = article?.rsplit('/').next()?;
+        let title = wiki_title(article?)?;
         let base = self.inner.opts.wikipedia_url.replace("{lang}", &self.lang());
         let url = format!("{}/api/rest_v1/page/summary/{title}", base.trim_end_matches('/'));
         let v = self.get(&url, &[], &self.inner.wikidata).await.ok()?;
@@ -284,7 +288,9 @@ impl OpenData {
             runtime_minutes: r
                 .get("duration")
                 .and_then(|d| d.parse::<f64>().ok())
-                .map(|m| m.round() as u32),
+                .map(f64::round)
+                .filter(|m| (0.0..=f64::from(u32::MAX)).contains(m))
+                .map(|m| m as u32),
             genres: genres(r.get("genres")),
             keywords: Vec::new(),
             studios: Vec::new(),
@@ -461,10 +467,14 @@ impl OpenData {
         let mut specials = 0;
         for e in eps.as_array().into_iter().flatten() {
             let (season, number) = match e.get("number").and_then(Value::as_u64) {
-                Some(n) => (
-                    e.get("season").and_then(Value::as_u64).unwrap_or(0) as u32,
-                    n as u32,
-                ),
+                Some(n) => {
+                    let season = e.get("season").and_then(Value::as_u64).unwrap_or(0);
+                    // A number past u32 is not a real episode; it is left out rather than cut short.
+                    match (u32::try_from(season), u32::try_from(n)) {
+                        (Ok(s), Ok(n)) => (s, n),
+                        _ => continue,
+                    }
+                }
                 None => {
                     specials += 1;
                     (0, specials)
@@ -479,7 +489,7 @@ impl OpenData {
                     .map(|s| plain(&s))
                     .and_then(|s| nonempty(Some(s))),
                 air_date: str_of(e, "airdate").and_then(|d| parse_date(&d)),
-                runtime_minutes: e.get("runtime").and_then(Value::as_u64).map(|r| r as u32),
+                runtime_minutes: u32_of(e.get("runtime")),
                 still: e
                     .pointer("/image/original")
                     .and_then(Value::as_str)
@@ -533,10 +543,7 @@ impl OpenData {
         let title = str_of(&show, "name").ok_or(MetaError::NotFound)?;
         let first = str_of(&show, "premiered").and_then(|d| parse_date(&d));
         let ext = show.get("externals");
-        let tvdb_id = ext
-            .and_then(|x| x.get("thetvdb"))
-            .and_then(Value::as_u64)
-            .map(|t| t as TvdbId);
+        let tvdb_id = ext.and_then(|x| x.get("thetvdb")).and_then(u32_of_value);
         let imdb_id = ext
             .and_then(|x| x.get("imdb"))
             .and_then(Value::as_str)
@@ -598,8 +605,7 @@ impl OpenData {
             runtime_minutes: show
                 .get("runtime")
                 .or_else(|| show.get("averageRuntime"))
-                .and_then(Value::as_u64)
-                .map(|r| r as u32),
+                .and_then(u32_of_value),
             certification: None,
             original_language: None,
             origin_country: show
@@ -640,10 +646,7 @@ impl OpenData {
         Some(SearchHit {
             kind: MediaKind::Series,
             tmdb_id: None,
-            tvdb_id: show
-                .pointer("/externals/thetvdb")
-                .and_then(Value::as_u64)
-                .map(|t| t as TvdbId),
+            tvdb_id: show.pointer("/externals/thetvdb").and_then(u32_of_value),
             imdb_id: show
                 .pointer("/externals/imdb")
                 .and_then(Value::as_str)
@@ -710,6 +713,64 @@ fn unlisted(e: MetaError, why: &'static str) -> MetaError {
         MetaError::NotFound => MetaError::Unsupported(why),
         other => other,
     }
+}
+
+/// A whole number that fits in a `u32`; ids past the range are dropped, never cut short.
+fn u32_of_value(v: &Value) -> Option<u32> {
+    v.as_u64().and_then(|n| u32::try_from(n).ok())
+}
+
+fn u32_of(v: Option<&Value>) -> Option<u32> {
+    v.and_then(u32_of_value)
+}
+
+/// The most of a response body read: open data answers are far smaller.
+const MAX_BODY: usize = 8 * 1024 * 1024;
+/// The most of an error response kept for the message shown to people and written to the log.
+const MAX_ERROR_TEXT: usize = 200;
+
+/// Reads at most `max` bytes of `resp`'s body; `None` when it is longer.
+async fn body_up_to(mut resp: reqwest::Response, max: usize) -> Result<Option<Vec<u8>>, MetaError> {
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        return Ok(None);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if body.len() + chunk.len() > max {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Some(body))
+}
+
+/// The start of an error body, on one line, at most [`MAX_ERROR_TEXT`] characters.
+async fn error_text(mut resp: reqwest::Response) -> String {
+    let mut body = Vec::new();
+    while body.len() < 4096 {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    short_text(&String::from_utf8_lossy(&body))
+}
+
+fn short_text(text: &str) -> String {
+    let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match one_line.char_indices().nth(MAX_ERROR_TEXT) {
+        Some((at, _)) => format!("{}…", &one_line[..at]),
+        None => one_line,
+    }
+}
+
+/// The page title in a Wikipedia article address, ready to put in a URL path. Wikidata gives the
+/// address with `/` left as it is ("Face/Off", "Fahrenheit 9/11"), so everything after `/wiki/`
+/// is the title, and its `/`, `?` and `#` are encoded so it stays one path segment.
+fn wiki_title(article: &str) -> Option<String> {
+    let (_, title) = article.split_once("/wiki/")?;
+    let title = title.replace('?', "%3F").replace('#', "%23").replace('/', "%2F");
+    (!title.is_empty()).then_some(title)
 }
 
 fn str_of(v: &Value, key: &str) -> Option<String> {
@@ -803,6 +864,80 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn wikipedia_titles_keep_their_slashes() {
+        assert_eq!(
+            wiki_title("https://en.wikipedia.org/wiki/Face/Off").as_deref(),
+            Some("Face%2FOff")
+        );
+        assert_eq!(
+            wiki_title("https://en.wikipedia.org/wiki/Fahrenheit_9/11").as_deref(),
+            Some("Fahrenheit_9%2F11")
+        );
+        assert_eq!(
+            wiki_title("https://fr.wikipedia.org/wiki/Am%C3%A9lie").as_deref(),
+            Some("Am%C3%A9lie")
+        );
+        assert_eq!(wiki_title("https://en.wikipedia.org/wiki/").as_deref(), None);
+        assert_eq!(wiki_title("https://en.wikipedia.org/Off").as_deref(), None);
+    }
+
+    #[tokio::test]
+    async fn the_summary_of_a_title_with_a_slash_is_that_article() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/rest_v1/page/summary/Face%2FOff"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"extract": "A 1997 film."})),
+            )
+            .mount(&server)
+            .await;
+        let article = "https://en.wikipedia.org/wiki/Face/Off".to_string();
+        assert_eq!(
+            client(&server).summary(Some(&article)).await.as_deref(),
+            Some("A 1997 film.")
+        );
+    }
+
+    #[tokio::test]
+    async fn error_text_is_cut_short_and_large_answers_are_refused() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/broken"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("x".repeat(100_000)))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/huge"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!("\"{}\"", "y".repeat(MAX_BODY))))
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        match c
+            .get(&format!("{}/broken", server.uri()), &[], &c.inner.tvmaze)
+            .await
+        {
+            Err(MetaError::Status { status: 503, message }) => {
+                assert!(message.chars().count() <= MAX_ERROR_TEXT + 1, "{}", message.len());
+            }
+            other => panic!("{other:?}"),
+        }
+        match c
+            .get(&format!("{}/huge", server.uri()), &[], &c.inner.tvmaze)
+            .await
+        {
+            Err(MetaError::Decode(m)) => assert!(m.contains("larger"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn ids_past_u32_are_dropped_not_cut_short() {
+        assert_eq!(u32_of_value(&Value::from(81189)), Some(81189));
+        assert_eq!(u32_of_value(&Value::from(u64::from(u32::MAX) + 5)), None);
+        assert_eq!(u32_of(None), None);
     }
 
     fn binding(pairs: &[(&str, &str)]) -> Value {
