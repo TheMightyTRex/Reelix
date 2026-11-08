@@ -81,6 +81,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         config.data_dir.clone(),
     ));
     let direct_handle = tokio::spawn(direct.clone().run(cancel.clone()));
+    let key_use_handle = tokio::spawn(write_key_use(db.clone(), cancel.clone()));
 
     let state = AppState::new(
         db.clone(),
@@ -137,9 +138,33 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     if let Err(e) = direct_handle.await? {
         tracing::error!(error = %e, "direct download worker stopped");
     }
+    if let Err(e) = key_use_handle.await {
+        tracing::error!(error = %e, "API key use task failed");
+    }
     db.pool().close().await;
     tracing::info!("shutdown complete");
     Ok(())
+}
+
+/// Writes API key use every [`reelix_db::KEY_USE_FLUSH_EVERY`], and once more when the server
+/// stops. Requests with a key only note their use in memory, so they never wait for the write
+/// lock (RFX-71); a write that fails is tried again at the next tick.
+async fn write_key_use(db: Db, cancel: CancellationToken) {
+    let mut every = tokio::time::interval(reelix_db::KEY_USE_FLUSH_EVERY);
+    every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    every.tick().await; // the first tick is at once
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => break,
+            _ = every.tick() => {}
+        }
+        if let Err(e) = db.flush_key_use().await {
+            tracing::debug!(error = %e, "API key use not written; trying again at the next tick");
+        }
+    }
+    if let Err(e) = db.flush_key_use().await {
+        tracing::warn!(error = %e, "API key use since the last write was not saved");
+    }
 }
 
 /// `REELIX_SECRET_KEY` (base64, 32 bytes) overrides the key file.

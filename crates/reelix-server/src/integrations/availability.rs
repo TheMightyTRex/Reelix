@@ -99,6 +99,9 @@ pub struct ServerItems {
     pub items: Result<Vec<MsItem>, String>,
 }
 
+/// Rows per INSERT: 5 values each, under the 999 values an older SQLite allows in one statement.
+const ROWS_PER_INSERT: usize = 150;
+
 /// Replaces the stored availability of each server with the matched items; forgets servers
 /// that are no longer configured.
 pub async fn record(db: &Db, results: Vec<ServerItems>) -> sqlx::Result<()> {
@@ -137,21 +140,25 @@ pub async fn record(db: &Db, results: Vec<ServerItems>) -> sqlx::Result<()> {
                     .bind(r.server_id)
                     .execute(&mut *tx)
                     .await?;
-                for item in &items {
-                    let Some(media_id) = ix.find(item) else {
-                        continue;
-                    };
-                    sqlx::query(
-                        "INSERT OR REPLACE INTO media_server_availability
-                         (server_id, media_kind, media_id, item_id, synced_at) VALUES (?, ?, ?, ?, ?)",
-                    )
-                    .bind(r.server_id)
-                    .bind(kind_str(item.kind))
-                    .bind(media_id)
-                    .bind(&item.id)
-                    .bind(now)
-                    .execute(&mut *tx)
-                    .await?;
+                let matched: Vec<(&MsItem, i64)> = items
+                    .iter()
+                    .filter_map(|i| ix.find(i).map(|id| (i, id)))
+                    .collect();
+                // Many rows per statement: a big library is written in a short transaction, so
+                // the sync does not hold the write lock for long (RFX-71).
+                for chunk in matched.chunks(ROWS_PER_INSERT) {
+                    let mut q = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                        "INSERT OR REPLACE INTO media_server_availability \
+                         (server_id, media_kind, media_id, item_id, synced_at) ",
+                    );
+                    q.push_values(chunk, |mut row, (item, media_id)| {
+                        row.push_bind(r.server_id)
+                            .push_bind(kind_str(item.kind))
+                            .push_bind(*media_id)
+                            .push_bind(item.id.as_str())
+                            .push_bind(now);
+                    });
+                    q.build().execute(&mut *tx).await?;
                 }
                 sqlx::query(
                     "INSERT INTO media_server_sync (server_id, synced_at, items_total, last_error) VALUES (?, ?, ?, NULL)
