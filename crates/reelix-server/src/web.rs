@@ -131,6 +131,9 @@ impl WebUi {
 
     /// Fallback for every path no route matched.
     async fn fallback(&self, req: Request) -> Response {
+        if let Some(to) = trailing_slash_redirect(&req) {
+            return to;
+        }
         let path = req.uri().path();
         if path == "/api" || path.starts_with("/api/") {
             return api_not_found(path);
@@ -152,6 +155,34 @@ impl WebUi {
             res.map(Body::new)
         }
     }
+}
+
+/// An API address with a trailing slash, such as `/sonarr/api/v3/series/`, is the same route without
+/// it, as Radarr and Sonarr treat it (Bazarr asks for `series/`). It is redirected (308, so the method
+/// and body stay) rather than answered with the web UI. The location keeps the URL base and query, and
+/// an address starting with `//` is never redirected, so this cannot send a browser to another site.
+fn trailing_slash_redirect(req: &Request) -> Option<Response> {
+    let path = req.uri().path();
+    if path.len() < 2 || !path.ends_with('/') || !(path.starts_with("/api/") || path.contains("/api/")) {
+        return None;
+    }
+    let original = req
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map_or_else(|| req.uri().clone(), |o| o.0.clone());
+    let full = original.path();
+    if full.starts_with("//") {
+        return None;
+    }
+    let trimmed = full.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let target = match original.query() {
+        Some(q) => format!("{trimmed}?{q}"),
+        None => trimmed.to_owned(),
+    };
+    Some(Redirect::permanent(&target).into_response())
 }
 
 fn api_not_found(path: &str) -> Response {
@@ -444,6 +475,28 @@ mod tests {
 
         let (s, _, _) = call(&app, Method::POST, "/api").await;
         assert_eq!(s, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_paths_with_a_trailing_slash_redirect_to_the_route() {
+        let dir = dist();
+        let app = build_app(api(), Arc::new(WebUi::load(dir.path(), "")), "");
+        let (s, h, _) = call(&app, Method::GET, "/api/v1/ping/").await;
+        assert_eq!(s, StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(h[header::LOCATION], "/api/v1/ping");
+        // Radarr- and Sonarr-compatible addresses, with the query kept (Bazarr's `series/?apikey=`).
+        let (s, h, _) = call(&app, Method::GET, "/sonarr/api/v3/series/?apikey=k").await;
+        assert_eq!(s, StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(h[header::LOCATION], "/sonarr/api/v3/series?apikey=k");
+        // Web pages with a slash are still the web UI.
+        let (s, _, body) = call(&app, Method::GET, "/movies/").await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(body.contains("<base href"));
+        // Under a URL base the location keeps the base.
+        let app = build_app(api(), Arc::new(WebUi::load(dir.path(), "/reelix")), "/reelix");
+        let (s, h, _) = call(&app, Method::GET, "/reelix/radarr/api/v3/movie/").await;
+        assert_eq!(s, StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(h[header::LOCATION], "/reelix/radarr/api/v3/movie");
     }
 
     #[tokio::test]
