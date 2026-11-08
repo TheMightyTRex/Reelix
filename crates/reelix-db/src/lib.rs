@@ -7,6 +7,7 @@ mod custom_formats;
 mod delay_profiles;
 mod error;
 mod jobs;
+mod key_use;
 mod quality_definitions;
 mod quality_profiles;
 mod release_profiles;
@@ -30,6 +31,7 @@ pub use custom_formats::CustomFormatRepo;
 pub use delay_profiles::DelayProfileRepo;
 pub use error::DbError;
 pub use jobs::{Job, JobRepo, NewJob};
+pub use key_use::KEY_USE_FLUSH_EVERY;
 pub use quality_definitions::QualityDefinitionRepo;
 pub use quality_profiles::QualityProfileRepo;
 pub use release_profiles::ReleaseProfileRepo;
@@ -73,6 +75,8 @@ pub fn from_ms(ms: i64) -> DateTime<Utc> {
 #[derive(Clone, Debug)]
 pub struct Db {
     pool: SqlitePool,
+    /// API key use not yet written (see [`key_use`]).
+    key_use: std::sync::Arc<key_use::KeyUse>,
 }
 
 impl Db {
@@ -193,7 +197,10 @@ impl Db {
 
     async fn migrated(pool: SqlitePool) -> Result<Db> {
         MIGRATOR.run(&pool).await?;
-        Ok(Db { pool })
+        Ok(Db {
+            pool,
+            key_use: std::sync::Arc::default(),
+        })
     }
 
     pub fn pool(&self) -> &SqlitePool {
