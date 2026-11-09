@@ -6,6 +6,14 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-09
+
+### Fixed
+- **Docker image name:** the README and `docker/docker-compose.example.yml` now use `ghcr.io/demonzoned/reelix`, where release images are published. The old `ghcr.io/mvanhare/reelix` name doesn't exist, so pulling it failed.
+
+### Changed
+- **Repository links:** the crate metadata and the user agent sent to MusicBrainz, ListenBrainz and Open Library now point to `github.com/demonzoned/Reelix`.
+
 ## [0.8.6] - 2026-11-06
 
 ### Security

@@ -93,7 +93,7 @@ impl OpenLibrary {
             inner: Arc::new(Inner {
                 http,
                 user_agent: format!(
-                    "Reelix/{} ( https://github.com/mvanhare/Reelix )",
+                    "Reelix/{} ( https://github.com/demonzoned/Reelix )",
                     reelix_core::VERSION
                 ),
                 opts,
