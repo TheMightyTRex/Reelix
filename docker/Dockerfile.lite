@@ -73,9 +73,12 @@ LABEL org.opencontainers.image.title="Reelix" \
       org.opencontainers.image.version="${VERSION}"
 # util-linux (setpriv) is part of the base image; tzdata makes TZ work. The upgrade takes in Debian's
 # security fixes released since the pinned base image (such as apt 2.6.2).
-RUN apt-get update \
+# unrar unpacks downloads that hold only RAR archives. It is in Debian's non-free component
+# (freeware, free to redistribute) and adds about 0.4 MB.
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata unrar \
     && rm -rf /var/lib/apt/lists/*
 
 # --chmod on COPY, not a later RUN chmod, which would store a second copy of each file in a new layer.
