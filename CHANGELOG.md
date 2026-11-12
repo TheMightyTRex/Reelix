@@ -18,6 +18,14 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 - **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
 - **Migration: a profile name used by another kind no longer fails.** Quality profile names are unique across films and series, music and books, so migrating Lidarr after Radarr failed on Lidarr's "Any" ("a quality profile named Any already exists") and skipped the artists using it. Such a profile is now created as "Any (Lidarr)", and the preview says so. When Reelix already has a profile of the same name and kind, the preview now says that Reelix's own is used and the app's changes to it aren't copied.
 
+## [0.8.7] - 2026-11-09
+
+### Fixed
+- **Docker image name:** the README and `docker/docker-compose.example.yml` now use `ghcr.io/demonzoned/reelix`, where release images are published. The old `ghcr.io/mvanhare/reelix` name doesn't exist, so pulling it failed.
+
+### Changed
+- **Repository links:** the crate metadata and the user agent sent to MusicBrainz, ListenBrainz and Open Library now point to `github.com/demonzoned/Reelix`.
+
 ## [0.8.6] - 2026-11-06
 
 ### Security
