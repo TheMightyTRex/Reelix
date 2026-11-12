@@ -339,6 +339,33 @@ async fn library_file_inside_the_folder_is_deleted_and_its_record_removed() {
 }
 
 #[tokio::test]
+async fn following_again_wants_only_the_newest_n() {
+    let c = ctx().await;
+    let (p3, p4) = (c.file("e3").await, c.file("e4").await);
+    c.keep(Some(2)).await.unwrap();
+    for follow in [RadioFollow::None, RadioFollow::All] {
+        c.svc
+            .update_show(
+                c.show.id,
+                RadioShowEdit {
+                    follow: Some(follow),
+                    ..RadioShowEdit::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+    // The two older episodes stay unwanted, so they are not searched for and fetched again.
+    for ext in ["e1", "e2"] {
+        let e = c.episode(ext).await;
+        assert!(!e.monitored, "{ext}");
+        assert_eq!(e.status, RadioEpisodeStatus::NotRequested, "{ext}");
+    }
+    c.assert_kept("e3", &p3).await;
+    c.assert_kept("e4", &p4).await;
+}
+
+#[tokio::test]
 async fn edit_validation() {
     let c = ctx().await;
     for bad in [0, -1, 1001] {

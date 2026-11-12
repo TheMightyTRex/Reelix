@@ -183,7 +183,8 @@ impl RadioService {
 
     /// Edits a show's follow choice, monitoring, tags, root folder, quality profile,
     /// Audiobookshelf item or episode limit. A new follow choice is re-applied to every
-    /// episode; a saved episode limit is applied at once ([`RadioService::prune_show`]).
+    /// episode, within the newest `keep_episodes` when the show has a limit; a saved episode
+    /// limit is applied at once ([`RadioService::prune_show`]).
     pub async fn update_show(&self, id: i64, edit: RadioShowEdit) -> Result<RadioShowDto> {
         let mut show = repo::shows::require(&self.db, id).await?;
         let follow_changed = edit.follow.is_some_and(|f| f != show.follow);
@@ -227,8 +228,14 @@ impl RadioService {
         }
         repo::shows::save_settings(&self.db, &show).await?;
         if follow_changed {
-            for e in repo::episodes::for_show(&self.db, id).await? {
-                let m = monitored_by_follow(show.follow, show.followed_at, e.first_broadcast, false);
+            let mut episodes = repo::episodes::for_show(&self.db, id).await?;
+            // With an episode limit, only the newest N may be wanted again: the older ones were
+            // pruned, or would be at once after downloading.
+            episodes.sort_by(|a, b| b.first_broadcast.cmp(&a.first_broadcast).then(b.id.cmp(&a.id)));
+            for (i, e) in episodes.into_iter().enumerate() {
+                let within = show.keep_episodes.is_none_or(|n| (i as i64) < n);
+                let m =
+                    within && monitored_by_follow(show.follow, show.followed_at, e.first_broadcast, false);
                 repo::episodes::set_monitored(&self.db, e.id, m).await?;
             }
         }
