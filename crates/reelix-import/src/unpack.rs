@@ -294,8 +294,10 @@ async fn run(
         Some(0 | 1) => Ok(output.stdout),
         Some(11) => Err(UnpackError::Encrypted),
         _ if stderr.to_ascii_lowercase().contains("password") => Err(UnpackError::Encrypted),
-        // 3: checksum error; 2: fatal error; 10: missing volume or nothing to unpack.
+        // 3: checksum error; 2: fatal error; 10: missing volume or nothing to unpack. unrar 7 reports a
+        // volume it cannot find as 6 (open error), with "Cannot find volume" on stderr.
         Some(2 | 3 | 10) => Err(UnpackError::Damaged),
+        Some(6) if stderr.to_ascii_lowercase().contains("cannot find volume") => Err(UnpackError::Damaged),
         code => Err(UnpackError::Failed { code, stderr }),
     }
 }
