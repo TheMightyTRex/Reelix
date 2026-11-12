@@ -469,6 +469,9 @@ pub struct RadioSettingsDto {
     /// Podcast Index API secret. Stored encrypted; reads return `********` when set, and
     /// sending `********` back keeps the saved secret.
     pub podcastindex_api_secret: Option<String>,
+    /// Sources whose catch-up audio Reelix may fetch with yt-dlp for wanted episodes that have no podcast
+    /// file (RFX-96): none by default. Each source's terms say what is allowed; this is for personal use.
+    pub catchup_providers: Vec<String>,
 }
 
 impl Default for RadioSettingsDto {
@@ -484,6 +487,7 @@ impl Default for RadioSettingsDto {
             max_lookups_per_refresh: 30,
             podcastindex_api_key: None,
             podcastindex_api_secret: None,
+            catchup_providers: Vec::new(),
         }
     }
 }

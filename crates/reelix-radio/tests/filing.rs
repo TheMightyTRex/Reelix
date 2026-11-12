@@ -82,6 +82,12 @@ impl RadioProvider for Fake {
     async fn show(&self, _id: &str, _f: &ShowFetch) -> Result<ShowData, ProviderError> {
         Ok(data())
     }
+    fn has_catchup(&self) -> bool {
+        true
+    }
+    fn catchup_url(&self, id: &str) -> Option<String> {
+        Some(format!("https://catchup.example/{id}"))
+    }
 }
 
 /// Counts scan requests.
@@ -498,4 +504,96 @@ async fn specials_hard_links_and_ambiguous_downloads() {
             .await
             .is_err()
     );
+}
+
+// ---------------------------------------------------------------- catch-up (RFX-96)
+
+/// Writes a small FLAC named after the page, as yt-dlp would, and remembers the pages asked for.
+#[derive(Default)]
+struct Fetcher(std::sync::Mutex<Vec<String>>);
+
+#[async_trait::async_trait]
+impl reelix_radio::catchup::CatchupFetcher for Fetcher {
+    async fn fetch(&self, page_url: &str, into: &Path) -> anyhow::Result<()> {
+        self.0.lock().unwrap().push(page_url.to_owned());
+        tiny_flac(&into.join(format!("{}.flac", page_url.rsplit('/').next().unwrap())));
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn catchup_fetches_wanted_episodes_only_when_switched_on() {
+    let c = ctx().await;
+    let data_dir = tempfile::tempdir().unwrap();
+    c.svc.set_data_dir(data_dir.path().to_path_buf());
+    use_library(&c).await;
+    let fetcher = Arc::new(Fetcher::default());
+
+    // Catch-up off (the default): nothing is fetched, even with a fetcher attached.
+    c.svc.set_catchup(fetcher.clone());
+    assert_eq!(c.svc.run_catchup().await.unwrap().tried, 0);
+
+    // Switched on for the source: the three broadcast episodes are fetched and filed; the unbroadcast one is not.
+    c.svc
+        .set_settings(RadioSettingsDto {
+            library_folder: Some(c.library.path().to_string_lossy().into_owned()),
+            catchup_providers: vec!["fake".into()],
+            ..RadioSettingsDto::default()
+        })
+        .await
+        .unwrap();
+    let sum = c.svc.run_catchup().await.unwrap();
+    assert_eq!((sum.tried, sum.filed, sum.failed), (3, 3, 0), "{sum:?}");
+    let asked = fetcher.0.lock().unwrap().clone();
+    assert!(
+        asked.iter().all(|p| p.starts_with("https://catchup.example/e")),
+        "{asked:?}"
+    );
+    assert!(!asked.iter().any(|p| p.ends_with("/e4")), "not broadcast yet");
+    let show_dir = c.library.path().join("The Archers");
+    assert_eq!(std::fs::read_dir(&show_dir).unwrap().count(), 3);
+    // The staging folders are gone.
+    assert_eq!(
+        std::fs::read_dir(data_dir.path().join("radio").join("catchup"))
+            .unwrap()
+            .count(),
+        0
+    );
+    // Filed episodes are not fetched again.
+    assert_eq!(c.svc.run_catchup().await.unwrap().tried, 0);
+}
+
+#[tokio::test]
+async fn catchup_only_for_sources_that_have_it() {
+    let c = ctx().await;
+    let err = c
+        .svc
+        .set_settings(RadioSettingsDto {
+            catchup_providers: vec!["nope".into()],
+            ..RadioSettingsDto::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown radio source"), "{err}");
+}
+
+#[test]
+fn streaming_sites_are_off_until_switched_on() {
+    use reelix_radio::providers::{BbcProvider, GlobalPlayerProvider, MixcloudProvider, NtsProvider};
+    let http = reqwest::Client::new();
+    let reg = ProviderRegistry::default()
+        .with(Arc::new(BbcProvider::new(http.clone())))
+        .with(Arc::new(NtsProvider::new(http.clone())))
+        .with(Arc::new(MixcloudProvider::new(http.clone())))
+        .with(Arc::new(GlobalPlayerProvider::new(http)));
+    let ids = |on: &[String]| reg.enabled(on).iter().map(|p| p.id()).collect::<Vec<_>>();
+    assert_eq!(ids(&[]), ["bbc"]);
+    assert_eq!(ids(&["nts".into(), "mixcloud".into()]), ["nts", "mixcloud"]);
+    let dtos = reg.dtos(&[]);
+    assert!(
+        dtos.iter()
+            .filter(|d| d.id != "bbc")
+            .all(|d| !d.enabled && d.risk.is_some())
+    );
+    assert!(reg.all().iter().all(|p| p.has_catchup()));
 }

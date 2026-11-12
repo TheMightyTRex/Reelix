@@ -12,6 +12,7 @@
 //! [`RadioService::file_download`] ([`filing`]). See `docs/radio.md`.
 
 pub mod artwork;
+pub mod catchup;
 mod convert;
 mod discover;
 mod error;
@@ -64,6 +65,8 @@ pub mod kinds {
     pub const RADIO_EPISODE_SEARCH: &str = "radio_episode_search";
     /// Indexer search for every wanted episode, every 6 hours; handled by the pipeline.
     pub const RADIO_MISSING_SEARCH: &str = "radio_missing_search";
+    /// Catch-up audio for wanted episodes from sources with catch-up on, every hour (RFX-96).
+    pub const RADIO_CATCHUP: &str = "radio_catchup";
 }
 
 /// Settings keys.

@@ -81,6 +81,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         config.data_dir.clone(),
     ));
     let direct_handle = tokio::spawn(direct.clone().run(cancel.clone()));
+    // RFX-96: radio catch-up fetches through the direct downloads' yt-dlp (sources with catch-up on only).
+    modules.radio.set_catchup(Arc::new(RadioCatchup(direct.clone())));
     let key_use_handle = tokio::spawn(write_key_use(db.clone(), cancel.clone()));
 
     let state = AppState::new(
@@ -216,4 +218,14 @@ async fn shutdown_signal(cancel: CancellationToken) {
         () = cancel.cancelled() => {}
     }
     cancel.cancel();
+}
+
+/// Radio catch-up (RFX-96) through `reelix-direct`'s yt-dlp, which accepts only the known catch-up pages.
+struct RadioCatchup(Arc<reelix_direct::DirectService>);
+
+#[async_trait::async_trait]
+impl reelix_radio::catchup::CatchupFetcher for RadioCatchup {
+    async fn fetch(&self, page_url: &str, into: &std::path::Path) -> anyhow::Result<()> {
+        self.0.fetch_radio_audio(page_url, into).await
+    }
 }

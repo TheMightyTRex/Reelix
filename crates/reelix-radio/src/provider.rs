@@ -226,6 +226,23 @@ pub trait RadioProvider: Send + Sync + 'static {
         true
     }
 
+    /// Whether the source is on when the settings name no sources (RFX-96 to 99: catch-up and streaming sites
+    /// are off until switched on).
+    fn default_on(&self) -> bool {
+        true
+    }
+
+    /// Whether episodes can be fetched from their catch-up pages ([`catchup_url`](Self::catchup_url)).
+    fn has_catchup(&self) -> bool {
+        false
+    }
+
+    /// The page of an episode (by its external id) that yt-dlp can fetch the audio from, for catch-up
+    /// (RFX-96); `None` = the source has none.
+    fn catchup_url(&self, _episode_external_id: &str) -> Option<String> {
+        None
+    }
+
     /// Whether the source needs a key before it works (shown in the settings, RFX-102).
     fn key_needed(&self) -> bool {
         false
@@ -279,6 +296,15 @@ pub trait RadioProvider: Send + Sync + 'static {
     async fn show(&self, external_id: &str, fetch: &ShowFetch) -> Result<ShowData, ProviderError>;
 }
 
+/// Whether the settings' list allows `p`: named in it, or (an empty list) on by default.
+fn allowed(p: &dyn RadioProvider, enabled: &[String]) -> bool {
+    if enabled.is_empty() {
+        p.default_on()
+    } else {
+        enabled.iter().any(|e| e == p.id())
+    }
+}
+
 /// The providers available to the service, in link-recognition order.
 #[derive(Clone, Default)]
 pub struct ProviderRegistry {
@@ -304,11 +330,11 @@ impl ProviderRegistry {
         &self.providers
     }
 
-    /// Providers allowed by the settings (`enabled` empty = all) that are configured.
+    /// Providers allowed by the settings (`enabled` empty = those on by default) that are configured.
     pub fn enabled(&self, enabled: &[String]) -> Vec<Arc<dyn RadioProvider>> {
         self.providers
             .iter()
-            .filter(|p| p.is_configured() && (enabled.is_empty() || enabled.iter().any(|e| e == p.id())))
+            .filter(|p| p.is_configured() && allowed(p.as_ref(), enabled))
             .cloned()
             .collect()
     }
@@ -363,7 +389,7 @@ impl ProviderRegistry {
                 id: p.id().to_owned(),
                 name: p.name().to_owned(),
                 supports_search: p.supports_search(),
-                enabled: p.is_configured() && (enabled.is_empty() || enabled.iter().any(|e| e == p.id())),
+                enabled: p.is_configured() && allowed(p.as_ref(), enabled),
                 key_needed: p.key_needed(),
                 episodes_arrive: p.episodes_arrive().to_owned(),
                 risk: p.risk_note().map(str::to_owned),

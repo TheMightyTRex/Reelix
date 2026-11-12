@@ -857,7 +857,23 @@ impl RadioProvider for BbcProvider {
     }
 
     fn episodes_arrive(&self) -> &'static str {
-        "Programme pages; audio from the programme's podcast feed or your download sites"
+        "Programme pages; audio from the programme's podcast feed, your download sites, or catch-up when it is on"
+    }
+
+    fn has_catchup(&self) -> bool {
+        true
+    }
+
+    fn catchup_url(&self, episode_external_id: &str) -> Option<String> {
+        let pid = episode_external_id.trim();
+        // yt-dlp reads the programme page; BBC Sounds' own player page it cannot (checked 12 November 2026).
+        is_pid(pid).then(|| format!("https://www.bbc.co.uk/programmes/{pid}"))
+    }
+
+    fn risk_note(&self) -> Option<&'static str> {
+        Some(
+            "Catch-up fetches whole programmes from BBC Sounds. The BBC's terms allow downloads in its own app only; podcast feeds are fine. For your personal use only.",
+        )
     }
 
     fn stations(&self) -> Vec<reelix_api_types::radio::RadioProviderStationDto> {
