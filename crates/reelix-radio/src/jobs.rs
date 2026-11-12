@@ -73,7 +73,18 @@ handler!(RadioLibrarySyncJob, kinds::RADIO_LIBRARY_SYNC, |svc, _p| {
 });
 
 handler!(RadioCatchupJob, kinds::RADIO_CATCHUP, |svc, _p| {
-    let r = svc.run_catchup().await?;
+    // Episode limits are applied every hour too, whether or not catch-up runs (RFX-106).
+    let catchup = svc.run_catchup().await;
+    let k = svc.prune_all_shows().await?;
+    if k.episodes > 0 || k.skipped > 0 {
+        tracing::info!(
+            episodes = k.episodes,
+            files = k.files_deleted,
+            skipped = k.skipped,
+            "radio episode limits applied"
+        );
+    }
+    let r = catchup?;
     if r.tried > 0 {
         tracing::info!(
             tried = r.tried,
@@ -86,7 +97,7 @@ handler!(RadioCatchupJob, kinds::RADIO_CATCHUP, |svc, _p| {
 });
 
 /// Scheduled tasks: show refresh every 12 h, podcast feeds every hour, the podcast library
-/// every 15 minutes, catch-up every hour.
+/// every 15 minutes, catch-up and the shows' episode limits every hour.
 pub fn tasks() -> Vec<TaskDef> {
     vec![
         TaskDef {

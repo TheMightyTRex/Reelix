@@ -131,6 +131,10 @@ pub struct RadioShowDto {
     /// held the podcast library at the last library sync; `None` without an item or a sync.
     #[serde(default)]
     pub abs_web_url: Option<String>,
+    /// Keep only the newest this many episodes with a file (1 to 1000); older files are
+    /// deleted and their episodes unmonitored. `None` keeps every episode.
+    #[serde(default)]
+    pub keep_episodes: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -373,6 +377,9 @@ pub struct AddRadioShowRequest {
     pub tags: Vec<i64>,
 }
 
+/// Highest `keep_episodes` a show can have.
+pub const KEEP_EPISODES_MAX: i64 = 1000;
+
 /// `PUT /radio/shows/{id}` (partial; `null` clears the nullable fields).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -394,6 +401,11 @@ pub struct RadioShowEdit {
     #[serde(default, deserialize_with = "double", skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub abs_item_id: Option<Option<String>>,
+    /// Keep only the newest this many episodes (1 to [`KEEP_EPISODES_MAX`]); `null` keeps
+    /// every episode.
+    #[serde(default, deserialize_with = "double", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<i64>, minimum = 1, maximum = 1000))]
+    pub keep_episodes: Option<Option<i64>>,
 }
 
 /// `PUT /radio/episodes/{id}` and `PUT /radio/series/{id}` (every episode of the series):
@@ -559,6 +571,12 @@ mod tests {
         let e: RadioShowEdit = serde_json::from_str(r#"{"root_folder_id": null}"#).unwrap();
         assert_eq!(e.root_folder_id, Some(None));
         assert_eq!(e.quality_profile_id, None);
+        assert_eq!(e.keep_episodes, None);
+        let e: RadioShowEdit = serde_json::from_str(r#"{"keep_episodes": null}"#).unwrap();
+        assert_eq!(e.keep_episodes, Some(None));
+        let e: RadioShowEdit = serde_json::from_str(r#"{"keep_episodes": 5}"#).unwrap();
+        assert_eq!(e.keep_episodes, Some(Some(5)));
+        assert_eq!(serde_json::to_value(&e).unwrap()["keep_episodes"], 5);
         let a: AddRadioShowRequest = serde_json::from_str(r#"{"link": "https://x/feed"}"#).unwrap();
         assert!(a.monitored);
     }
