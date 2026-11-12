@@ -1033,7 +1033,7 @@ format = "pretty"        # pretty | json
 # docker-compose.yml
 services:
   reelix:
-    image: ghcr.io/mvanhare/reelix:latest
+    image: ghcr.io/demonzoned/reelix:latest
     container_name: reelix
     environment:
       - PUID=1000
@@ -1121,7 +1121,7 @@ The import runs through the **API** of the running source app, with a fallback t
 - Scene music names with hyphenated artists (for example "Alt-J") split wrongly.
 - None of it has been tested against real indexers, download clients, media servers or a large real library, so the M8/M9 exit criteria are unverified.
 
-**System screens (done ahead of M10):** scheduled and manual backups (`VACUUM INTO` snapshot + `config.toml` + secret key in a zip, retention for scheduled ones), download, delete and restore (stored or uploaded; staged and applied on the next start before the database opens, rolled back if the restored database won't open); a log viewer over the rolling log files (pretty and JSON) with level/text filters, a live tail and downloads; update checks against the `mvanhare/Reelix` GitHub releases (twice a day when enabled, with a health notice; no self-update); editing bind address, port, URL base and logging in `config.toml` from Settings → General; and per-user UI settings (date/time format, relative dates, first day of week, default calendar and library views).
+**System screens (done ahead of M10):** scheduled and manual backups (`VACUUM INTO` snapshot + `config.toml` + secret key in a zip, retention for scheduled ones), download, delete and restore (stored or uploaded; staged and applied on the next start before the database opens, rolled back if the restored database won't open); a log viewer over the rolling log files (pretty and JSON) with level/text filters, a live tail and downloads; update checks against the `demonzoned/Reelix` GitHub releases (twice a day when enabled, with a health notice; no self-update); editing bind address, port, URL base and logging in `config.toml` from Settings → General; and per-user UI settings (date/time format, relative dates, first day of week, default calendar and library views).
 
 **Migration, compatibility and hardening (M10):** the `reelix-migrate` tool (System → Migrate) for Radarr, Sonarr, Prowlarr, Readarr, Lidarr and Jellyseerr; a Torznab/Newznab aggregator; Radarr/Sonarr/Readarr/Lidarr-compatible APIs; a performance pass (lists filter and sort on light rows and load only the page; all library endpoints under 150 ms p95 with 10k movies, 100k episodes and 100k tracks); an accessibility pass (contrast, focus handling in dialogs, keyboard access, landmarks, page titles, status text); and a security review with fixes, a threat model ([security.md](security.md)), property tests and libFuzzer targets for every parser.
 

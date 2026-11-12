@@ -54,7 +54,7 @@ impl Default for MusicBrainzOptions {
             base_url: DEFAULT_BASE_URL.into(),
             caa_url: DEFAULT_CAA_URL.into(),
             user_agent: format!(
-                "Reelix/{} ( https://github.com/mvanhare/Reelix )",
+                "Reelix/{} ( https://github.com/demonzoned/Reelix )",
                 reelix_core::VERSION
             ),
             retry: RetryPolicy::default(),
