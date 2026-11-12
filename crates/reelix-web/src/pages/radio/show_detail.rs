@@ -462,6 +462,7 @@ fn ShowEditModal(
             root_folder_id: Some(opt_id(root.get_untracked())),
             quality_profile_id: Some(opt_id(profile.get_untracked())),
             abs_item_id: None,
+            keep_episodes: None,
         };
         busy.set(true);
         spawn_local(async move {

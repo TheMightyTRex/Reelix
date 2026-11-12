@@ -131,6 +131,10 @@ pub struct RadioShowDto {
     /// held the podcast library at the last library sync; `None` without an item or a sync.
     #[serde(default)]
     pub abs_web_url: Option<String>,
+    /// Keep only the newest this many episodes with a file (1 to 1000); older files are
+    /// deleted and their episodes unmonitored. `None` keeps every episode.
+    #[serde(default)]
+    pub keep_episodes: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -233,6 +237,10 @@ pub struct RadioShowHitDto {
     /// Library show id when already added.
     #[serde(default)]
     pub show_id: Option<i64>,
+    /// The broadcaster the show comes from (BBC, LBC, Times Radio), when it is a radio station's show
+    /// (RFX-101); search can keep only these.
+    #[serde(default)]
+    pub broadcaster: Option<String>,
 }
 
 /// `GET /radio/preview?link=`: the show behind a pasted link, with a first look at its
@@ -267,6 +275,34 @@ pub struct RadioProviderDto {
     /// Search by name is supported (otherwise only pasted links).
     pub supports_search: bool,
     pub enabled: bool,
+    /// The source needs a key (or key and secret) before it works (RFX-102).
+    #[serde(default)]
+    pub key_needed: bool,
+    /// How episodes arrive, in a short phrase ("Podcast feeds", "Programme pages; audio from podcast feeds
+    /// or your download sites").
+    #[serde(default)]
+    pub episodes_arrive: String,
+    /// What to know before switching it on (terms, a short catch-up window), when anything.
+    #[serde(default)]
+    pub risk: Option<String>,
+    /// The source's stations, with logos, for a station picker.
+    #[serde(default)]
+    pub stations: Vec<RadioProviderStationDto>,
+    /// Episodes can be fetched from the source's catch-up pages when catch-up is on (RFX-96).
+    #[serde(default)]
+    pub catchup: bool,
+}
+
+/// One station of a source, as `GET /radio/providers` lists it (RFX-102).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioProviderStationDto {
+    /// The source's own id for the station (a BBC network id); `network-{id}` is its Discover list.
+    pub id: String,
+    pub name: String,
+    /// "National", "Nations", "Local".
+    pub group: Option<String>,
+    pub logo_url: Option<String>,
 }
 
 /// `GET /radio/shows` query.
@@ -296,6 +332,17 @@ pub struct RadioSearchQuery {
     pub q: String,
     /// One provider id; omitted = every enabled provider that can search.
     pub provider: Option<String>,
+    /// Only shows from a radio station's broadcaster (RFX-101).
+    #[serde(default)]
+    pub from_stations: bool,
+}
+
+/// One shared radio genre, as `GET /radio/genres` lists it (RFX-93). `all-genre-{id}` is its Discover row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioGenreDto {
+    pub id: String,
+    pub name: String,
 }
 
 /// `GET /radio/preview` query.
@@ -330,6 +377,9 @@ pub struct AddRadioShowRequest {
     pub tags: Vec<i64>,
 }
 
+/// Highest `keep_episodes` a show can have.
+pub const KEEP_EPISODES_MAX: i64 = 1000;
+
 /// `PUT /radio/shows/{id}` (partial; `null` clears the nullable fields).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -351,6 +401,11 @@ pub struct RadioShowEdit {
     #[serde(default, deserialize_with = "double", skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub abs_item_id: Option<Option<String>>,
+    /// Keep only the newest this many episodes (1 to [`KEEP_EPISODES_MAX`]); `null` keeps
+    /// every episode.
+    #[serde(default, deserialize_with = "double", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<i64>, minimum = 1, maximum = 1000))]
+    pub keep_episodes: Option<Option<i64>>,
 }
 
 /// `PUT /radio/episodes/{id}` and `PUT /radio/series/{id}` (every episode of the series):
@@ -429,6 +484,9 @@ pub struct RadioSettingsDto {
     /// Podcast Index API secret. Stored encrypted; reads return `********` when set, and
     /// sending `********` back keeps the saved secret.
     pub podcastindex_api_secret: Option<String>,
+    /// Sources whose catch-up audio Reelix may fetch with yt-dlp for wanted episodes that have no podcast
+    /// file (RFX-96): none by default. Each source's terms say what is allowed; this is for personal use.
+    pub catchup_providers: Vec<String>,
 }
 
 impl Default for RadioSettingsDto {
@@ -444,6 +502,7 @@ impl Default for RadioSettingsDto {
             max_lookups_per_refresh: 30,
             podcastindex_api_key: None,
             podcastindex_api_secret: None,
+            catchup_providers: Vec::new(),
         }
     }
 }
@@ -512,6 +571,12 @@ mod tests {
         let e: RadioShowEdit = serde_json::from_str(r#"{"root_folder_id": null}"#).unwrap();
         assert_eq!(e.root_folder_id, Some(None));
         assert_eq!(e.quality_profile_id, None);
+        assert_eq!(e.keep_episodes, None);
+        let e: RadioShowEdit = serde_json::from_str(r#"{"keep_episodes": null}"#).unwrap();
+        assert_eq!(e.keep_episodes, Some(None));
+        let e: RadioShowEdit = serde_json::from_str(r#"{"keep_episodes": 5}"#).unwrap();
+        assert_eq!(e.keep_episodes, Some(Some(5)));
+        assert_eq!(serde_json::to_value(&e).unwrap()["keep_episodes"], 5);
         let a: AddRadioShowRequest = serde_json::from_str(r#"{"link": "https://x/feed"}"#).unwrap();
         assert!(a.monitored);
     }

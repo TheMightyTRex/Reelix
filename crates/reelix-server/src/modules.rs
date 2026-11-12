@@ -122,7 +122,8 @@ impl Modules {
             http: deps.http.clone(),
             providers: {
                 use reelix_radio::providers::{
-                    AppleProvider, ArchiveProvider, BbcProvider, PodcastIndexProvider, RssProvider,
+                    AppleProvider, ArchiveProvider, BbcProvider, GlobalPlayerProvider, MixcloudProvider,
+                    NtsProvider, PodcastIndexProvider, RssProvider,
                 };
                 use std::sync::Arc;
                 // Feeds read for Discover and requests reach public addresses only.
@@ -134,6 +135,10 @@ impl Modules {
                     ))
                     .with(Arc::new(PodcastIndexProvider::new(deps.http.clone())))
                     .with(Arc::new(ArchiveProvider::new(deps.http.clone())))
+                    // RFX-97 to 99: off until switched on in the radio settings; audio through catch-up only.
+                    .with(Arc::new(GlobalPlayerProvider::new(deps.http.clone())))
+                    .with(Arc::new(NtsProvider::new(deps.http.clone())))
+                    .with(Arc::new(MixcloudProvider::new(deps.http.clone())))
                     .with(Arc::new(
                         RssProvider::new(deps.http.clone()).with_public_client(public_http),
                     ))

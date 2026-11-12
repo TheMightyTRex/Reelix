@@ -17,7 +17,7 @@ use reelix_api_types::content::{ContentRootFolderDto, CreateContentRootFolderReq
 use reelix_api_types::library::Paged;
 use reelix_api_types::pipeline::ReleaseDto;
 use reelix_api_types::radio::{
-    AddRadioShowRequest, RadioClearFileQuery, RadioEpisodeDto, RadioEpisodeFileRequest,
+    AddRadioShowRequest, RadioClearFileQuery, RadioEpisodeDto, RadioEpisodeFileRequest, RadioGenreDto,
     RadioLibraryReviewDto, RadioMonitorRequest, RadioNamingDto, RadioPreviewQuery, RadioProviderDto,
     RadioSearchQuery, RadioSearchRequest, RadioSettingsDto, RadioShowDto, RadioShowEdit,
     RadioShowEpisodesDto, RadioShowHitDto, RadioShowListQuery, RadioShowPreviewDto, RadioStationDto,
@@ -57,6 +57,7 @@ pub fn routes() -> Router<AppState> {
         .route("/radio/stations", get(stations))
         .route("/radio/stations/{id}/logo", get(station_logo))
         .route("/radio/providers", get(providers))
+        .route("/radio/genres", get(genres))
         .route("/radio/library/review", get(library_review))
         .route("/radio/rootfolders", get(list_root_folders).post(add_root_folder))
         .route("/radio/rootfolders/{id}", delete(delete_root_folder))
@@ -68,7 +69,7 @@ pub fn routes() -> Router<AppState> {
 #[openapi(
     paths(
         list_shows, add_show, get_show, edit_show, delete_show, show_episodes, show_artwork, refresh_show,
-        get_episode, set_episode_file, clear_episode_file, search, preview, stations, station_logo, providers,
+        get_episode, set_episode_file, clear_episode_file, search, preview, stations, station_logo, providers, genres,
         library_review, list_root_folders, add_root_folder, delete_root_folder, get_settings, put_settings,
         search_show, search_episode, episode_releases, get_naming, put_naming, edit_episode, edit_series,
     ),
@@ -88,6 +89,8 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::radio::RadioShowPreviewDto,
         reelix_api_types::radio::RadioPreviewEpisodeDto,
         reelix_api_types::radio::RadioProviderDto,
+        reelix_api_types::radio::RadioProviderStationDto,
+        reelix_api_types::radio::RadioGenreDto,
         reelix_api_types::radio::AddRadioShowRequest,
         reelix_api_types::radio::RadioShowEdit,
         reelix_api_types::radio::RadioEpisodeFileRequest,
@@ -490,7 +493,22 @@ pub async fn search(
     ApiQuery(q): ApiQuery<RadioSearchQuery>,
 ) -> ApiResult<ApiJson<Vec<RadioShowHitDto>>> {
     require_lib(&user)?;
-    Ok(ApiJson(svc(&state)?.search(&q.q, q.provider.as_deref()).await?))
+    let mut hits = svc(&state)?.search(&q.q, q.provider.as_deref()).await?;
+    if q.from_stations {
+        hits.retain(|h| h.broadcaster.is_some());
+    }
+    Ok(ApiJson(hits))
+}
+
+/// The shared radio genres (RFX-93): one list for every source; `all-genre-{id}` is each one's Discover row.
+#[utoipa::path(get, path = "/api/v1/radio/genres", tag = "radio",
+    security(("session" = []), ("api_key" = [])),
+    responses((status = 200, description = "Genres", body = Vec<RadioGenreDto>)))]
+pub async fn genres(
+    State(state): State<AppState>,
+    _user: CurrentUser,
+) -> ApiResult<ApiJson<Vec<RadioGenreDto>>> {
+    Ok(ApiJson(svc(&state)?.genres()))
 }
 
 /// The show behind a link (show page or feed), with its newest episodes. Saves nothing.

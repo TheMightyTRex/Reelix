@@ -70,7 +70,60 @@ async fn bbc_server() -> MockServer {
 fn bbc(s: &MockServer) -> BbcProvider {
     BbcProvider::new(reqwest::Client::new())
         .with_base_urls(&s.uri(), &s.uri())
+        .with_podcasts_url(&s.uri())
         .with_interval(Duration::ZERO)
+}
+
+#[tokio::test]
+async fn bbc_takes_episode_links_from_its_podcast_feed() {
+    // RFX-95: Just a Minute has a BBC podcast; the feed names episode m002rd20, so that episode gets the
+    // feed's download link, and the show's feed is the podcast feed. Episodes not in the feed keep none.
+    let s = bbc_server().await;
+    Mock::given(method("GET"))
+        .and(path("/programmes/m002h9t4/children.json"))
+        .respond_with(json("bbc_s95_children.json"))
+        .mount(&s)
+        .await;
+    let feed = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Just a Minute</title>
+        <item><title>Episode</title><guid isPermaLink="false">urn:bbc:podcast:m002rd20</guid>
+        <enclosure url="https://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download-rss/proto/https/vpid/p0abc123.mp3" length="1" type="audio/mpeg"/></item>
+        </channel></rss>"#;
+    Mock::given(method("GET"))
+        .and(path("/b006s5dp.rss"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(feed))
+        .mount(&s)
+        .await;
+    let p = bbc(&s);
+    let d = p.show("b006s5dp", &full(1)).await.unwrap();
+    assert_eq!(
+        d.feed_url.as_deref(),
+        Some(format!("{}/b006s5dp.rss", s.uri()).as_str())
+    );
+    let ep = d.episodes.iter().find(|e| e.external_id == "m002rd20").unwrap();
+    assert!(
+        ep.enclosure_url
+            .as_deref()
+            .unwrap()
+            .ends_with("/vpid/p0abc123.mp3")
+    );
+    assert!(
+        d.episodes
+            .iter()
+            .filter(|e| e.external_id != "m002rd20")
+            .all(|e| e.enclosure_url.is_none())
+    );
+    // A quick look does not read the feed.
+    let quick = p
+        .show(
+            "b006s5dp",
+            &ShowFetch {
+                quick: true,
+                ..ShowFetch::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(quick.feed_url.is_none());
 }
 
 #[tokio::test]

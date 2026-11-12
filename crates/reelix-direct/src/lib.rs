@@ -1,5 +1,6 @@
 //! A durable, single-worker queue independent of torrent/Usenet clients.
 mod process;
+pub mod radio;
 pub mod spotify;
 mod spotify_login;
 #[cfg(test)]

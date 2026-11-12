@@ -12,11 +12,14 @@
 //! [`RadioService::file_download`] ([`filing`]). See `docs/radio.md`.
 
 pub mod artwork;
+pub mod catchup;
 mod convert;
 mod discover;
 mod error;
 pub mod filing;
+pub mod genres;
 pub mod jobs;
+pub mod keep;
 mod library;
 mod matching;
 pub mod naming;
@@ -38,6 +41,7 @@ mod xml;
 pub use artwork::{ImageKind, StoredImage};
 pub use error::{RadioError, Result};
 pub use filing::{FiledEpisode, FilingOutcome};
+pub use keep::KeepSummary;
 pub use library::{LibrarySyncSummary, NewEpisodeFile, NoopLibrarySync, RadioLibrarySync, clean_title};
 pub use matching::source_ids;
 pub use naming::EpisodeNaming;
@@ -63,6 +67,8 @@ pub mod kinds {
     pub const RADIO_EPISODE_SEARCH: &str = "radio_episode_search";
     /// Indexer search for every wanted episode, every 6 hours; handled by the pipeline.
     pub const RADIO_MISSING_SEARCH: &str = "radio_missing_search";
+    /// Catch-up audio for wanted episodes from sources with catch-up on, every hour (RFX-96).
+    pub const RADIO_CATCHUP: &str = "radio_catchup";
 }
 
 /// Settings keys.
