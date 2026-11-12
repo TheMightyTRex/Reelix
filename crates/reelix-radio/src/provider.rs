@@ -394,6 +394,7 @@ impl ProviderRegistry {
                 episodes_arrive: p.episodes_arrive().to_owned(),
                 risk: p.risk_note().map(str::to_owned),
                 stations: p.stations(),
+                catchup: p.has_catchup(),
             })
             .collect()
     }

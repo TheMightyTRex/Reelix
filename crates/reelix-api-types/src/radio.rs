@@ -284,6 +284,9 @@ pub struct RadioProviderDto {
     /// The source's stations, with logos, for a station picker.
     #[serde(default)]
     pub stations: Vec<RadioProviderStationDto>,
+    /// Episodes can be fetched from the source's catch-up pages when catch-up is on (RFX-96).
+    #[serde(default)]
+    pub catchup: bool,
 }
 
 /// One station of a source, as `GET /radio/providers` lists it (RFX-102).
