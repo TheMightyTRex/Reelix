@@ -45,8 +45,9 @@ fn unrar_available() -> bool {
         .status()
         .is_ok();
     if !found {
+        // CI sets it to "1" on Linux and to "" elsewhere, so an empty value means not required.
         assert!(
-            std::env::var_os("REELIX_REQUIRE_UNRAR").is_none(),
+            std::env::var("REELIX_REQUIRE_UNRAR").map_or(true, |v| v.is_empty()),
             "REELIX_REQUIRE_UNRAR is set but unrar is not on PATH"
         );
         eprintln!("unrar is not on PATH; skipping");
