@@ -58,6 +58,8 @@ pub const ID: &str = "bbc";
 
 pub const PROGRAMMES_BASE: &str = "https://www.bbc.co.uk";
 pub const SEARCH_BASE: &str = "https://rms.api.bbc.co.uk";
+/// Where the BBC keeps its podcast feeds (RFX-95).
+pub const PODCASTS_BASE: &str = "https://podcasts.files.bbci.co.uk";
 /// Show artwork (square) by image pid.
 pub const ARTWORK_URL: &str = "https://ichef.bbci.co.uk/images/ic/640x640/{pid}.jpg";
 /// Station logos (SVG) by service id.
@@ -146,6 +148,98 @@ pub const STATIONS: &[(&str, &str)] = &[
     ("bbc_world_service", "World Service"),
 ];
 
+/// Every BBC radio network BBC Sounds lists (`rms.api.bbc.co.uk/v2/networks`, read 12 November 2026), as
+/// `(network id, name, group)`: national, the nations and local. Each is a Discover list of its most played
+/// programmes (`network-{id}`) and a station Starboard can show with its logo (RFX-94).
+pub const NETWORKS: &[(&str, &str, &str)] = &[
+    ("bbc_radio_one", "BBC Radio 1", "National"),
+    ("bbc_radio_one_anthems", "BBC Radio 1 Anthems", "National"),
+    ("bbc_radio_one_dance", "BBC Radio 1 Dance", "National"),
+    ("bbc_1xtra", "BBC Radio 1Xtra", "National"),
+    ("bbc_radio_two", "BBC Radio 2", "National"),
+    ("bbc_radio_three", "BBC Radio 3", "National"),
+    ("bbc_radio_three_unwind", "BBC Radio 3 Unwind", "National"),
+    ("bbc_radio_four", "BBC Radio 4", "National"),
+    ("bbc_radio_four_extra", "BBC Radio 4 Extra", "National"),
+    ("bbc_radio_five_live", "BBC Radio 5 Live", "National"),
+    (
+        "bbc_radio_five_live_sports_extra",
+        "BBC Radio 5 Sports Extra",
+        "National",
+    ),
+    (
+        "bbc_radio_five_sports_extra_2",
+        "BBC Radio 5 Sports Extra 2",
+        "National",
+    ),
+    (
+        "bbc_radio_five_sports_extra_3",
+        "BBC Radio 5 Sports Extra 3",
+        "National",
+    ),
+    ("bbc_6music", "BBC Radio 6 Music", "National"),
+    (
+        "bbc_radio_six_indie_forever",
+        "BBC Radio 6 Indie Forever",
+        "National",
+    ),
+    ("bbc_asian_network", "BBC Asian Network", "National"),
+    ("bbc_world_service", "BBC World Service", "National"),
+    ("bbc_sounds_news", "Live News", "National"),
+    ("cbeebies_radio", "CBeebies Radio", "National"),
+    ("bbc_radio_scotland", "BBC Radio Scotland", "Nations"),
+    ("bbc_radio_nan_gaidheal", "BBC Radio nan Gàidheal", "Nations"),
+    ("bbc_radio_ulster", "BBC Radio Ulster", "Nations"),
+    ("bbc_radio_foyle", "BBC Radio Foyle", "Nations"),
+    ("bbc_radio_wales", "BBC Radio Wales", "Nations"),
+    ("bbc_radio_cymru", "BBC Radio Cymru", "Nations"),
+    ("bbc_radio_cymru_2", "BBC Radio Cymru 2", "Nations"),
+    ("bbc_radio_berkshire", "BBC Radio Berkshire", "Local"),
+    ("bbc_radio_bristol", "BBC Radio Bristol", "Local"),
+    ("bbc_radio_cambridge", "BBC Radio Cambridgeshire", "Local"),
+    ("bbc_radio_cornwall", "BBC Radio Cornwall", "Local"),
+    ("bbc_radio_coventry_warwickshire", "BBC CWR", "Local"),
+    ("bbc_radio_cumbria", "BBC Radio Cumbria", "Local"),
+    ("bbc_radio_derby", "BBC Radio Derby", "Local"),
+    ("bbc_radio_devon", "BBC Radio Devon", "Local"),
+    ("bbc_radio_essex", "BBC Essex", "Local"),
+    ("bbc_radio_gloucestershire", "BBC Radio Gloucestershire", "Local"),
+    ("bbc_radio_guernsey", "BBC Radio Guernsey", "Local"),
+    (
+        "bbc_radio_hereford_worcester",
+        "BBC Hereford & Worcester",
+        "Local",
+    ),
+    ("bbc_radio_humberside", "BBC Radio Humberside", "Local"),
+    ("bbc_radio_jersey", "BBC Radio Jersey", "Local"),
+    ("bbc_radio_kent", "BBC Radio Kent", "Local"),
+    ("bbc_radio_lancashire", "BBC Radio Lancashire", "Local"),
+    ("bbc_radio_leeds", "BBC Radio Leeds", "Local"),
+    ("bbc_radio_leicester", "BBC Radio Leicester", "Local"),
+    ("bbc_radio_lincolnshire", "BBC Radio Lincolnshire", "Local"),
+    ("bbc_london", "BBC Radio London", "Local"),
+    ("bbc_radio_manchester", "BBC Radio Manchester", "Local"),
+    ("bbc_radio_merseyside", "BBC Radio Merseyside", "Local"),
+    ("bbc_radio_newcastle", "BBC Radio Newcastle", "Local"),
+    ("bbc_radio_norfolk", "BBC Radio Norfolk", "Local"),
+    ("bbc_radio_northampton", "BBC Radio Northampton", "Local"),
+    ("bbc_radio_nottingham", "BBC Radio Nottingham", "Local"),
+    ("bbc_radio_oxford", "BBC Radio Oxford", "Local"),
+    ("bbc_radio_sheffield", "BBC Radio Sheffield", "Local"),
+    ("bbc_radio_shropshire", "BBC Radio Shropshire", "Local"),
+    ("bbc_radio_solent", "BBC Radio Solent", "Local"),
+    ("bbc_radio_somerset_sound", "BBC Radio Somerset", "Local"),
+    ("bbc_radio_stoke", "BBC Radio Stoke", "Local"),
+    ("bbc_radio_suffolk", "BBC Radio Suffolk", "Local"),
+    ("bbc_radio_surrey", "BBC Radio Surrey", "Local"),
+    ("bbc_radio_sussex", "BBC Radio Sussex", "Local"),
+    ("bbc_tees", "BBC Radio Tees", "Local"),
+    ("bbc_three_counties_radio", "BBC Three Counties Radio", "Local"),
+    ("bbc_radio_wiltshire", "BBC Radio Wiltshire", "Local"),
+    ("bbc_wm", "BBC Radio WM", "Local"),
+    ("bbc_radio_york", "BBC Radio York", "Local"),
+];
+
 /// Titles per page of the BBC programmes A to Z.
 pub const ATOZ_PAGE: u64 = 30;
 /// Most A to Z shows put before the BBC Sounds results.
@@ -162,16 +256,59 @@ pub struct BbcProvider {
     search: JsonReader,
     base: String,
     search_base: String,
+    /// The BBC's podcast feeds (RFX-95): a programme with a podcast has one at `{podcasts_base}/{pid}.rss`.
+    feeds: crate::providers::RssProvider,
+    podcasts_base: String,
 }
 
 impl BbcProvider {
     pub fn new(http: reqwest::Client) -> Self {
         Self {
             programmes: JsonReader::new(http.clone(), "the BBC", REQUEST_INTERVAL, CACHE_TTL),
-            search: JsonReader::new(http, "BBC Sounds search", REQUEST_INTERVAL, SEARCH_TTL),
+            search: JsonReader::new(http.clone(), "BBC Sounds search", REQUEST_INTERVAL, SEARCH_TTL),
             base: PROGRAMMES_BASE.to_owned(),
             search_base: SEARCH_BASE.to_owned(),
+            feeds: crate::providers::RssProvider::new(http),
+            podcasts_base: PODCASTS_BASE.to_owned(),
         }
+    }
+
+    /// Another host for the podcast feeds (tests).
+    pub fn with_podcasts_url(mut self, base: &str) -> Self {
+        self.podcasts_base = base.trim_end_matches('/').to_owned();
+        self
+    }
+
+    /// RFX-95: when the programme has a BBC podcast, its feed is the show's feed and each episode it holds
+    /// takes its download link from it (the feed names each episode `urn:bbc:podcast:{pid}`). A programme with
+    /// no podcast (404) is left as it was; a feed that cannot be read is left out without failing the show.
+    async fn with_podcast(&self, mut show: ShowData) -> ShowData {
+        let url = format!("{}/{}.rss", self.podcasts_base, show.external_id);
+        let feed = match self.feeds.read(&url).await {
+            Ok(Some(feed)) => feed,
+            Ok(None) | Err(ProviderError::NotFound(_)) => return show,
+            Err(e) => {
+                tracing::debug!(pid = %show.external_id, error = %e, "BBC podcast feed not read");
+                return show;
+            }
+        };
+        let links: HashMap<String, String> = feed
+            .episodes
+            .iter()
+            .filter_map(|e| {
+                let pid = e.guid.as_deref()?.strip_prefix("urn:bbc:podcast:")?;
+                Some((pid.to_owned(), e.enclosure_url.clone()?))
+            })
+            .collect();
+        for e in &mut show.episodes {
+            if e.enclosure_url.is_none()
+                && let Some(link) = links.get(&e.external_id)
+            {
+                e.enclosure_url = Some(link.clone());
+            }
+        }
+        show.feed_url = Some(url);
+        show
     }
 
     /// Other hosts for the programme pages and the search (tests).
@@ -615,6 +752,7 @@ pub fn popular_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
                 feed_url: None,
                 episode_count: None,
                 show_id: None,
+                broadcaster: None,
             })
         })
         .take(DISCOVER_LIMIT)
@@ -670,6 +808,7 @@ fn atoz_hit(programme: &Value) -> Option<ShowHit> {
         feed_url: None,
         episode_count: None,
         show_id: None,
+        broadcaster: None,
     })
 }
 
@@ -705,6 +844,7 @@ fn search_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
                 feed_url: None,
                 episode_count: None,
                 show_id: None,
+                broadcaster: None,
             })
         })
         .collect())
@@ -714,6 +854,24 @@ fn search_hits(data: &Value) -> Result<Vec<ShowHit>, ProviderError> {
 impl RadioProvider for BbcProvider {
     fn id(&self) -> &'static str {
         ID
+    }
+
+    fn episodes_arrive(&self) -> &'static str {
+        "Programme pages; audio from the programme's podcast feed or your download sites"
+    }
+
+    fn stations(&self) -> Vec<reelix_api_types::radio::RadioProviderStationDto> {
+        NETWORKS
+            .iter()
+            .map(
+                |(id, name, group)| reelix_api_types::radio::RadioProviderStationDto {
+                    id: (*id).to_owned(),
+                    name: (*name).to_owned(),
+                    group: Some((*group).to_owned()),
+                    logo_url: Some(LOGO_URL.replace("{id}", id)),
+                },
+            )
+            .collect()
     }
 
     fn name(&self) -> &'static str {
@@ -740,9 +898,15 @@ impl RadioProvider for BbcProvider {
             cats.iter()
                 .map(|(id, name)| DiscoverList::category(&format!("category-{id}"), name).in_group(group))
         });
+        // Every network as a category of its own, by group (RFX-94).
+        let networks = NETWORKS.iter().map(|(id, name, group)| {
+            DiscoverList::category(&format!("network-{id}"), name)
+                .in_group(&format!("BBC stations: {}", group.to_lowercase()))
+        });
         std::iter::once(DiscoverList::row("popular", "Popular on BBC Sounds"))
             .chain(stations)
             .chain(categories)
+            .chain(networks)
             .collect()
     }
 
@@ -757,6 +921,13 @@ impl RadioProvider for BbcProvider {
                 .find(|id| *id == station)
                 .ok_or_else(unknown)?;
             params.push(("network", station));
+        } else if let Some(network) = list.strip_prefix("network-") {
+            let network = NETWORKS
+                .iter()
+                .map(|(id, _, _)| *id)
+                .find(|id| *id == network)
+                .ok_or_else(unknown)?;
+            params.push(("network", network));
         } else if let Some(category) = list.strip_prefix("category-") {
             let category = categories().find(|id| *id == category).ok_or_else(unknown)?;
             params.push(("category", category));
@@ -823,7 +994,12 @@ impl RadioProvider for BbcProvider {
             )));
         }
         let top = self.resolve(pid).await?;
-        self.read(&top, fetch).await
+        let show = self.read(&top, fetch).await?;
+        // A quick look (Discover's preview) does not read the feed; following and refreshing do.
+        if fetch.quick {
+            return Ok(show);
+        }
+        Ok(self.with_podcast(show).await)
     }
 }
 

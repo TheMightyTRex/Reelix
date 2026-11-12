@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use reelix_api_types::radio::{RadioProviderDto, RadioSeriesKind, RadioSettingsDto};
+use reelix_api_types::radio::{RadioProviderDto, RadioProviderStationDto, RadioSeriesKind, RadioSettingsDto};
 
 pub use async_trait::async_trait;
 /// A search result (nothing saved). `show_id` is filled in by the service.
@@ -180,6 +180,7 @@ impl ShowData {
             feed_url: self.feed_url.clone(),
             episode_count: u32::try_from(self.episodes.len()).ok(),
             show_id: None,
+            broadcaster: None,
         }
     }
 }
@@ -223,6 +224,26 @@ pub trait RadioProvider: Send + Sync + 'static {
     /// treated as turned off.
     fn is_configured(&self) -> bool {
         true
+    }
+
+    /// Whether the source needs a key before it works (shown in the settings, RFX-102).
+    fn key_needed(&self) -> bool {
+        false
+    }
+
+    /// How episodes arrive, in a short phrase for the settings.
+    fn episodes_arrive(&self) -> &'static str {
+        "Podcast feeds"
+    }
+
+    /// What to know before switching the source on, when anything.
+    fn risk_note(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// The source's stations, for a station picker.
+    fn stations(&self) -> Vec<RadioProviderStationDto> {
+        Vec::new()
     }
 
     /// Shows matching `query`, best first.
@@ -343,6 +364,10 @@ impl ProviderRegistry {
                 name: p.name().to_owned(),
                 supports_search: p.supports_search(),
                 enabled: p.is_configured() && (enabled.is_empty() || enabled.iter().any(|e| e == p.id())),
+                key_needed: p.key_needed(),
+                episodes_arrive: p.episodes_arrive().to_owned(),
+                risk: p.risk_note().map(str::to_owned),
+                stations: p.stations(),
             })
             .collect()
     }

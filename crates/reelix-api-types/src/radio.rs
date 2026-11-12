@@ -233,6 +233,10 @@ pub struct RadioShowHitDto {
     /// Library show id when already added.
     #[serde(default)]
     pub show_id: Option<i64>,
+    /// The broadcaster the show comes from (BBC, LBC, Times Radio), when it is a radio station's show
+    /// (RFX-101); search can keep only these.
+    #[serde(default)]
+    pub broadcaster: Option<String>,
 }
 
 /// `GET /radio/preview?link=`: the show behind a pasted link, with a first look at its
@@ -267,6 +271,31 @@ pub struct RadioProviderDto {
     /// Search by name is supported (otherwise only pasted links).
     pub supports_search: bool,
     pub enabled: bool,
+    /// The source needs a key (or key and secret) before it works (RFX-102).
+    #[serde(default)]
+    pub key_needed: bool,
+    /// How episodes arrive, in a short phrase ("Podcast feeds", "Programme pages; audio from podcast feeds
+    /// or your download sites").
+    #[serde(default)]
+    pub episodes_arrive: String,
+    /// What to know before switching it on (terms, a short catch-up window), when anything.
+    #[serde(default)]
+    pub risk: Option<String>,
+    /// The source's stations, with logos, for a station picker.
+    #[serde(default)]
+    pub stations: Vec<RadioProviderStationDto>,
+}
+
+/// One station of a source, as `GET /radio/providers` lists it (RFX-102).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioProviderStationDto {
+    /// The source's own id for the station (a BBC network id); `network-{id}` is its Discover list.
+    pub id: String,
+    pub name: String,
+    /// "National", "Nations", "Local".
+    pub group: Option<String>,
+    pub logo_url: Option<String>,
 }
 
 /// `GET /radio/shows` query.
@@ -296,6 +325,17 @@ pub struct RadioSearchQuery {
     pub q: String,
     /// One provider id; omitted = every enabled provider that can search.
     pub provider: Option<String>,
+    /// Only shows from a radio station's broadcaster (RFX-101).
+    #[serde(default)]
+    pub from_stations: bool,
+}
+
+/// One shared radio genre, as `GET /radio/genres` lists it (RFX-93). `all-genre-{id}` is its Discover row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioGenreDto {
+    pub id: String,
+    pub name: String,
 }
 
 /// `GET /radio/preview` query.

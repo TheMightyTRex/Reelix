@@ -16,6 +16,7 @@ mod convert;
 mod discover;
 mod error;
 pub mod filing;
+pub mod genres;
 pub mod jobs;
 mod library;
 mod matching;

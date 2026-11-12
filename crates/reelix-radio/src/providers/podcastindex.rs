@@ -169,6 +169,7 @@ fn hit(f: &Value) -> Option<ShowHit> {
         feed_url: url_at(f, "url"),
         episode_count: u32_at(f, "episodeCount"),
         show_id: None,
+        broadcaster: None,
     })
 }
 
@@ -255,6 +256,10 @@ impl RadioProvider for PodcastIndexProvider {
         ID
     }
 
+    fn key_needed(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &'static str {
         "Podcast Index"
     }
@@ -288,12 +293,31 @@ impl RadioProvider for PodcastIndexProvider {
     }
 
     async fn discover(&self, list: &str, prefs: &SearchPrefs) -> Result<Vec<ShowHit>, ProviderError> {
-        if list != "trending" {
-            return Err(ProviderError::NotFound(format!(
-                "Podcast Index has no Discover list {list}"
-            )));
-        }
+        // `trending`, or `category-{name}` for a shared genre's Podcast Index category (RFX-100).
+        let category = match list.strip_prefix("category-") {
+            Some(name) => Some(
+                crate::genres::GENRES
+                    .iter()
+                    .filter_map(|g| g.podcastindex)
+                    .find(|c| *c == name)
+                    .ok_or_else(|| {
+                        ProviderError::NotFound(format!("Podcast Index has no Discover list {list}"))
+                    })?,
+            ),
+            None if list == "trending" => None,
+            None => {
+                return Err(ProviderError::NotFound(format!(
+                    "Podcast Index has no Discover list {list}"
+                )));
+            }
+        };
         let mut pq = format!("/podcasts/trending?max={DISCOVER_LIMIT}");
+        if let Some(cat) = category {
+            pq.push_str(&format!(
+                "&cat={}",
+                url::form_urlencoded::byte_serialize(cat.as_bytes()).collect::<String>()
+            ));
+        }
         if let Some(lang) = prefs
             .language
             .as_deref()

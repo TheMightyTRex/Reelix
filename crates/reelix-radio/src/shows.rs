@@ -474,6 +474,14 @@ impl RadioService {
         let known = repo::shows::known(&self.db).await?;
         for h in &mut hits {
             h.show_id = known.find(&h.provider, &h.external_id, h.feed_url.as_deref());
+            if h.broadcaster.is_none() {
+                h.broadcaster = if h.provider == crate::providers::bbc::ID {
+                    Some("BBC".to_owned())
+                } else {
+                    crate::genres::broadcaster(h.author.as_deref(), h.station_name.as_deref())
+                        .map(str::to_owned)
+                };
+            }
         }
         Ok(hits)
     }

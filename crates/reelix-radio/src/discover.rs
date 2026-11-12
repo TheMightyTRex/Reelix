@@ -11,6 +11,9 @@ use crate::error::{RadioError, Result};
 use crate::provider::{SearchPrefs, ShowFetch};
 use crate::{RadioService, repo};
 
+/// The provider id of the rows that gather every source (the shared genres).
+pub const ALL: &str = "all";
+
 impl RadioService {
     async fn prefs(&self) -> Result<(Vec<String>, SearchPrefs)> {
         let s = self.settings().await?;
@@ -28,6 +31,18 @@ impl RadioService {
     pub async fn discover_lists(&self) -> Result<RadioDiscoverDto> {
         let (enabled, prefs) = self.prefs().await?;
         let mut out = RadioDiscoverDto::default();
+        // The shared genres first (RFX-93): each row gathers shows from every source switched on.
+        if !self.providers.for_discover(&enabled, &prefs).is_empty() {
+            for g in crate::genres::GENRES {
+                out.categories.push(RadioDiscoverListDto {
+                    id: format!("{ALL}-genre-{}", g.id),
+                    name: g.name.to_owned(),
+                    provider: ALL.to_owned(),
+                    provider_name: "Every source".to_owned(),
+                    group: Some("Genres".to_owned()),
+                });
+            }
+        }
         for p in self.providers.for_discover(&enabled, &prefs) {
             for l in p.discover_lists() {
                 let dto = RadioDiscoverListDto {
@@ -52,6 +67,13 @@ impl RadioService {
     pub async fn discover(&self, row: &str) -> Result<Vec<RadioShowHitDto>> {
         let unknown = || RadioError::NotFound(format!("unknown radio discover row: {row}"));
         let (provider, list) = row.split_once('-').ok_or_else(unknown)?;
+        if provider == ALL {
+            let genre = list
+                .strip_prefix("genre-")
+                .and_then(crate::genres::genre)
+                .ok_or_else(unknown)?;
+            return self.discover_genre(genre).await;
+        }
         let (enabled, prefs) = self.prefs().await?;
         let p = self
             .providers
@@ -64,6 +86,70 @@ impl RadioService {
         let mut seen = HashSet::new();
         hits.retain(|h| seen.insert((h.provider.clone(), h.external_id.clone())));
         self.mark_in_library(hits).await
+    }
+
+    /// One shared genre across every source switched on: the BBC's categories, Apple's chart and Podcast
+    /// Index's trending list for it, taken in turn so each source is seen near the top, without repeats (by
+    /// show and by feed), at most [`DISCOVER_LIMIT`](crate::provider::DISCOVER_LIMIT). A source that fails is
+    /// left out.
+    pub async fn discover_genre(&self, genre: &crate::genres::SharedGenre) -> Result<Vec<RadioShowHitDto>> {
+        let (enabled, prefs) = self.prefs().await?;
+        let mut lists: Vec<Vec<RadioShowHitDto>> = Vec::new();
+        for p in self.providers.for_discover(&enabled, &prefs) {
+            let ids: Vec<String> = match p.id() {
+                crate::providers::bbc::ID => genre.bbc.iter().map(|c| format!("category-{c}")).collect(),
+                crate::providers::apple::ID => {
+                    genre.apple.map(|g| format!("genre-{g}")).into_iter().collect()
+                }
+                crate::providers::podcastindex::ID => genre
+                    .podcastindex
+                    .map(|c| format!("category-{c}"))
+                    .into_iter()
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for id in ids {
+                match p.discover(&id, &prefs).await {
+                    Ok(hits) => lists.push(hits),
+                    Err(e) => {
+                        tracing::debug!(provider = p.id(), list = %id, error = %e, "radio genre list not read")
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        let (mut seen, mut feeds) = (HashSet::new(), HashSet::new());
+        let longest = lists.iter().map(Vec::len).max().unwrap_or(0);
+        'all: for i in 0..longest {
+            for l in &lists {
+                let Some(h) = l.get(i) else { continue };
+                let feed = h
+                    .feed_url
+                    .as_deref()
+                    .map(|f| f.trim_end_matches('/').to_ascii_lowercase());
+                if !seen.insert((h.provider.clone(), h.external_id.clone()))
+                    || feed.is_some_and(|f| !feeds.insert(f))
+                {
+                    continue;
+                }
+                out.push(h.clone());
+                if out.len() >= crate::provider::DISCOVER_LIMIT {
+                    break 'all;
+                }
+            }
+        }
+        self.mark_in_library(out).await
+    }
+
+    /// The shared genres (RFX-93), for `GET /radio/genres`.
+    pub fn genres(&self) -> Vec<reelix_api_types::radio::RadioGenreDto> {
+        crate::genres::GENRES
+            .iter()
+            .map(|g| reelix_api_types::radio::RadioGenreDto {
+                id: g.id.to_owned(),
+                name: g.name.to_owned(),
+            })
+            .collect()
     }
 
     /// One show by provider and id with its newest episodes, as Discover shows it (the
