@@ -2,9 +2,9 @@
 
 use reelix_api_types::library::Paged;
 use reelix_api_types::radio::{
-    AddRadioShowRequest, RadioEpisodeDto, RadioPreviewEpisodeDto, RadioProviderDto, RadioShowDto,
-    RadioShowEdit, RadioShowEpisodesDto, RadioShowHitDto, RadioShowListQuery, RadioShowPreviewDto,
-    RadioStationDto,
+    AddRadioShowRequest, KEEP_EPISODES_MAX, RadioEpisodeDto, RadioPreviewEpisodeDto, RadioProviderDto,
+    RadioShowDto, RadioShowEdit, RadioShowEpisodesDto, RadioShowHitDto, RadioShowListQuery,
+    RadioShowPreviewDto, RadioStationDto,
 };
 use reelix_core::ContentKind;
 use reelix_parser::QualityFamily;
@@ -181,8 +181,10 @@ impl RadioService {
         self.get_show(id).await
     }
 
-    /// Edits a show's follow choice, monitoring, tags, root folder, quality profile or
-    /// Audiobookshelf item. A new follow choice is re-applied to every episode.
+    /// Edits a show's follow choice, monitoring, tags, root folder, quality profile,
+    /// Audiobookshelf item or episode limit. A new follow choice is re-applied to every
+    /// episode, within the newest `keep_episodes` when the show has a limit; a saved episode
+    /// limit is applied at once ([`RadioService::prune_show`]).
     pub async fn update_show(&self, id: i64, edit: RadioShowEdit) -> Result<RadioShowDto> {
         let mut show = repo::shows::require(&self.db, id).await?;
         let follow_changed = edit.follow.is_some_and(|f| f != show.follow);
@@ -214,15 +216,38 @@ impl RadioService {
         if let Some(a) = edit.abs_item_id {
             show.abs_item_id = a.map(|a| a.trim().to_owned()).filter(|a| !a.is_empty());
         }
+        if let Some(k) = edit.keep_episodes {
+            if let Some(n) = k
+                && !(1..=KEEP_EPISODES_MAX).contains(&n)
+            {
+                return Err(RadioError::Validation(format!(
+                    "keep_episodes must be from 1 to {KEEP_EPISODES_MAX}, or null to keep every episode"
+                )));
+            }
+            show.keep_episodes = k;
+        }
         repo::shows::save_settings(&self.db, &show).await?;
         if follow_changed {
-            for e in repo::episodes::for_show(&self.db, id).await? {
-                let m = monitored_by_follow(show.follow, show.followed_at, e.first_broadcast, false);
+            let mut episodes = repo::episodes::for_show(&self.db, id).await?;
+            // With an episode limit, only the newest N may be wanted again: the older ones were
+            // pruned, or would be at once after downloading.
+            episodes.sort_by(|a, b| b.first_broadcast.cmp(&a.first_broadcast).then(b.id.cmp(&a.id)));
+            for (i, e) in episodes.into_iter().enumerate() {
+                let within = show.keep_episodes.is_none_or(|n| (i as i64) < n);
+                let m =
+                    within && monitored_by_follow(show.follow, show.followed_at, e.first_broadcast, false);
                 repo::episodes::set_monitored(&self.db, e.id, m).await?;
             }
         }
         if follow_changed || monitored_changed {
             self.recompute_statuses(id).await?;
+        }
+        if show.keep_episodes.is_some()
+            && edit.keep_episodes.is_some()
+            && let Err(e) = self.prune_show(id).await
+        {
+            // The limit is saved; the hourly catch-up job applies it again.
+            tracing::warn!(show_id = id, error = %e, "radio keep episodes: not applied");
         }
         self.emit(entities::SHOW, "updated", id);
         self.get_show(id).await
@@ -252,7 +277,7 @@ impl RadioService {
 
     /// Saves `monitored` on episodes `ids` of show `show_id` and their new statuses; emits
     /// `entity.changed` for each changed episode and, if any changed, the show.
-    async fn apply_monitored(&self, show_id: i64, ids: &[i64], monitored: bool) -> Result<()> {
+    pub(crate) async fn apply_monitored(&self, show_id: i64, ids: &[i64], monitored: bool) -> Result<()> {
         let show = repo::shows::require(&self.db, show_id).await?;
         let now = self.now();
         let mut any = false;

@@ -14,7 +14,7 @@ use crate::provider::ShowData;
 const COLS: &str = "s.id, s.provider, s.external_id, s.title, s.sort_title, s.synopsis, s.author, s.web_url, \
     s.first_broadcast, s.station_id, st.name AS station_name, s.artwork_url, s.artwork_path, s.feed_url, \
     s.follow, s.followed_at, s.monitored, s.tags, s.root_folder_id, s.abs_item_id, s.quality_profile_id, \
-    s.refreshed_at, s.added_at, \
+    s.refreshed_at, s.added_at, s.keep_episodes, \
     (SELECT COUNT(*) FROM radio_series x WHERE x.show_id = s.id) AS n_series, \
     (SELECT COUNT(*) FROM radio_episodes e WHERE e.show_id = s.id) AS n_eps, \
     (SELECT COUNT(*) FROM radio_episodes e WHERE e.show_id = s.id AND e.status = 'in_library') AS n_have, \
@@ -58,6 +58,7 @@ fn map(r: &SqliteRow) -> Result<RadioShowDto> {
             wanted_count: count(r, "n_wanted")?,
         },
         abs_web_url: None,
+        keep_episodes: r.try_get("keep_episodes")?,
     })
 }
 
@@ -333,7 +334,7 @@ pub async fn update_from_source(db: &Db, id: i64, data: &ShowData, station_id: O
 pub async fn save_settings(db: &Db, s: &RadioShowDto) -> Result<()> {
     sqlx::query(
         "UPDATE radio_shows SET follow = ?, followed_at = ?, monitored = ?, tags = ?, root_folder_id = ?, \
-            quality_profile_id = ?, abs_item_id = ?, updated_at = ? WHERE id = ?",
+            quality_profile_id = ?, abs_item_id = ?, keep_episodes = ?, updated_at = ? WHERE id = ?",
     )
     .bind(enum_str(&s.follow))
     .bind(ms(s.followed_at))
@@ -342,11 +343,21 @@ pub async fn save_settings(db: &Db, s: &RadioShowDto) -> Result<()> {
     .bind(s.root_folder_id)
     .bind(s.quality_profile_id)
     .bind(&s.abs_item_id)
+    .bind(s.keep_episodes)
     .bind(now_ms())
     .bind(s.id)
     .execute(db.pool())
     .await?;
     Ok(())
+}
+
+/// Ids of shows that keep only their newest episodes (`keep_episodes` set).
+pub async fn with_keep_limit(db: &Db) -> Result<Vec<i64>> {
+    Ok(
+        sqlx::query_scalar("SELECT id FROM radio_shows WHERE keep_episodes IS NOT NULL ORDER BY id")
+            .fetch_all(db.pool())
+            .await?,
+    )
 }
 
 /// Records where downloaded artwork was stored (relative to the data folder; `None` clears).

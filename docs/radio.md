@@ -34,6 +34,7 @@ This page describes what exists and where the remaining parts plug in.
 | `src/wanted.rs` | `wanted_episodes`, `episode_file_name` (indexer search / filing hand-off) |
 | `src/search.rs` | `RadioTarget`, `search_targets`, `request_search`, release checks (`match_release`) |
 | `src/filing.rs` | `file_download`: filing finished downloads into the podcast library |
+| `src/keep.rs` | `prune_show`, `prune_all_shows`: a show's `keep_episodes` limit (RFX-106) |
 | `src/naming.rs` | `radio.naming` tokens and templates |
 | `src/tags.rs` | Tags written into filed episodes (lofty) |
 | `src/settings.rs` | `radio.settings` and folder checks (`check_library_folder`) |
@@ -56,7 +57,8 @@ broadcasts. It also rebuilds `root_folders` to accept `media_kind = 'radio'`.
   `first_broadcast`, `station_id` (→ stations, `SET NULL`), `artwork_url`, `artwork_path`,
   `feed_url`, `follow` (`all` | `from_now_on` | `none`), `followed_at`, `monitored`, `tags`
   (JSON ids), `root_folder_id`, `abs_item_id`, `quality_profile_id` (nullable), `refreshed_at`,
-  `added_at`.
+  `added_at`, `keep_episodes` (nullable, 0019: keep only the newest N episodes; `NULL` keeps
+  every episode).
 - `radio_series`: `show_id` (cascade), `external_id` (unique per show; feeds use `season:N`
   and `specials`), `kind` (`series` | `specials`), `number`, `number_source` (`source` |
   `broadcast_order`), `title`, `synopsis`, `expected_episodes`, `settled_at`,
@@ -145,6 +147,7 @@ Registered in `jobs.rs` and listed under System → Tasks.
 | `refresh_radio_shows` | 12 h | `refresh_shows`; scheduled runs skip feed shows (they are read hourly); a payload `{show_ids, manual}` refreshes those shows |
 | `radio_feed_sync` | 1 h | Refreshes shows whose provider `is_feed()` |
 | `radio_library_sync` | 15 min | Calls the attached `RadioLibrarySync` (the Audiobookshelf reader, see (a)) |
+| `radio_catchup` | 1 h | Catch-up audio for wanted episodes, then every show's `keep_episodes` limit (`prune_all_shows`) |
 | `radio_episode_search`, `radio_missing_search` | queued, 6 h | Indexer searches, handled by the pipeline (see (d)) |
 
 ## API
@@ -157,7 +160,7 @@ root-folder changes need `ADMIN`. Discover's radio routes (any signed-in user) a
 |---|---|
 | `GET /radio/shows` | Paged list; `search`, `station_id`, `followed`, `monitored`, `sort`, `dir`, `page`, `page_size` |
 | `POST /radio/shows` | Add: `{provider, external_id}` or `{link}`, plus `follow`, `monitored`, `root_folder_id`, `quality_profile_id`, `tags` |
-| `GET/PUT/DELETE /radio/shows/{id}` | Read, edit (follow, monitored, tags, root folder, quality profile, `abs_item_id`; `null` clears), delete |
+| `GET/PUT/DELETE /radio/shows/{id}` | Read, edit (follow, monitored, tags, root folder, quality profile, `abs_item_id`, `keep_episodes` 1 to 1000; `null` clears), delete |
 | `GET /radio/shows/{id}/episodes` | `{series, episodes}` |
 | `POST /radio/shows/{id}/refresh` | Queues `refresh_radio_shows` for the show |
 | `GET /radio/episodes/{id}` | Episode with its matched `file` (and `filed_path`/`filed_at` when Reelix filed a download) |
@@ -553,3 +556,18 @@ Not built yet: manual import of an arbitrary folder for a radio episode (retryin
 works), a profile check at filing time (the release was already scored), and telling radio
 apart from music by category in `content_kind_of` (radio releases are recognised by matching
 wanted episodes instead).
+
+### (f) Keeping only the newest episodes (RFX-106)
+
+A show with `keep_episodes = N` keeps the files of its newest N episodes. The episodes with a
+file (a filed path or a matched library file) are put newest first by first broadcast, else
+the library file's publish date, else id. For each one beyond N, every known path of its file
+is deleted only when it is a plain file inside the show's podcast library folder once links
+are resolved; a link, or a path outside the folder, is never touched and that episode is left
+as it is (also when its only file is a library path Reelix cannot see). Otherwise the filed
+path is cleared, the library file record is removed and the episode is unmonitored, so it is
+not searched for or fetched again. Each deletion is logged at info level; no history event is
+written (radio filing records none for deletions). The limit is applied after an episode is
+filed, when `keep_episodes` is saved on a show, and every hour with `radio_catchup`.
+Changing the show's follow choice re-applies it to every episode, which monitors pruned
+episodes again; the limit then removes them again once they are filed.
