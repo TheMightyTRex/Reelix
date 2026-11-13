@@ -9,6 +9,7 @@ mod content;
 pub mod error;
 pub mod jobs;
 pub mod providers;
+mod retention;
 pub(crate) mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -37,6 +38,7 @@ use reelix_parser::parse;
 
 pub use error::{ActivityError, Result};
 pub use providers::{ActivityProviders, ClientHandle, StaticProviders};
+pub use retention::HISTORY_SETTINGS_KEY;
 
 use crate::import::{FileImporter, Hint, ImportedItem, Target, transfer_mode};
 use crate::store::blocklist::{self, NewBlocklist};
@@ -54,6 +56,8 @@ pub mod kinds {
     pub const MANUAL_IMPORT: &str = "manual_import";
     /// Daily housekeeping: forget finished tracked downloads older than 30 days.
     pub const PRUNE_FINISHED: &str = "prune_finished";
+    /// Daily: removes history older than the days to keep (Settings, history; 0 keeps everything).
+    pub const PRUNE_HISTORY: &str = "prune_history";
 }
 
 const IDLE_POLL: Duration = Duration::from_secs(120);
