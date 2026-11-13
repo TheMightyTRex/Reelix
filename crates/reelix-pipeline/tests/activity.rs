@@ -995,6 +995,103 @@ async fn password_protected_rar_waits_with_a_clear_message() {
     assert_eq!(files_under(&folder), [folder.join("password.rar")]);
 }
 
+/// Gives episode `id` the title `title`.
+async fn retitle(e: &Env, id: i64, title: &str) {
+    sqlx::query("UPDATE episodes SET title = ? WHERE id = ?")
+        .bind(title)
+        .bind(id)
+        .execute(e.db.pool())
+        .await
+        .unwrap();
+}
+
+/// The episode file linked to episode `id`, if any.
+async fn file_of(e: &Env, id: i64) -> Option<i64> {
+    sqlx::query_scalar("SELECT episode_file_id FROM episodes WHERE id = ?")
+        .bind(id)
+        .fetch_one(e.db.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn other_numbering_is_imported_by_the_episode_title() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    retitle(&e, eps[1], "Space Race (1)").await;
+    // Broadcast numbering: S01E05 does not exist here, and the grab's episode id is stale.
+    let title = "The.Show.S01E05.Space.Race.Part.1.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hashT", title, None, Some(sid), vec![999_999]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 4000);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hashT", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        tracked::get(&e.db, id).await.unwrap().unwrap().status_messages
+    );
+    assert!(file_of(&e, eps[1]).await.is_some());
+    assert!(file_of(&e, eps[0]).await.is_none());
+    assert!(file_of(&e, eps[2]).await.is_none());
+}
+
+#[tokio::test]
+async fn the_episode_title_wins_over_a_different_number() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    retitle(&e, eps[0], "The Long Goodbye").await;
+    retitle(&e, eps[2], "Homecoming").await;
+    // TVDB numbering calls TMDB's S01E03 "S01E01".
+    let title = "The.Show.S01E01.Homecoming.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hashU", title, None, Some(sid), vec![eps[0]]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 4000);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hashU", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        tracked::get(&e.db, id).await.unwrap().unwrap().status_messages
+    );
+    assert!(file_of(&e, eps[2]).await.is_some());
+    assert!(file_of(&e, eps[0]).await.is_none());
+}
+
+#[tokio::test]
+async fn a_stale_grab_episode_is_not_imported_without_a_title() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    let title = "The.Show.S01E05.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hashV", title, None, Some(sid), vec![999_999]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 4000);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hashV", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_ne!(state_of(&e, id).await, TrackedState::Imported);
+    for ep in eps {
+        assert!(file_of(&e, ep).await.is_none());
+    }
+    let q = e.svc.queue(None, None).await.unwrap();
+    let messages = serde_json::to_string(&q.items).unwrap();
+    assert!(!messages.contains("not part of the series"), "{messages}");
+    assert!(messages.contains("Unable to match episodes"), "{messages}");
+}
+
 /// Inserts a grab history row dated `days_ago` days back.
 async fn history_row(db: &Db, title: &str, days_ago: i64) -> i64 {
     let id = history::insert(
