@@ -339,7 +339,7 @@ impl Modules {
         builder = crate::integrations::register(builder, &self.integrations);
         // pipeline search (search, rss_sync, process_pending)
         builder = reelix_pipeline::search::jobs::register(builder, &self.search);
-        // pipeline activity (download_monitor, process_download, manual_import, prune_finished)
+        // pipeline activity (download_monitor, process_download, manual_import, prune_finished, prune_history)
         builder = reelix_pipeline::monitor::jobs::register(builder, &self.activity);
         // maintenance (backup, update_check)
         builder = crate::maintenance::MaintenanceService::register(builder, &self.maintenance);

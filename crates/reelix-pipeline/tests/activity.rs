@@ -994,3 +994,97 @@ async fn password_protected_rar_waits_with_a_clear_message() {
     assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
     assert_eq!(files_under(&folder), [folder.join("password.rar")]);
 }
+
+/// Inserts a grab history row dated `days_ago` days back.
+async fn history_row(db: &Db, title: &str, days_ago: i64) -> i64 {
+    let id = history::insert(
+        db,
+        &history::NewHistory::new(history::HistoryEvent::Grabbed, title),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE history SET date = date - ? WHERE id = ?")
+        .bind(days_ago * 86_400_000)
+        .bind(id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn history_is_cleaned_up_after_the_days_to_keep() {
+    use reelix_api_types::pipeline::HistorySettings;
+
+    let e = env(Protocol::Usenet, false).await;
+    history_row(&e.db, "Ancient.Release", 400).await;
+    history_row(&e.db, "Older.Release", 120).await;
+    let kept = history_row(&e.db, "Recent.Release", 10).await;
+
+    // Recommended default: 90 days.
+    assert_eq!(e.svc.history_settings().await.unwrap().keep_days, 90);
+    assert_eq!(e.svc.prune_history().await.unwrap(), 2);
+    let (rows, total) = history::list(&e.db, &Default::default(), 0, 10).await.unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(rows[0].id, kept);
+
+    // 0 keeps everything.
+    history_row(&e.db, "Another.Ancient.Release", 4000).await;
+    e.svc
+        .set_history_settings(HistorySettings { keep_days: 0 })
+        .await
+        .unwrap();
+    assert_eq!(e.svc.prune_history().await.unwrap(), 0);
+    assert_eq!(
+        history::list(&e.db, &Default::default(), 0, 10).await.unwrap().1,
+        2
+    );
+
+    // A shorter setting takes effect on the next run.
+    e.svc
+        .set_history_settings(HistorySettings { keep_days: 5 })
+        .await
+        .unwrap();
+    assert_eq!(e.svc.prune_history().await.unwrap(), 2);
+    assert_eq!(
+        history::list(&e.db, &Default::default(), 0, 10).await.unwrap().1,
+        0
+    );
+
+    assert!(
+        e.svc
+            .set_history_settings(HistorySettings {
+                keep_days: HistorySettings::MAX_KEEP_DAYS + 1
+            })
+            .await
+            .is_err()
+    );
+    assert_eq!(e.svc.history_settings().await.unwrap().keep_days, 5);
+}
+
+#[tokio::test]
+async fn delete_history_before_a_date() {
+    let e = env(Protocol::Usenet, false).await;
+    history_row(&e.db, "Old.Release", 30).await;
+    history_row(&e.db, "New.Release", 1).await;
+    let mut events = e.events.subscribe();
+    let before = chrono::Utc::now() - chrono::Duration::days(7);
+    assert_eq!(e.svc.delete_history_before(before).await.unwrap(), 1);
+    assert!(matches!(
+        events.try_recv(),
+        Ok(DomainEvent::EntityChanged { ref entity, ref action, .. }) if entity == "history" && action == "deleted"
+    ));
+    let (rows, _) = history::list(&e.db, &Default::default(), 0, 10).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].source_title, "New.Release");
+}
+
+#[test]
+fn history_clean_up_runs_daily() {
+    let task = reelix_pipeline::monitor::jobs::tasks()
+        .into_iter()
+        .find(|t| t.kind == "prune_history")
+        .expect("prune_history is scheduled");
+    assert_eq!(task.interval, std::time::Duration::from_secs(24 * 3600));
+    assert!(!task.run_on_startup);
+}
