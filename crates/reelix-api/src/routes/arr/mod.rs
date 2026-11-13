@@ -23,6 +23,7 @@ use axum::{Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use reelix_api_types::library::{MediaFileDto, MediaInfoDto};
 use reelix_api_types::pipeline::{QueueItemDto, QueueRemoveQuery};
+use reelix_api_types::{HealthCheck, HealthLevel};
 use reelix_core::{ContentKind, MediaKind, Permissions};
 use reelix_decision::{ProfileItem, QualityProfile};
 use reelix_library::LibraryService;
@@ -395,10 +396,35 @@ async fn system_status(
     }))
 }
 
-/// Health in the *arr shape (Reelix's own checks live under System → Health).
-async fn health(user: CurrentUser) -> Reply {
+/// Reelix's own health checks (`/api/v1/system/health`) in the *arr shape. Like the *arr apps,
+/// only problems are listed, so a healthy Reelix answers an empty list. Every check is listed
+/// under every app, since the database, data folder, indexers and download clients are shared.
+async fn health(State(state): State<AppState>, user: CurrentUser) -> Reply {
     authorize(&user)?;
-    ok(json!([]))
+    let checks = crate::routes::system::run_health_checks(&state).await;
+    ok(Value::Array(arr_health(&checks)))
+}
+
+/// `[{id, source, type, message, wikiUrl}]` for the checks that are not `ok`; `type` is
+/// `warning` or `error`, as in Sonarr's and Radarr's `HealthCheckResult`.
+fn arr_health(checks: &[HealthCheck]) -> Vec<Value> {
+    checks
+        .iter()
+        .filter(|c| c.level != HealthLevel::Ok)
+        .enumerate()
+        .map(|(i, c)| {
+            json!({
+                "id": i + 1,
+                "source": c.source,
+                "type": match c.level {
+                    HealthLevel::Error => "error",
+                    _ => "warning",
+                },
+                "message": c.message,
+                "wikiUrl": "",
+            })
+        })
+        .collect()
 }
 
 async fn content_roots(
