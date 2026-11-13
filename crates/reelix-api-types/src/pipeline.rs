@@ -256,6 +256,50 @@ pub struct HistoryQuery {
     pub event_type: Option<String>,
 }
 
+/// `DELETE /history?before=`: removes every history row dated before this time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+#[cfg_attr(feature = "openapi", into_params(parameter_in = Query))]
+pub struct HistoryDeleteQuery {
+    /// RFC 3339 time, for example `2026-08-01T00:00:00Z`; rows dated before it are removed.
+    pub before: DateTime<Utc>,
+}
+
+/// What `DELETE /history` removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HistoryDeleteResult {
+    pub removed: u64,
+}
+
+/// How long history is kept (`GET`/`PUT /settings/history`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HistorySettings {
+    /// Days of history to keep; older rows are removed once a day. 0 keeps everything.
+    #[serde(default = "HistorySettings::default_keep_days")]
+    pub keep_days: u32,
+}
+
+impl HistorySettings {
+    /// Recommended: about three months.
+    pub const DEFAULT_KEEP_DAYS: u32 = 90;
+    /// Upper limit (100 years); larger values are refused.
+    pub const MAX_KEEP_DAYS: u32 = 36_500;
+
+    fn default_keep_days() -> u32 {
+        Self::DEFAULT_KEEP_DAYS
+    }
+}
+
+impl Default for HistorySettings {
+    fn default() -> Self {
+        Self {
+            keep_days: Self::DEFAULT_KEEP_DAYS,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HistoryDto {

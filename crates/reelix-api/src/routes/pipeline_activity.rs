@@ -1,5 +1,6 @@
 //! Pipeline activity side (M4): queue, history and manual import. Everything needs
-//! `MANAGE_LIBRARY`; reading the queue also accepts `VIEW_QUEUE`. DTOs: `reelix_api_types::pipeline`.
+//! `MANAGE_LIBRARY`; reading the queue also accepts `VIEW_QUEUE`. Deleting history and the
+//! history settings need `ADMIN`. DTOs: `reelix_api_types::pipeline`.
 
 use std::sync::Arc;
 
@@ -9,8 +10,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use reelix_api_types::pipeline::{
-    HistoryDto, HistoryQuery, ManualImportItemDto, ManualImportQuery, ManualImportRequest, PageQuery, Paged,
-    QueueBulkFailure, QueueBulkRemove, QueueBulkRemoveResult, QueueItemDto, QueueRemoveQuery,
+    HistoryDeleteQuery, HistoryDeleteResult, HistoryDto, HistoryQuery, HistorySettings, ManualImportItemDto,
+    ManualImportQuery, ManualImportRequest, PageQuery, Paged, QueueBulkFailure, QueueBulkRemove,
+    QueueBulkRemoveResult, QueueItemDto, QueueRemoveQuery,
 };
 use reelix_api_types::{ApiErrorBody, EnqueuedJob, HealthCheck, HealthLevel};
 use reelix_core::Permissions;
@@ -29,9 +31,13 @@ pub fn routes() -> Router<AppState> {
         .route("/queue/{id}", delete(remove_queue_item))
         .route("/queue/{id}/import", post(retry_import))
         .route("/queue/{id}/ignore", post(ignore_queue_item))
-        .route("/history", get(history))
+        .route("/history", get(history).delete(delete_history))
         .route("/history/{id}/failed", post(mark_failed))
         .route("/manualimport", get(manual_import_preview).post(manual_import))
+        .route(
+            "/settings/history",
+            get(get_history_settings).put(put_history_settings),
+        )
 }
 
 #[derive(OpenApi)]
@@ -43,6 +49,9 @@ pub fn routes() -> Router<AppState> {
         retry_import,
         ignore_queue_item,
         history,
+        delete_history,
+        get_history_settings,
+        put_history_settings,
         mark_failed,
         manual_import_preview,
         manual_import,
@@ -53,6 +62,8 @@ pub fn routes() -> Router<AppState> {
         QueueBulkRemoveResult,
         QueueBulkFailure,
         HistoryDto,
+        HistoryDeleteResult,
+        HistorySettings,
         ManualImportItemDto,
         ManualImportRequest,
         reelix_api_types::pipeline::ManualImportFile,
@@ -220,6 +231,59 @@ pub async fn history(
 ) -> ApiResult<ApiJson<Paged<HistoryDto>>> {
     require(&user)?;
     Ok(ApiJson(svc(&state)?.history(&q).await?))
+}
+
+/// Deletes every history row dated before `before` (admin). Reelix also does this once a
+/// day for rows older than the days to keep (`/settings/history`).
+#[utoipa::path(delete, path = "/api/v1/history", tag = "pipeline", params(HistoryDeleteQuery),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Deleted", body = HistoryDeleteResult),
+        (status = 400, description = "Missing or invalid `before`", body = ApiErrorBody),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn delete_history(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiQuery(q): ApiQuery<HistoryDeleteQuery>,
+) -> ApiResult<ApiJson<HistoryDeleteResult>> {
+    user.require(Permissions::ADMIN)?;
+    let removed = svc(&state)?.delete_history_before(q.before).await?;
+    Ok(ApiJson(HistoryDeleteResult { removed }))
+}
+
+/// How many days of history to keep (admin). Default 90; 0 keeps everything.
+#[utoipa::path(get, path = "/api/v1/settings/history", tag = "pipeline",
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "History settings", body = HistorySettings),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn get_history_settings(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> ApiResult<ApiJson<HistorySettings>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(svc(&state)?.history_settings().await?))
+}
+
+/// Sets how many days of history to keep (admin; 0 to 36500, 0 keeps everything). The daily
+/// task "Clean up history" removes older rows.
+#[utoipa::path(put, path = "/api/v1/settings/history", tag = "pipeline",
+    request_body = HistorySettings,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Saved", body = HistorySettings),
+        (status = 400, description = "keep_days out of range", body = ApiErrorBody),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn put_history_settings(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(settings): ApiJson<HistorySettings>,
+) -> ApiResult<ApiJson<HistorySettings>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(svc(&state)?.set_history_settings(settings).await?))
 }
 
 /// Marks a grabbed release as failed: history `download_failed`, blocklist, re-search.
