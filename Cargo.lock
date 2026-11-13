@@ -4402,6 +4402,7 @@ version = "0.8.7"
 dependencies = [
  "async-trait",
  "chrono",
+ "quick-xml 0.41.0",
  "reelix-core",
  "regex",
  "reqwest",

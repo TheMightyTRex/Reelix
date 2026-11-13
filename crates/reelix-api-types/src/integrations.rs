@@ -56,7 +56,8 @@ pub struct CreateExclusionRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ImportListKindDto {
     pub implementation: String,
-    /// `video` (movies/series) or `music` (artists/albums).
+    /// `video` (movies/series), `music` (artists/albums) or `books` (Goodreads, Hardcover and
+    /// book exports).
     pub content: String,
 }
 

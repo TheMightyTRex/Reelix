@@ -143,6 +143,7 @@ pub fn catalog(kind: ProviderKind, defs: &DefinitionStore) -> Vec<ProviderSchema
                 .map(|mut s| {
                     match reelix_lists::content_of(&s.implementation) {
                         reelix_lists::ListContent::Music => s.fields.extend(music_import_list_fields()),
+                        reelix_lists::ListContent::Books => s.fields.extend(book_import_list_fields()),
                         reelix_lists::ListContent::Video => s.fields.extend(import_list_fields()),
                     }
                     s
@@ -162,7 +163,7 @@ fn options(values: &[(&str, &str)]) -> Vec<SelectOption> {
         .collect()
 }
 
-/// `video` or `music`: what an import-list implementation yields (and so which target fields
+/// `video`, `music` or `books`: what an import-list implementation yields (and so which target fields
 /// its schema carries).
 pub fn import_list_content(implementation: &str) -> &'static str {
     reelix_lists::content_of(implementation).as_str()
@@ -242,6 +243,53 @@ fn music_import_list_fields() -> Vec<FieldSchema> {
         FieldSchema::new("search_on_add", "Search on add", FieldKind::Bool)
             .default_value(true)
             .help("Search for monitored albums right away"),
+    ]
+}
+
+/// Names of the Reelix-level fields added to every book import-list schema (RFX-88).
+pub const BOOK_IMPORT_LIST_FIELDS: [&str; 7] = [
+    "enabled_auto_add",
+    "formats",
+    "quality_profile_id",
+    "root_folder_id",
+    "audio_quality_profile_id",
+    "audio_root_folder_id",
+    "search_on_add",
+];
+
+/// How the books of a list are added (the row's tags are applied to added authors).
+fn book_import_list_fields() -> Vec<FieldSchema> {
+    vec![
+        FieldSchema::new("enabled_auto_add", "Add automatically", FieldKind::Bool)
+            .default_value(true)
+            .help("Add new books from the list on every sync"),
+        FieldSchema::new(
+            "formats",
+            "Formats",
+            FieldKind::Select {
+                options: options(&[
+                    ("both", "Ebook and audiobook"),
+                    ("ebook", "Ebook only"),
+                    ("audiobook", "Audiobook only"),
+                ]),
+            },
+        )
+        .default_value("both"),
+        FieldSchema::new("quality_profile_id", "Ebook quality profile", FieldKind::Number)
+            .help("Ebook quality profile id; empty uses the first ebook profile"),
+        FieldSchema::new("root_folder_id", "Ebook root folder", FieldKind::Number)
+            .help("Ebook root folder id; empty uses the first ebook root folder"),
+        FieldSchema::new(
+            "audio_quality_profile_id",
+            "Audiobook quality profile",
+            FieldKind::Number,
+        )
+        .help("Audiobook quality profile id; empty uses the first audiobook profile"),
+        FieldSchema::new("audio_root_folder_id", "Audiobook root folder", FieldKind::Number)
+            .help("Audiobook root folder id; empty uses the first audiobook root folder"),
+        FieldSchema::new("search_on_add", "Search on add", FieldKind::Bool)
+            .default_value(true)
+            .help("Search for added books right away"),
     ]
 }
 
@@ -409,10 +457,10 @@ mod tests {
         }
         assert!(find(ProviderKind::Notification, "discord", &defs).is_some());
         for s in catalog(ProviderKind::ImportList, &defs) {
-            let fields: &[&str] = if import_list_content(&s.schema.implementation) == "music" {
-                &MUSIC_IMPORT_LIST_FIELDS
-            } else {
-                &IMPORT_LIST_FIELDS
+            let fields: &[&str] = match import_list_content(&s.schema.implementation) {
+                "music" => &MUSIC_IMPORT_LIST_FIELDS,
+                "books" => &BOOK_IMPORT_LIST_FIELDS,
+                _ => &IMPORT_LIST_FIELDS,
             };
             for f in fields {
                 assert!(
