@@ -91,7 +91,7 @@ async fn data_dir_writable(dir: std::path::PathBuf) -> WriteTest {
     res
 }
 
-async fn run_health_checks(state: &AppState) -> Vec<HealthCheck> {
+pub(crate) async fn run_health_checks(state: &AppState) -> Vec<HealthCheck> {
     let mut checks = Vec::new();
     checks.push(match state.db().ping().await {
         Ok(()) => check("database", HealthLevel::Ok, "Database is reachable".into()),
