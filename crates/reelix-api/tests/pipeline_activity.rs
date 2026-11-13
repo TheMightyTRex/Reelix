@@ -114,24 +114,28 @@ async fn admin(app: &TestApp) -> String {
 }
 
 async fn plain_user(app: &TestApp) -> String {
+    user_with(app, "plain", Permissions::ROLE_USER).await
+}
+
+async fn user_with(app: &TestApp, name: &str, permissions: Permissions) -> String {
     let hash = reelix_api::auth::hash_password("user-password").unwrap();
     app.state
         .db()
         .users()
         .create(NewUser {
-            username: "plain".into(),
+            username: name.into(),
             email: None,
             display_name: None,
             password_hash: Some(hash),
             auth_source: AuthSource::Local,
-            permissions: Permissions::ROLE_USER,
+            permissions,
         })
         .await
         .unwrap();
     cookie_from(
         app,
         "/api/v1/auth/login",
-        json!({"username": "plain", "password": "user-password"}),
+        json!({"username": name, "password": "user-password"}),
         StatusCode::OK,
     )
     .await
@@ -333,4 +337,98 @@ async fn manual_import_routes_validate() {
     .await;
     assert_eq!(s, StatusCode::ACCEPTED);
     assert!(job["job_id"].is_i64());
+}
+
+/// Moves a history row's date back by `days`.
+async fn age_history(db: &Db, id: i64, days: i64) {
+    sqlx::query("UPDATE history SET date = date - ? WHERE id = ?")
+        .bind(days * 86_400_000)
+        .bind(id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn delete_history_before_needs_admin() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let manager = user_with(&app, "manager", Permissions::ROLE_MANAGER).await;
+    let db = app.state.db().clone();
+    let old = history::insert(&db, &NewHistory::new(HistoryEvent::Grabbed, "Old.Release.1080p"))
+        .await
+        .unwrap();
+    history::insert(&db, &NewHistory::new(HistoryEvent::Grabbed, "New.Release.1080p"))
+        .await
+        .unwrap();
+    age_history(&db, old, 200).await;
+    let before = (chrono::Utc::now() - chrono::Duration::days(100)).format("%Y-%m-%dT%H:%M:%SZ");
+
+    let uri = format!("/api/v1/history?before={before}");
+    let (s, _) = call(&app, Method::DELETE, &uri, &manager, None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = call(&app, Method::DELETE, "/api/v1/history", &admin, None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "before is required");
+    let (s, _) = call(
+        &app,
+        Method::DELETE,
+        "/api/v1/history?before=yesterday",
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let (s, body) = call(&app, Method::DELETE, &uri, &admin, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, json!({"removed": 1}));
+    let (_, list) = call(&app, Method::GET, "/api/v1/history", &admin, None).await;
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["items"][0]["source_title"], "New.Release.1080p");
+    let (_, body) = call(&app, Method::DELETE, &uri, &admin, None).await;
+    assert_eq!(body, json!({"removed": 0}));
+}
+
+#[tokio::test]
+async fn history_settings_round_trip() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let manager = user_with(&app, "manager", Permissions::ROLE_MANAGER).await;
+
+    let (s, _) = call(&app, Method::GET, "/api/v1/settings/history", &manager, None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, body) = call(&app, Method::GET, "/api/v1/settings/history", &admin, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, json!({"keep_days": 90}), "recommended default");
+
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/history",
+        &manager,
+        Some(json!({"keep_days": 30})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/history",
+        &admin,
+        Some(json!({"keep_days": 40000})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, body) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/history",
+        &admin,
+        Some(json!({"keep_days": 0})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, json!({"keep_days": 0}));
+    let (_, body) = call(&app, Method::GET, "/api/v1/settings/history", &admin, None).await;
+    assert_eq!(body, json!({"keep_days": 0}));
 }
