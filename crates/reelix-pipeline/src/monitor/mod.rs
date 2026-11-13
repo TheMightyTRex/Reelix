@@ -740,8 +740,17 @@ impl ActivityService {
                     .iter()
                     .flat_map(|i| i.target.episode_ids().iter().copied())
                     .collect();
-                let complete = !imported.is_empty()
-                    && (t.series_id.is_none() || t.episode_ids.iter().all(|e| covered.contains(e)));
+                // An episode found by its title stands in for a grab episode named with other
+                // numbering (broadcast or TVDB), one for one.
+                let by_title = imported
+                    .iter()
+                    .filter(|i| i.matched_by_title)
+                    .flat_map(|i| i.target.episode_ids().iter().copied())
+                    .filter(|e| !t.episode_ids.contains(e))
+                    .collect::<HashSet<i64>>()
+                    .len();
+                let missing = t.episode_ids.iter().filter(|e| !covered.contains(e)).count();
+                let complete = !imported.is_empty() && (t.series_id.is_none() || missing <= by_title);
                 if complete {
                     self.set_state(&current, TrackedState::Imported, Vec::new())
                         .await?;
