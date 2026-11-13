@@ -6,8 +6,8 @@ use chrono::NaiveDate;
 use reelix_core::MediaKind;
 use reelix_metadata::http::RetryPolicy;
 use reelix_metadata::{
-    DiscoverFeed, ExternalSource, MetaError, MetadataProvider, MovieStatus, MultiHit, SeriesExternalId,
-    SeriesStatus, TimeWindow, Tmdb, TmdbAuth, TmdbOptions,
+    DiscoverFeed, EpisodeGroupSummary, ExternalSource, MetaError, MetadataProvider, MovieStatus, MultiHit,
+    SeriesExternalId, SeriesStatus, TimeWindow, Tmdb, TmdbAuth, TmdbOptions, pick_aired_order,
 };
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -623,4 +623,101 @@ async fn client_side_rate_limit_applies() {
         "third request waited for the window"
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
+
+fn group(id: &str, name: &str, kind: u8, episodes: u32) -> EpisodeGroupSummary {
+    EpisodeGroupSummary {
+        id: id.into(),
+        name: name.into(),
+        kind,
+        episode_count: episodes,
+        group_count: 1,
+    }
+}
+
+#[test]
+fn the_aired_order_group_is_picked() {
+    use reelix_metadata::episode_group_type::*;
+    let dvd = group("a", "DVD Order", DVD, 100);
+    let absolute = group("b", "Absolute", ABSOLUTE, 100);
+    let tv = group("c", "Broadcast", TV, 50);
+    let air = group("d", "Original air date", ORIGINAL_AIR_DATE, 40);
+    let aired = group("e", "Aired Order", ORIGINAL_AIR_DATE, 30);
+    let tvdb = group("f", "TVDB Order", TV, 20);
+    let tvdb_dvd = group("g", "TVDB DVD", DVD, 200);
+    assert_eq!(pick_aired_order(&[dvd.clone(), absolute.clone()]), None);
+    assert_eq!(pick_aired_order(&[dvd.clone(), tv.clone()]), Some(&tv));
+    assert_eq!(pick_aired_order(&[tv.clone(), air.clone()]), Some(&air));
+    assert_eq!(
+        pick_aired_order(&[air.clone(), aired.clone(), tv.clone()]),
+        Some(&aired)
+    );
+    assert_eq!(
+        pick_aired_order(&[aired.clone(), tvdb.clone(), tvdb_dvd.clone()]),
+        Some(&tvdb)
+    );
+    // Ties go to the group with the most episodes; empty groups are never picked.
+    let bigger = group("h", "Aired Order (full)", ORIGINAL_AIR_DATE, 31);
+    assert_eq!(pick_aired_order(&[aired.clone(), bigger.clone()]), Some(&bigger));
+    assert_eq!(
+        pick_aired_order(&[group("i", "Aired", ORIGINAL_AIR_DATE, 0)]),
+        None
+    );
+}
+
+#[tokio::test]
+async fn aired_order_reads_the_picked_episode_group() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tv/1100/episode_groups"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1100,
+            "results": [
+                {"id": "5aa0000000000000000000d1", "name": "DVD Order", "type": 3, "episode_count": 13, "group_count": 1},
+                {"id": "5aa0000000000000000000a1", "name": "Aired Order", "type": 1, "episode_count": 13, "group_count": 2,
+                 "description": "", "network": null}
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/tv/episode_group/5aa0000000000000000000a1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "5aa0000000000000000000a1",
+            "name": "Aired Order",
+            "type": 1,
+            "groups": [
+                {"id": "x1", "name": "Season 3", "order": 3, "locked": true, "episodes": [
+                    {"id": 1, "name": "Heart of Archness (1)", "season_number": 3, "episode_number": 1, "order": 0},
+                    {"id": 2, "name": "Space Race (1)", "season_number": 4, "episode_number": 1, "order": 10}
+                ]},
+                {"id": "x0", "name": "Specials", "order": 0, "episodes": [
+                    {"id": 3, "name": "Pilot", "season_number": 0, "episode_number": 2, "order": 0}
+                ]}
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let tmdb = client(&server);
+    let g = tmdb.aired_order(1100).await.unwrap().unwrap();
+    assert_eq!(g.name, "Aired Order");
+    assert_eq!(g.numbering(), [(3, 1, 3, 1), (3, 11, 4, 1), (0, 1, 0, 2)]);
+    // Cached: a second refresh within the details lifetime sends no request.
+    assert_eq!(tmdb.aired_order(1100).await.unwrap().unwrap(), g);
+}
+
+#[tokio::test]
+async fn a_series_without_an_aired_order_group_has_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tv/1200/episode_groups"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": 1200, "results": []})),
+        )
+        .mount(&server)
+        .await;
+    assert_eq!(client(&server).aired_order(1200).await.unwrap(), None);
+    assert!(client(&server).episode_group("../movie/1").await.is_err());
 }

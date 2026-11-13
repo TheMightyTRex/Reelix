@@ -1185,3 +1185,103 @@ fn history_clean_up_runs_daily() {
     assert_eq!(task.interval, std::time::Duration::from_secs(24 * 3600));
     assert!(!task.run_on_startup);
 }
+
+/// Keeps an aired-order map for the series: `(season, episode, tmdb_season, tmdb_episode)`.
+async fn aired_order(e: &Env, sid: i64, entries: &[(u32, u32, u32, u32)]) {
+    let entries: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(s, ep, ts, te)| serde_json::json!({"season": s, "episode": ep, "tmdb_season": ts, "tmdb_episode": te}))
+        .collect();
+    sqlx::query(
+        "INSERT INTO series_episode_map (series_id, group_id, group_name, entries, refreshed_at) \
+         VALUES (?, 'g1', 'Aired Order', ?, 0)",
+    )
+    .bind(sid)
+    .bind(serde_json::Value::Array(entries).to_string())
+    .execute(e.db.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn other_numbering_without_a_title_is_imported_by_the_aired_order() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    // Aired order: a special first, so aired S01E05 is TMDB's S01E02.
+    aired_order(&e, sid, &[(1, 4, 1, 1), (1, 5, 1, 2), (1, 6, 1, 3)]).await;
+    let title = "The.Show.S01E05.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hashW", title, None, Some(sid), vec![999_999]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 4000);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hashW", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        tracked::get(&e.db, id).await.unwrap().unwrap().status_messages
+    );
+    assert!(file_of(&e, eps[1]).await.is_some());
+    assert!(file_of(&e, eps[0]).await.is_none());
+    assert!(file_of(&e, eps[2]).await.is_none());
+}
+
+#[tokio::test]
+async fn a_season_pack_in_aired_order_is_read_in_that_order_throughout() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    // TMDB joins the two-part pilot as S01E01, so aired S01E03 and S01E04 are TMDB's E02 and E03.
+    aired_order(&e, sid, &[(1, 1, 1, 1), (1, 2, 1, 1), (1, 3, 1, 2), (1, 4, 1, 3)]).await;
+    let title = "The.Show.S01.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hashX", title, None, Some(sid), eps.clone()).await;
+    let folder = e.downloads.join(title);
+    for (i, n) in ["E01E02", "E03", "E04"].iter().enumerate() {
+        write(
+            &folder.join(format!("The.Show.S01{n}.1080p.WEB-DL.x264-GRP.mkv")),
+            4000 + i,
+        );
+    }
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hashX", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        tracked::get(&e.db, id).await.unwrap().unwrap().status_messages
+    );
+    let mut files = Vec::new();
+    for ep in &eps {
+        files.push(file_of(&e, *ep).await);
+    }
+    assert!(files.iter().all(Option::is_some), "{files:?}");
+    let distinct: std::collections::HashSet<_> = files.iter().collect();
+    assert_eq!(distinct.len(), 3, "{files:?}");
+}
+
+#[tokio::test]
+async fn tmdb_numbers_win_when_every_file_fits_them() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    aired_order(&e, sid, &[(1, 1, 1, 2), (1, 2, 1, 3), (1, 3, 1, 1)]).await;
+    let title = "The.Show.S01E01.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hashY", title, None, Some(sid), vec![eps[0]]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 4000);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hashY", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::Imported);
+    assert!(file_of(&e, eps[0]).await.is_some());
+    assert!(file_of(&e, eps[1]).await.is_none());
+}

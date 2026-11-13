@@ -325,6 +325,39 @@ impl Tmdb {
         Ok(raw.into_model(&self.img()))
     }
 
+    /// A series' episode groups (other orders of its episodes), without their episodes.
+    pub async fn episode_groups(&self, tv_id: TmdbId) -> Result<Vec<EpisodeGroupSummary>, MetaError> {
+        #[derive(serde::Deserialize)]
+        struct List {
+            #[serde(default)]
+            results: Vec<EpisodeGroupSummary>,
+        }
+        let raw: List = self
+            .get(&format!("/tv/{tv_id}/episode_groups"), &[], self.details_ttl())
+            .await?;
+        Ok(raw.results)
+    }
+
+    /// One episode group with its groups and episodes.
+    pub async fn episode_group(&self, id: &str) -> Result<EpisodeGroup, MetaError> {
+        // TMDB's group ids are 24 hex digits; anything else would change the path.
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(MetaError::Decode(format!("invalid episode group id {id:?}")));
+        }
+        self.get(&format!("/tv/episode_group/{id}"), &[], self.details_ttl())
+            .await
+    }
+
+    /// The series' episode group in aired (TVDB and broadcast) order, picked by
+    /// [`pick_aired_order`], with its episodes. `None` when the series has no such group.
+    pub async fn aired_order(&self, tv_id: TmdbId) -> Result<Option<EpisodeGroup>, MetaError> {
+        let groups = self.episode_groups(tv_id).await?;
+        match pick_aired_order(&groups) {
+            Some(g) => Ok(Some(self.episode_group(&g.id).await?)),
+            None => Ok(None),
+        }
+    }
+
     /// Resolves IMDb (`tt…`) or TVDB ids to TMDB results.
     pub async fn find(&self, source: ExternalSource, id: &str) -> Result<FindResults, MetaError> {
         let src = match source {

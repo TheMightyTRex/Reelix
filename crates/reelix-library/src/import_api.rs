@@ -59,6 +59,9 @@ pub struct SeriesTarget {
     pub episodes: Vec<EpisodeDto>,
     pub profile: Option<QualityProfile>,
     pub files: Vec<ExistingFile>,
+    /// The series' episodes in aired (TVDB and broadcast) order mapped to TMDB's numbers, when
+    /// TMDB has such an episode group and its numbers differ.
+    pub episode_map: Option<reelix_import::episode_map::EpisodeOrderMap>,
 }
 
 impl SeriesTarget {
@@ -222,12 +225,14 @@ impl Importer<'_> {
             .iter()
             .map(|f| existing(f, &series.path, map.get(&f.id).cloned().unwrap_or_default()))
             .collect();
+        let episode_map = repo::episode_map(&svc.db, series_id).await?;
         Ok(SeriesTarget {
             profile: cache.profile(series.quality_profile_id).cloned(),
             series_type: series_type(series.series_type),
             series,
             episodes,
             files,
+            episode_map,
         })
     }
 

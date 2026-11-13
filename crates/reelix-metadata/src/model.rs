@@ -515,3 +515,108 @@ mod tests {
         assert_eq!(up, DiscoverFeed::Upcoming);
     }
 }
+
+/// TMDB episode group types (`type` in `/tv/{id}/episode_groups`).
+pub mod episode_group_type {
+    pub const ORIGINAL_AIR_DATE: u8 = 1;
+    pub const ABSOLUTE: u8 = 2;
+    pub const DVD: u8 = 3;
+    pub const DIGITAL: u8 = 4;
+    pub const STORY_ARC: u8 = 5;
+    pub const PRODUCTION: u8 = 6;
+    pub const TV: u8 = 7;
+}
+
+/// One of a series' episode groups on TMDB: another order of the same episodes (aired, DVD,
+/// absolute and so on), as listed by `/tv/{id}/episode_groups`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeGroupSummary {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// See [`episode_group_type`].
+    #[serde(rename = "type", default)]
+    pub kind: u8,
+    #[serde(default)]
+    pub episode_count: u32,
+    #[serde(default)]
+    pub group_count: u32,
+}
+
+/// An episode group with its groups (seasons, in most orders) and their episodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeGroup {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(rename = "type", default)]
+    pub kind: u8,
+    #[serde(default)]
+    pub groups: Vec<EpisodeGroupSeason>,
+}
+
+/// One group of an episode group. In season-based orders its `order` is the season number
+/// (0 for specials).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeGroupSeason {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub order: u32,
+    #[serde(default)]
+    pub episodes: Vec<EpisodeGroupEpisode>,
+}
+
+/// An episode in a group: its TMDB numbers and its place in the group (`order`, from 0).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpisodeGroupEpisode {
+    pub season_number: u32,
+    pub episode_number: u32,
+    #[serde(default)]
+    pub order: u32,
+}
+
+impl EpisodeGroup {
+    /// `(season, episode, tmdb_season, tmdb_episode)` for every episode: the group's order as
+    /// season (`order` of the group) and episode (`order` of the episode plus one), as Plex,
+    /// Jellyfin and the *arr apps read episode groups.
+    pub fn numbering(&self) -> Vec<(u32, u32, u32, u32)> {
+        self.groups
+            .iter()
+            .flat_map(|g| {
+                g.episodes
+                    .iter()
+                    .map(move |e| (g.order, e.order + 1, e.season_number, e.episode_number))
+            })
+            .collect()
+    }
+}
+
+/// The episode group most likely to number episodes as TVDB and broadcast release names do:
+/// one named after TVDB first, then an "aired order" group by original air date, then any group
+/// by original air date, then any TV group. Ties go to the group with the most episodes. Other
+/// orders (DVD, absolute, story arc, production, digital) are never picked.
+pub fn pick_aired_order(groups: &[EpisodeGroupSummary]) -> Option<&EpisodeGroupSummary> {
+    use episode_group_type::{ORIGINAL_AIR_DATE, TV};
+    let rank = |g: &EpisodeGroupSummary| {
+        let name = g.name.to_lowercase();
+        let aired = g.kind == ORIGINAL_AIR_DATE || g.kind == TV;
+        if name.contains("tvdb") && aired {
+            Some(0)
+        } else if g.kind == ORIGINAL_AIR_DATE && name.contains("aired") {
+            Some(1)
+        } else if g.kind == ORIGINAL_AIR_DATE {
+            Some(2)
+        } else if g.kind == TV {
+            Some(3)
+        } else {
+            None
+        }
+    };
+    groups
+        .iter()
+        .filter(|g| g.episode_count > 0)
+        .filter_map(|g| rank(g).map(|r| (r, g)))
+        .min_by(|(ra, a), (rb, b)| ra.cmp(rb).then(b.episode_count.cmp(&a.episode_count)))
+        .map(|(_, g)| g)
+}

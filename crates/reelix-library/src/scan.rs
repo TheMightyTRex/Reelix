@@ -8,6 +8,7 @@ use futures::stream::{self, StreamExt};
 use reelix_api_types::library::{LibrarySearchKind, SearchRequest};
 
 use reelix_decision::{FormatInput, QualityProfile, matching_formats, score_formats};
+use reelix_import::episode_map::match_by_episode_map;
 use reelix_import::files::{FileKind, FoundFile, SampleRules, ScanOptions, detect_sample, scan_async};
 use reelix_import::matching::{ExpectedEpisode, match_parsed_episodes};
 use reelix_import::mediainfo::{MediaInfo, ProbeConfig, probe};
@@ -246,6 +247,7 @@ impl LibraryService {
                 scene_absolute: e.scene_absolute_number,
             })
             .collect();
+        let episode_map = repo::episode_map(&self.db, id).await?;
         let existing = files::list(&self.db, FileTable::Episode, Some(&[id])).await?;
         let by_rel: HashMap<&str, &FileRow> =
             existing.iter().map(|f| (f.relative_path.as_str(), f)).collect();
@@ -263,16 +265,25 @@ impl LibraryService {
                 .and_then(|p| p.scene_name.clone())
                 .unwrap_or_else(|| f.path.to_string_lossy().into_owned());
             let parsed = parse_path(&source);
+            // Numbers TMDB's own cannot place are read in aired order (TVDB and broadcast),
+            // when the series has that map: libraries named by Sonarr use TVDB's numbers.
             let matched = match match_parsed_episodes(&parsed, series_type(s.series_type), &expected) {
-                Ok(m) if !m.episode_ids.is_empty() => m,
-                _ => {
-                    report.unmatched.push(rel);
-                    continue;
-                }
+                Ok(m) if !m.episode_ids.is_empty() => m.episode_ids,
+                _ => match parsed
+                    .episode()
+                    .zip(episode_map.as_ref())
+                    .and_then(|(info, map)| match_by_episode_map(info, map, &expected))
+                {
+                    Some(ids) => ids,
+                    None => {
+                        report.unmatched.push(rel);
+                        continue;
+                    }
+                },
             };
             let season = eps
                 .iter()
-                .find(|e| e.id == matched.episode_ids[0])
+                .find(|e| e.id == matched[0])
                 .map_or(0, |e| e.season_number);
             let fid = if prev.is_some_and(|p| p.size == f.size && p.media_info.is_some()) {
                 let p = prev.unwrap();
@@ -302,7 +313,7 @@ impl LibraryService {
                 fid
             };
             seen_files.insert(fid);
-            for e in matched.episode_ids {
+            for e in matched {
                 linked.insert(e, fid);
             }
         }

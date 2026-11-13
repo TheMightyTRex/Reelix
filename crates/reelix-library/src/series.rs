@@ -277,6 +277,7 @@ impl LibraryService {
         misc::set_alt_titles(&self.db, MediaKind::Series, id, &alts).await?;
         misc::set_credits(&self.db, MediaKind::Series, id, &cast_of(&meta.credits)).await?;
         self.sync_episodes(id, &meta, true).await?;
+        self.refresh_episode_map(id, tmdb_id).await;
         self.apply_monitor(id, req.monitor, req.seasons.as_deref())
             .await?;
         self.emit("series", "created", id);

@@ -122,8 +122,28 @@ impl LibraryService {
         misc::set_alt_titles(&self.db, MediaKind::Series, id, &alts).await?;
         misc::set_credits(&self.db, MediaKind::Series, id, &cast_of(&meta.credits)).await?;
         self.sync_episodes(id, &meta, false).await?;
+        self.refresh_episode_map(id, tmdb).await;
         self.emit("series", "updated", id);
         Ok(())
+    }
+
+    /// Keeps the series' episodes in aired order (TMDB's episode group) mapped to TMDB's
+    /// numbers, for files named with TVDB or broadcast numbers. The map is removed when the
+    /// series has no such group or it numbers every episode as TMDB does. A failure is logged
+    /// and the old map kept: it never fails the refresh.
+    pub(crate) async fn refresh_episode_map(&self, id: i64, tmdb_id: u32) {
+        let map = match self.metadata.episode_order(tmdb_id).await {
+            Ok(group) => group.and_then(|g| {
+                reelix_import::episode_map::EpisodeOrderMap::new(g.id.clone(), g.name.clone(), g.numbering())
+            }),
+            Err(e) => {
+                tracing::warn!(id, tmdb_id, error = %e, "episode groups could not be read; the old episode map is kept");
+                return;
+            }
+        };
+        if let Err(e) = series::set_episode_map(&self.db, id, map.as_ref()).await {
+            tracing::warn!(id, error = %e, "the episode map could not be saved");
+        }
     }
 
     /// Refreshes movies (`None` = all), then rescans per the media-management setting.
