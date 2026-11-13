@@ -19,6 +19,7 @@ mod error;
 pub mod import_api;
 pub mod jobs;
 mod library_import;
+pub mod merge;
 mod metadata;
 mod naming;
 mod refresh;
@@ -45,6 +46,8 @@ pub mod kinds {
     pub const REFRESH_AUTHORS: &str = "refresh_authors";
     pub const BOOK_SCAN: &str = "book_scan";
     pub const BOOK_RENAME: &str = "book_rename";
+    /// Merging an audiobook's parts into one chaptered M4B (RFX-87).
+    pub const BOOK_MERGE: &str = "book_merge";
     /// Handled by the pipeline.
     pub const BOOK_SEARCH: &str = "book_search";
 }

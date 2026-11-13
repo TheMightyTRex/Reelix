@@ -200,7 +200,7 @@ fn commit(stage: &Path, base: &Path, rels: &[String], extra: Option<&str>) -> Re
 }
 
 impl BooksService {
-    async fn fetch_cover(&self, url: Option<&str>) -> Option<Vec<u8>> {
+    pub(crate) async fn fetch_cover(&self, url: Option<&str>) -> Option<Vec<u8>> {
         let url = url.filter(|u| u.starts_with("http://") || u.starts_with("https://"))?;
         let res = self
             .http
@@ -217,7 +217,12 @@ impl BooksService {
         tags::image_mime(&bytes).map(|_| bytes.to_vec())
     }
 
-    async fn book_tags(&self, a: &AuthorDto, b: &BookDto, narrator: Option<String>) -> Result<BookTags> {
+    pub(crate) async fn book_tags(
+        &self,
+        a: &AuthorDto,
+        b: &BookDto,
+        narrator: Option<String>,
+    ) -> Result<BookTags> {
         let preferred = editions::list(&self.db, b.id)
             .await?
             .into_iter()

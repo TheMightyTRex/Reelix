@@ -78,6 +78,24 @@ handler!(BookRename, kinds::BOOK_RENAME, |svc, p| {
     Ok(())
 });
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct MergePayload {
+    file_id: i64,
+}
+
+handler!(BookMerge, kinds::BOOK_MERGE, |svc, p| {
+    let p: MergePayload = serde_json::from_value(p).unwrap_or_default();
+    let out = svc.merge_book_file(p.file_id).await?;
+    tracing::info!(
+        file_id = out.file_id,
+        chapters = out.chapters,
+        copied = out.copied,
+        "audiobook parts merged"
+    );
+    Ok(())
+});
+
 /// Recurring tasks: refresh of every author (24h).
 pub fn tasks() -> Vec<TaskDef> {
     vec![TaskDef {
@@ -93,7 +111,8 @@ pub fn register(mut builder: JobSystemBuilder, svc: &Arc<BooksService>) -> JobSy
     builder = builder
         .long_running_handler(RefreshAuthors(svc.clone()))
         .long_running_handler(BookScan(svc.clone()))
-        .long_running_handler(BookRename(svc.clone()));
+        .long_running_handler(BookRename(svc.clone()))
+        .long_running_handler(BookMerge(svc.clone()));
     for t in tasks() {
         builder = builder.task(t);
     }
