@@ -65,6 +65,10 @@ impl RadioService {
     /// Reads one show from its provider and merges it. Returns the number of new episodes.
     pub async fn refresh_show(&self, id: i64) -> Result<u32> {
         let show = repo::shows::require(&self.db, id).await?;
+        if show.custom {
+            // Typed details and no source: the episodes come from its library files.
+            return self.sync_custom_show(id).await;
+        }
         let provider = self.providers.get(&show.provider).ok_or_else(|| {
             RadioError::Validation(format!(
                 "the source {} of {} is not available",
@@ -98,7 +102,13 @@ impl RadioService {
         self.merge(id, data, &HashSet::new(), initial).await
     }
 
-    async fn merge(&self, id: i64, data: &ShowData, skipped: &HashSet<String>, initial: bool) -> Result<u32> {
+    pub(crate) async fn merge(
+        &self,
+        id: i64,
+        data: &ShowData,
+        skipped: &HashSet<String>,
+        initial: bool,
+    ) -> Result<u32> {
         let show = repo::shows::require(&self.db, id).await?;
         let station_id = match &data.station {
             Some(st) => Some(repo::stations::upsert(&self.db, &show.provider, st).await?),

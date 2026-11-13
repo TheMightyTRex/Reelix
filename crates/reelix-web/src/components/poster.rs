@@ -16,10 +16,18 @@ pub fn tmdb_image(path: Option<&str>, size: &str) -> Option<String> {
         None
     } else if path.starts_with("http://") || path.starts_with("https://") {
         Some(path.to_string())
+    } else if path.starts_with("/api/") {
+        // A picture Reelix serves itself (an item added with its own details).
+        Some(local_image(crate::api::base_path(), path))
     } else {
         let slash = if path.starts_with('/') { "" } else { "/" };
         Some(format!("https://image.tmdb.org/t/p/{size}{slash}{path}"))
     }
+}
+
+/// A Reelix-served image path under the UI's URL base.
+fn local_image(base: &str, path: &str) -> String {
+    format!("{base}{path}")
 }
 
 /// Up to two initials for an image placeholder.
@@ -226,6 +234,10 @@ mod tests {
         );
         assert_eq!(tmdb_image(Some("  "), POSTER_SM), None);
         assert_eq!(tmdb_image(None, POSTER_SM), None);
+        assert_eq!(
+            local_image("/reelix", "/api/v1/customitems/movie/1/image?v=ab"),
+            "/reelix/api/v1/customitems/movie/1/image?v=ab"
+        );
         assert_eq!(initials("the matrix reloaded"), "TM");
     }
 }

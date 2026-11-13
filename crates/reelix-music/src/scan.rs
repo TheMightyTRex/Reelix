@@ -220,13 +220,29 @@ impl MusicService {
         for i in infos {
             groups.entry(album_folder(&i.path)).or_default().push(i);
         }
-        let albums = repo::albums::of_artists(&self.db, &[artist.id]).await?;
+        let mut albums = repo::albums::of_artists(&self.db, &[artist.id]).await?;
         let settings = self.settings().await?;
         let mut seen_paths: HashSet<String> = HashSet::new();
         for (folder, files) in groups {
-            let Some(album_id) = self.identify_album(&albums, &folder, &files, &known).await? else {
-                tracing::debug!(folder = %folder.display(), "no album matches folder");
-                continue;
+            let album_id = match self.identify_album(&albums, &folder, &files, &known).await? {
+                Some(id) => id,
+                // A custom artist has no album list from a source: the folder makes one.
+                None if artist.custom => {
+                    let tag = majority(files.iter().map(|f| f.tags.album.as_deref())).map(str::to_owned);
+                    let title = tag.unwrap_or_else(|| folder_title(&folder));
+                    match self.custom_album(artist, title.trim()).await? {
+                        Some(a) => {
+                            let id = a.id;
+                            albums.push(a);
+                            id
+                        }
+                        None => continue,
+                    }
+                }
+                None => {
+                    tracing::debug!(folder = %folder.display(), "no album matches folder");
+                    continue;
+                }
             };
             self.ensure_releases_quiet(album_id).await;
             let album = repo::albums::require(&self.db, album_id).await?;

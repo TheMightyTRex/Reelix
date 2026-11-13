@@ -13,6 +13,7 @@ mod calendar;
 mod collections;
 pub mod content_roots;
 mod convert;
+pub mod custom;
 mod error;
 mod import;
 pub mod import_api;

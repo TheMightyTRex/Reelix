@@ -237,6 +237,10 @@ pub struct MovieDto {
     pub cast: Vec<CastDto>,
     pub added: DateTime<Utc>,
     pub last_refreshed: Option<DateTime<Utc>>,
+    /// Added with the owner's own details (`POST /customitems`): no outside match, and metadata
+    /// refreshes keep the typed details.
+    #[serde(default)]
+    pub custom: bool,
 }
 
 /// `GET /movies` query (all filters optional).
@@ -566,6 +570,10 @@ pub struct SeriesDto {
     pub cast: Vec<CastDto>,
     pub added: DateTime<Utc>,
     pub last_refreshed: Option<DateTime<Utc>>,
+    /// Added with the owner's own details (`POST /customitems`): no outside match, and metadata
+    /// refreshes keep the typed details.
+    #[serde(default)]
+    pub custom: bool,
 }
 
 /// `GET /series` query.

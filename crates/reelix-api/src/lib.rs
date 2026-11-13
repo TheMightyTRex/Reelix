@@ -64,6 +64,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::books::routes())
         .merge(routes::music::routes())
         .merge(routes::radio::routes())
+        .merge(routes::custom_items::routes())
         .merge(routes::command::routes())
         .merge(routes::maintenance::routes())
         .merge(routes::migrate::routes())
@@ -102,6 +103,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     doc.merge(routes::books::Api::openapi());
     doc.merge(routes::music::Api::openapi());
     doc.merge(routes::radio::Api::openapi());
+    doc.merge(routes::custom_items::Api::openapi());
     doc.merge(routes::command::Api::openapi());
     doc.merge(routes::maintenance::Api::openapi());
     doc.merge(routes::migrate::Api::openapi());

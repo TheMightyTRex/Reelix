@@ -222,6 +222,16 @@ impl LibraryService {
         let s = self.series_row(id).await?;
         let folder = PathBuf::from(&s.path);
         let mut report = ScanReport::default();
+        let videos = self.videos_in(&folder).await;
+        if s.custom {
+            // No episode list from a source: the files make it.
+            let paths: Vec<PathBuf> = videos
+                .iter()
+                .filter(|f| !named_sample(f))
+                .map(|f| f.path.clone())
+                .collect();
+            self.custom_episodes_from_files(&s, &paths).await?;
+        }
         let eps = repo::episodes(&self.db, id, None).await?;
         let expected: Vec<ExpectedEpisode> = eps
             .iter()
@@ -243,7 +253,7 @@ impl LibraryService {
         let mut seen_files = HashSet::new();
         let mut linked: HashMap<i64, i64> = HashMap::new();
 
-        for f in self.videos_in(&folder).await {
+        for f in videos {
             if named_sample(&f) {
                 continue;
             }

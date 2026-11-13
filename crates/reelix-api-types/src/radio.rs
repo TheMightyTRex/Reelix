@@ -135,6 +135,10 @@ pub struct RadioShowDto {
     /// deleted and their episodes unmonitored. `None` keeps every episode.
     #[serde(default)]
     pub keep_episodes: Option<i64>,
+    /// Added with the owner's own details (`POST /customitems`): no outside match, and metadata
+    /// refreshes keep the typed details.
+    #[serde(default)]
+    pub custom: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
