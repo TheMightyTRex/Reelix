@@ -82,6 +82,10 @@ pub struct AuthorDto {
     pub statistics: AuthorStatisticsDto,
     pub added: DateTime<Utc>,
     pub last_refreshed: Option<DateTime<Utc>>,
+    /// Added with the owner's own details (`POST /customitems`): no outside match, and metadata
+    /// refreshes keep the typed details.
+    #[serde(default)]
+    pub custom: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

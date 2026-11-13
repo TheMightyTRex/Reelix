@@ -3,6 +3,7 @@ pub mod auth;
 pub mod auth_external;
 pub mod books;
 pub mod command;
+pub mod custom_items;
 pub mod discover;
 pub mod integrations;
 pub mod library;

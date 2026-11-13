@@ -12,7 +12,7 @@ use crate::error::Result;
 
 const COLS: &str = "id, openlibrary_id, name, sort_name, overview, birth_date, death_date, images, links, \
     monitored, monitor_new_items, quality_profile_id, root_folder_id, path, audio_quality_profile_id, \
-    audio_root_folder_id, audio_path, tags, last_refreshed, created_at";
+    audio_root_folder_id, audio_path, tags, last_refreshed, created_at, custom";
 
 fn new_items_str(m: NewBookMonitor) -> &'static str {
     match m {
@@ -49,6 +49,7 @@ fn map(r: &SqliteRow) -> Result<AuthorDto> {
         statistics: AuthorStatisticsDto::default(),
         added: from_ms(r.try_get("created_at")?),
         last_refreshed: r.try_get::<Option<i64>, _>("last_refreshed")?.map(from_ms),
+        custom: r.try_get("custom")?,
     })
 }
 
@@ -110,8 +111,8 @@ pub async fn insert(db: &Db, a: &AuthorDto, added_by_request_id: Option<i64>) ->
         "INSERT INTO authors (openlibrary_id, name, sort_name, clean_name, overview, birth_date, death_date, \
          images, links, monitored, monitor_new_items, quality_profile_id, root_folder_id, path, \
          audio_quality_profile_id, audio_root_folder_id, audio_path, tags, added_by_request_id, \
-         last_refreshed, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         last_refreshed, custom, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&a.openlibrary_id)
     .bind(&a.name)
@@ -133,6 +134,7 @@ pub async fn insert(db: &Db, a: &AuthorDto, added_by_request_id: Option<i64>) ->
     .bind(json(&a.tags))
     .bind(added_by_request_id)
     .bind(a.last_refreshed.map(|t| t.timestamp_millis()))
+    .bind(a.custom)
     .bind(now)
     .bind(now)
     .execute(db.pool())

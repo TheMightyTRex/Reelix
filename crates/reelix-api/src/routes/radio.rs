@@ -240,7 +240,7 @@ const IMAGE_MAX_AGE: &str = "private, max-age=3600";
 const SVG_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 /// A downloaded image with its ETag; `304` when `If-None-Match` names it.
-fn image_response(img: StoredImage, req: &HeaderMap) -> Response {
+pub(crate) fn image_response(img: StoredImage, req: &HeaderMap) -> Response {
     let matches = req
         .get_all(header::IF_NONE_MATCH)
         .iter()

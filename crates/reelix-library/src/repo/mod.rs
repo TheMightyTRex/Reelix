@@ -29,3 +29,12 @@ pub(crate) fn parse_kind(s: &str) -> MediaKind {
         MediaKind::Movie
     }
 }
+
+/// A unique negative TMDB id for a custom movie or series while it is inserted; the insert
+/// then sets it to `-id`. Far below any `-id`, so the two never meet.
+pub(crate) fn custom_placeholder() -> i64 {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static NEXT: AtomicI64 = AtomicI64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed) % 1_000_000;
+    -(1_i64 << 50) - reelix_db::now_ms() * 1_000_000 - n
+}

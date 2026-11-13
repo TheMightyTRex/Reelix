@@ -14,7 +14,7 @@ use crate::provider::ShowData;
 const COLS: &str = "s.id, s.provider, s.external_id, s.title, s.sort_title, s.synopsis, s.author, s.web_url, \
     s.first_broadcast, s.station_id, st.name AS station_name, s.artwork_url, s.artwork_path, s.feed_url, \
     s.follow, s.followed_at, s.monitored, s.tags, s.root_folder_id, s.abs_item_id, s.quality_profile_id, \
-    s.refreshed_at, s.added_at, s.keep_episodes, \
+    s.refreshed_at, s.added_at, s.keep_episodes, s.custom, \
     (SELECT COUNT(*) FROM radio_series x WHERE x.show_id = s.id) AS n_series, \
     (SELECT COUNT(*) FROM radio_episodes e WHERE e.show_id = s.id) AS n_eps, \
     (SELECT COUNT(*) FROM radio_episodes e WHERE e.show_id = s.id AND e.status = 'in_library') AS n_have, \
@@ -59,6 +59,7 @@ fn map(r: &SqliteRow) -> Result<RadioShowDto> {
         },
         abs_web_url: None,
         keep_episodes: r.try_get("keep_episodes")?,
+        custom: r.try_get("custom")?,
     })
 }
 

@@ -14,6 +14,7 @@ mod authors;
 mod availability;
 mod books;
 mod calibre;
+mod custom;
 mod error;
 pub mod import_api;
 pub mod jobs;

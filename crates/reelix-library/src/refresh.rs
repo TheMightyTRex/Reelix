@@ -12,12 +12,16 @@ use crate::repo::{movies, series};
 use crate::series::apply_series_metadata;
 
 impl LibraryService {
-    /// Refreshes one movie from TMDB. A movie removed from TMDB is marked `deleted`.
+    /// Refreshes one movie from TMDB. A movie removed from TMDB is marked `deleted`. A custom
+    /// movie (typed details, no TMDB match) is left as it is.
     pub async fn refresh_movie(&self, id: i64) -> Result<()> {
         let profiles = self.profiles().await?;
         let mut m = movies::get(&self.db, id, &profiles)
             .await?
             .ok_or_else(|| LibraryError::not_found("movie", id))?;
+        if m.custom {
+            return Ok(());
+        }
         let meta = match self.metadata.movie(m.tmdb_id).await {
             Ok(meta) => meta,
             Err(MetaError::NotFound) => {
@@ -81,9 +85,13 @@ impl LibraryService {
         Ok(())
     }
 
-    /// Refreshes one series: metadata, seasons and episodes (added/updated/removed).
+    /// Refreshes one series: metadata, seasons and episodes (added/updated/removed). A custom
+    /// series keeps its typed details; its episodes come from its files at each scan.
     pub async fn refresh_series(&self, id: i64) -> Result<()> {
         let mut s = self.series_row(id).await?;
+        if s.custom {
+            return Ok(());
+        }
         let tmdb = s.tmdb_id.unwrap_or_default();
         let meta = match crate::series::series_metadata(
             self.metadata.as_ref(),

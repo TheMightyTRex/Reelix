@@ -18,7 +18,7 @@ use crate::error::Result;
 const COLS: &str = "id, tmdb_id, tvdb_id, imdb_id, title, original_title, sort_title, year, status, overview, network, \
     series_type, runtime, genres, certification, original_language, images, ratings, first_aired, last_aired, \
     next_airing, monitored, monitor_new_items, season_folder, quality_profile_id, root_folder_id, path, \
-    added_by_request_id, last_refreshed, created_at";
+    added_by_request_id, last_refreshed, created_at, custom";
 
 fn opt_u32(r: &SqliteRow, col: &str) -> Result<Option<u32>> {
     Ok(r.try_get::<Option<i64>, _>(col)?.map(|v| v as u32))
@@ -27,7 +27,10 @@ fn opt_u32(r: &SqliteRow, col: &str) -> Result<Option<u32>> {
 fn map(r: &SqliteRow) -> Result<SeriesDto> {
     Ok(SeriesDto {
         id: r.try_get("id")?,
-        tmdb_id: opt_u32(r, "tmdb_id")?,
+        // Custom series hold a negative placeholder: no TMDB id.
+        tmdb_id: r
+            .try_get::<Option<i64>, _>("tmdb_id")?
+            .and_then(|v| u32::try_from(v).ok()),
         tvdb_id: opt_u32(r, "tvdb_id")?,
         imdb_id: r.try_get("imdb_id")?,
         title: r.try_get("title")?,
@@ -61,6 +64,7 @@ fn map(r: &SqliteRow) -> Result<SeriesDto> {
         cast: Vec::new(),
         added: from_ms(r.try_get("created_at")?),
         last_refreshed: r.try_get::<Option<i64>, _>("last_refreshed")?.map(from_ms),
+        custom: r.try_get("custom")?,
     })
 }
 
@@ -284,7 +288,7 @@ pub async fn id_by_tvdb(db: &Db, tvdb_id: u32) -> Result<Option<i64>> {
 
 /// `tmdb_id → series id` and `tvdb_id → series id`.
 pub async fn id_index(db: &Db) -> Result<(HashMap<u32, i64>, HashMap<u32, i64>)> {
-    let rows = sqlx::query("SELECT id, tmdb_id, tvdb_id FROM series")
+    let rows = sqlx::query("SELECT id, tmdb_id, tvdb_id FROM series WHERE tmdb_id >= 0")
         .fetch_all(db.pool())
         .await?;
     let (mut tmdb, mut tvdb) = (HashMap::new(), HashMap::new());
@@ -303,15 +307,20 @@ pub async fn insert(db: &Db, s: &SeriesDto) -> Result<i64> {
     let tmdb = s.tmdb_id.unwrap_or_default();
     let res = sqlx::query(
         "INSERT INTO series (tmdb_id, title, sort_title, clean_title, quality_profile_id, root_folder_id, path,
-             created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             custom, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(tmdb as i64)
+    .bind(if s.custom {
+        super::custom_placeholder()
+    } else {
+        tmdb as i64
+    })
     .bind(&s.title)
     .bind(&s.sort_title)
     .bind(clean_title(&s.title))
     .bind(s.quality_profile_id)
     .bind(s.root_folder_id)
     .bind(&s.path)
+    .bind(s.custom)
     .bind(now)
     .bind(now)
     .execute(db.pool())
@@ -323,6 +332,12 @@ pub async fn insert(db: &Db, s: &SeriesDto) -> Result<i64> {
         _ => e.into(),
     })?;
     let id = res.last_insert_rowid();
+    if s.custom {
+        sqlx::query("UPDATE series SET tmdb_id = -id WHERE id = ?")
+            .bind(id)
+            .execute(db.pool())
+            .await?;
+    }
     save(db, id, s).await?;
     Ok(id)
 }

@@ -341,6 +341,8 @@ impl RadioService {
     /// missing `abs_item_id`s. Hand-set links and "Not this file" are left alone; an automatic
     /// link that no rule gives to another episode is kept. Returns the number of new links.
     pub async fn match_library(&self) -> Result<u32> {
+        // Custom shows make their episodes from their files first (RFX-90).
+        self.sync_custom_shows().await?;
         let keys: HashMap<i64, String> = repo::shows::match_keys(&self.db)
             .await?
             .into_iter()

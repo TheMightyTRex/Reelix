@@ -124,6 +124,7 @@ impl MusicService {
                 path: path.clone(),
                 tags: req.tags.clone(),
                 added_by_request_id,
+                custom: false,
             },
         )
         .await?;

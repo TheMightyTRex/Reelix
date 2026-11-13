@@ -14,6 +14,7 @@
 pub mod artwork;
 pub mod catchup;
 mod convert;
+pub mod custom;
 mod discover;
 mod error;
 pub mod filing;

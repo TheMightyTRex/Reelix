@@ -65,7 +65,7 @@ pub(crate) fn series_naming(s: &SeriesDto) -> SeriesNaming {
     }
 }
 
-fn blank_series() -> SeriesDto {
+pub(crate) fn blank_series() -> SeriesDto {
     SeriesDto {
         id: 0,
         tmdb_id: None,
@@ -102,6 +102,7 @@ fn blank_series() -> SeriesDto {
         cast: Vec::new(),
         added: chrono::Utc::now(),
         last_refreshed: None,
+        custom: false,
     }
 }
 
