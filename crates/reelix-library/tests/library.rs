@@ -170,10 +170,23 @@ struct FakeMeta {
     collections: Mutex<HashMap<u32, CollectionMetadata>>,
     /// Answer a TMDB id it does not have with `Unsupported`, as open data does, not `NotFound`.
     open_data: std::sync::atomic::AtomicBool,
+    /// Episode groups in aired order, by TMDB id.
+    groups: Mutex<HashMap<u32, EpisodeGroup>>,
+    /// Fail every episode group request.
+    groups_fail: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl MetadataSource for FakeMeta {
+    async fn episode_order(&self, id: u32) -> Result<Option<EpisodeGroup>, MetaError> {
+        if self.groups_fail.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(MetaError::Status {
+                status: 500,
+                message: "down".into(),
+            });
+        }
+        Ok(self.groups.lock().unwrap().get(&id).cloned())
+    }
     async fn movie(&self, id: u32) -> Result<MovieMetadata, MetaError> {
         self.movies
             .lock()
@@ -1107,4 +1120,127 @@ async fn library_import_many_series_then_scan_links_episodes() {
         let s = e.svc.get_series(*id).await.unwrap();
         assert_eq!(s.statistics.episode_file_count, 2, "{}", s.title);
     }
+}
+
+/// An aired order with season 1 as three episodes, where TMDB has two in season 1 and the third
+/// as season 2's first.
+fn aired_group() -> EpisodeGroup {
+    let ep = |season_number, episode_number, order| EpisodeGroupEpisode {
+        season_number,
+        episode_number,
+        order,
+    };
+    EpisodeGroup {
+        id: "5b1f0c0e0e0a2b7d4f00a001".into(),
+        name: "Aired Order".into(),
+        kind: 1,
+        groups: vec![
+            EpisodeGroupSeason {
+                name: "Season 1".into(),
+                order: 1,
+                episodes: vec![ep(1, 1, 0), ep(1, 2, 1), ep(2, 1, 2)],
+            },
+            EpisodeGroupSeason {
+                name: "Season 2".into(),
+                order: 2,
+                episodes: vec![ep(2, 2, 0)],
+            },
+        ],
+    }
+}
+
+#[tokio::test]
+async fn the_aired_order_map_is_kept_with_the_series_and_used_by_the_scan() {
+    let e = env().await;
+    e.meta.groups.lock().unwrap().insert(1399, aired_group());
+    let s = e.svc.add_series(add_series_req(&e, 1399, 2399)).await.unwrap();
+    let map = e
+        .svc
+        .importer()
+        .series_target(s.id)
+        .await
+        .unwrap()
+        .episode_map
+        .unwrap();
+    assert_eq!(map.group_name, "Aired Order");
+    assert_eq!(map.tmdb_for(1, 3), Some((2, 1)));
+    assert_eq!(map.tmdb_for(2, 1), Some((2, 2)));
+
+    // A file named with the aired numbers TMDB lacks (S01E03) goes to TMDB's S02E01.
+    let root = Path::new(&s.path);
+    write(
+        &root.join("Season 01/The.Show.S01E03.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    // TMDB's own numbers still come first for numbers it has.
+    write(
+        &root.join("Season 01/The.Show.S01E01.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    let r = e.svc.scan_series(s.id).await.unwrap();
+    assert_eq!((r.added, r.unmatched.len()), (2, 0), "{r:?}");
+    let eps = e.svc.episodes(s.id, None).await.unwrap();
+    let has = |season, n| {
+        eps.iter()
+            .find(|x| x.season_number == season && x.episode_number == n)
+            .unwrap()
+            .has_file
+    };
+    assert!(has(1, 1) && has(2, 1));
+    assert!(!has(1, 2) && !has(2, 2));
+
+    // A failed request keeps the old map; a series without the group loses it.
+    e.meta
+        .groups_fail
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    e.svc.refresh_series(s.id).await.unwrap();
+    assert!(
+        e.svc
+            .importer()
+            .series_target(s.id)
+            .await
+            .unwrap()
+            .episode_map
+            .is_some()
+    );
+    e.meta
+        .groups_fail
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    e.meta.groups.lock().unwrap().clear();
+    e.svc.refresh_series(s.id).await.unwrap();
+    assert!(
+        e.svc
+            .importer()
+            .series_target(s.id)
+            .await
+            .unwrap()
+            .episode_map
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn an_aired_order_with_tmdb_numbers_is_not_kept() {
+    let e = env().await;
+    let mut g = aired_group();
+    g.groups = vec![EpisodeGroupSeason {
+        name: "Season 1".into(),
+        order: 1,
+        episodes: vec![EpisodeGroupEpisode {
+            season_number: 1,
+            episode_number: 1,
+            order: 0,
+        }],
+    }];
+    e.meta.groups.lock().unwrap().insert(1399, g);
+    let s = e.svc.add_series(add_series_req(&e, 1399, 2399)).await.unwrap();
+    assert!(
+        e.svc
+            .importer()
+            .series_target(s.id)
+            .await
+            .unwrap()
+            .episode_map
+            .is_none()
+    );
 }

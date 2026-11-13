@@ -748,7 +748,7 @@ impl ActivityService {
                 // numbering (broadcast or TVDB), one for one.
                 let by_title = imported
                     .iter()
-                    .filter(|i| i.matched_by_title)
+                    .filter(|i| i.other_numbering)
                     .flat_map(|i| i.target.episode_ids().iter().copied())
                     .filter(|e| !t.episode_ids.contains(e))
                     .collect::<HashSet<i64>>()

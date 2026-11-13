@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use reelix_core::MediaKind;
 use reelix_metadata::{
-    CollectionMetadata, ExternalSource, MetaError, MetadataProvider, MovieMetadata, SearchHit,
+    CollectionMetadata, EpisodeGroup, ExternalSource, MetaError, MetadataProvider, MovieMetadata, SearchHit,
     SeriesExternalId, SeriesMetadata, Tmdb,
 };
 
@@ -31,6 +31,11 @@ pub trait MetadataSource: Send + Sync {
         id: &str,
         kind: MediaKind,
     ) -> Result<Vec<SearchHit>, MetaError>;
+    /// The series' episodes in aired (TVDB and broadcast) order, from TMDB's episode groups.
+    /// `None` when the source has no such order for it.
+    async fn episode_order(&self, _tmdb_id: u32) -> Result<Option<EpisodeGroup>, MetaError> {
+        Ok(None)
+    }
 }
 
 #[async_trait]
@@ -71,6 +76,10 @@ impl MetadataSource for Tmdb {
             MediaKind::Movie => r.movies,
             MediaKind::Series => r.series,
         })
+    }
+
+    async fn episode_order(&self, tmdb_id: u32) -> Result<Option<EpisodeGroup>, MetaError> {
+        self.aired_order(tmdb_id).await
     }
 }
 
@@ -177,5 +186,8 @@ impl MetadataSource for DynMetadata {
         kind: MediaKind,
     ) -> Result<Vec<SearchHit>, MetaError> {
         self.get().await?.find(source, id, kind).await
+    }
+    async fn episode_order(&self, tmdb_id: u32) -> Result<Option<EpisodeGroup>, MetaError> {
+        self.get().await?.episode_order(tmdb_id).await
     }
 }
