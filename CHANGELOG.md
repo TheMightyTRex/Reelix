@@ -9,6 +9,14 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 ### Added
 - **Films and series without a TMDB key.** With no TMDB key set, Reelix now uses open data instead of stopping: films from Wikidata (found by their TMDB or IMDb id) with the summary from Wikipedia, and series from TVmaze (found by their TVDB or IMDb id, or their TMDB id through Wikidata) with every season, episode and air date. Migrations from Radarr and Sonarr no longer skip the library. TMDB is still used when a key is set; posters for films, collections, people and discover feeds still need it. Data: Wikidata (CC0), Wikipedia and TVmaze (CC BY-SA 4.0).
 
+## [0.8.7] - 2026-11-09
+
+### Fixed
+- **Docker image name:** the README and `docker/docker-compose.example.yml` now use `ghcr.io/demonzoned/reelix`, where release images are published. The old `ghcr.io/mvanhare/reelix` name doesn't exist, so pulling it failed.
+
+### Changed
+- **Repository links:** the crate metadata and the user agent sent to MusicBrainz, ListenBrainz and Open Library now point to `github.com/demonzoned/Reelix`.
+
 ## [0.8.6] - 2026-11-06
 
 ### Security

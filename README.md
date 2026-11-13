@@ -110,7 +110,7 @@ Release archives, installers and `SHA256SUMS` carry signed build provenance; che
 # docker-compose.yml
 services:
   reelix:
-    image: ghcr.io/mvanhare/reelix:latest
+    image: ghcr.io/demonzoned/reelix:latest
     container_name: reelix
     environment:
       - PUID=1000
