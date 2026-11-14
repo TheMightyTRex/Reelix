@@ -5,6 +5,8 @@
 //! - `POST /customitems` adds one; the answer's `id` works in the kind's own routes.
 //! - `PUT /customitems/{kind}/{id}` changes the typed details or the picture later.
 //! - `GET /customitems/{kind}/{id}/image` serves the picture Reelix keeps.
+//! - `POST /customitems/{kind}/{id}/match` swaps the typed details for an outside match
+//!   ("match now"), keeping the folder and files.
 //!
 //! Every route needs `MANAGE_LIBRARY`, as adding an item of any kind does. Pictures come as an
 //! `http(s)` address (fetched once) or a `data:` address, PNG, JPEG or WebP only (recognised
@@ -24,7 +26,8 @@ use base64::Engine;
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::custom::{
     AddCustomItemRequest, CustomDetails, CustomDetailsChange, CustomItemDto, CustomItemEdit, CustomItemKind,
-    IMAGE_MAX_BYTES, IMAGE_URL_MAX, OVERVIEW_MAX, STATION_MAX, TITLE_MAX, YEAR_MAX, YEAR_MIN,
+    CustomItemMatch, IMAGE_MAX_BYTES, IMAGE_URL_MAX, OVERVIEW_MAX, STATION_MAX, TITLE_MAX, YEAR_MAX,
+    YEAR_MIN,
 };
 use reelix_books::BooksService;
 use reelix_library::LibraryService;
@@ -49,16 +52,18 @@ pub fn routes() -> Router<AppState> {
         .route("/customitems", post(add_item))
         .route("/customitems/{kind}/{id}", put(edit_item))
         .route("/customitems/{kind}/{id}/image", get(item_image))
+        .route("/customitems/{kind}/{id}/match", post(match_item))
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(add_item, edit_item, item_image),
+    paths(add_item, edit_item, item_image, match_item),
     components(schemas(
         reelix_api_types::custom::CustomItemKind,
         reelix_api_types::custom::AddCustomItemRequest,
         reelix_api_types::custom::CustomItemEdit,
+        reelix_api_types::custom::CustomItemMatch,
         reelix_api_types::custom::CustomItemDto,
     )),
     tags((name = "custom items", description = "Films, series, authors, artists and radio shows added with your own details and no outside match")),
@@ -570,6 +575,107 @@ pub async fn item_image(
         .await
         .ok_or_else(|| ApiError::not_found(format!("{} {id} has no picture", kind.as_str())))?;
     Ok(crate::routes::radio::image_response(img, &headers))
+}
+
+/// Swaps the typed details of an item added with `POST /customitems` for an outside match
+/// ("match now"): `tmdb_id` for a film, `tmdb_id` or `tvdb_id` for a series, `openlibrary_id`
+/// for an author, `musicbrainz_id` for an artist. The item keeps its id, folder, files, quality
+/// profile and monitoring; from then on it is an ordinary item (`custom: false`) that metadata
+/// refreshes follow, with the source's pictures (Reelix's copy of the typed picture is removed).
+/// Episodes, books and albums come from the source; a scan links the files to them. The match
+/// is checked with the source first, so an unknown id changes nothing. Radio shows cannot be
+/// matched yet.
+#[utoipa::path(post, path = "/api/v1/customitems/{kind}/{id}/match", tag = "custom items", request_body = CustomItemMatch,
+    params(
+        ("kind" = String, Path, description = "movie, series, author or artist"),
+        ("id" = i64, Path, description = "The item's id in its kind's routes"),
+    ),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Matched; the item now has the source's details", body = CustomItemDto),
+        (status = 400, description = "No id of the kind's source, an id the source does not know, a radio show, or the item already has an outside match", body = ApiErrorBody),
+        (status = 403, description = "Requires MANAGE_LIBRARY", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+        (status = 409, description = "Another item already has that outside id", body = ApiErrorBody),
+    ))]
+pub async fn match_item(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath((kind, id)): ApiPath<(String, i64)>,
+    ApiJson(m): ApiJson<CustomItemMatch>,
+) -> ApiResult<ApiJson<CustomItemDto>> {
+    require_lib(&user)?;
+    let kind = kind_of(&kind)?;
+    let text = |v: &Option<String>, what: &str| -> ApiResult<String> {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| ApiError::validation(format!("{what} is required")))
+    };
+    let item = match kind {
+        CustomItemKind::Movie => {
+            let tmdb = m
+                .tmdb_id
+                .ok_or_else(|| ApiError::validation("tmdb_id is required"))?;
+            let mv = state
+                .ext::<LibraryService>()?
+                .match_custom_movie(id, tmdb)
+                .await?;
+            CustomItemDto {
+                id,
+                kind,
+                title: mv.title,
+                path: Some(mv.path),
+            }
+        }
+        CustomItemKind::Series => {
+            let s = state
+                .ext::<LibraryService>()?
+                .match_custom_series(id, m.tmdb_id, m.tvdb_id)
+                .await?;
+            CustomItemDto {
+                id,
+                kind,
+                title: s.title,
+                path: Some(s.path),
+            }
+        }
+        CustomItemKind::Author => {
+            let olid = text(&m.openlibrary_id, "openlibrary_id")?;
+            let a = state
+                .ext::<BooksService>()?
+                .match_custom_author(id, &olid)
+                .await?;
+            CustomItemDto {
+                id,
+                kind,
+                title: a.name,
+                path: a.path.or(a.audio_path),
+            }
+        }
+        CustomItemKind::Artist => {
+            let mbid = text(&m.musicbrainz_id, "musicbrainz_id")?;
+            let a = state
+                .ext::<MusicService>()?
+                .match_custom_artist(id, &mbid)
+                .await?;
+            CustomItemDto {
+                id,
+                kind,
+                title: a.name,
+                path: Some(a.path),
+            }
+        }
+        CustomItemKind::RadioShow => {
+            return Err(ApiError::validation(
+                "radio shows cannot be matched yet: follow the show from a radio source and remove this one",
+            ));
+        }
+    };
+    // The source's pictures are used from now on.
+    remove_pictures(&state.config().data_dir, kind, id).await;
+    Ok(ApiJson(item))
 }
 
 #[cfg(test)]

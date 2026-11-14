@@ -143,7 +143,24 @@ pub struct CustomItemEdit {
     pub remove_image: bool,
 }
 
-/// The answer to `POST` and `PUT /customitems`: `id` works in the kind's own routes.
+/// `POST /customitems/{kind}/{id}/match`: the outside match that replaces the typed details.
+/// Give the id of the item's kind: `tmdb_id` for a film, `tmdb_id` or `tvdb_id` for a series,
+/// `openlibrary_id` (`OL…A`) for an author, `musicbrainz_id` for an artist.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CustomItemMatch {
+    #[serde(default)]
+    pub tmdb_id: Option<u32>,
+    #[serde(default)]
+    pub tvdb_id: Option<u32>,
+    #[serde(default)]
+    pub openlibrary_id: Option<String>,
+    #[serde(default)]
+    pub musicbrainz_id: Option<String>,
+}
+
+/// The answer to `POST` and `PUT /customitems` and to `match`: `id` works in the kind's own
+/// routes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CustomItemDto {

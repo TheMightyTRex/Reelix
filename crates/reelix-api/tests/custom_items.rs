@@ -1,6 +1,6 @@
-//! `POST /customitems`, `PUT /customitems/{kind}/{id}` and `GET /customitems/{kind}/{id}/image`
-//! (RFX-90): films, series, authors, artists and radio shows with the owner's own details and
-//! no outside match.
+//! `POST /customitems`, `PUT /customitems/{kind}/{id}`, `GET /customitems/{kind}/{id}/image`
+//! and `POST /customitems/{kind}/{id}/match` (RFX-90): films, series, authors, artists and radio
+//! shows with the owner's own details and no outside match, and matching them later.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -124,7 +124,11 @@ async fn app() -> TestApp {
         events: events.clone(),
         http: reqwest::Client::new(),
         library: library.clone(),
-        metadata: Arc::new(FakeBookMetadata::new()),
+        metadata: Arc::new({
+            let a = reelix_books::testing::author("OL77A", "Jo Bloggs");
+            let w = reelix_books::testing::work("OL770W", "Garden Diary", &a, Some(2001));
+            FakeBookMetadata::new().with_author(a).with_work(w)
+        }),
     }));
     books.set_queue(system.queue());
     let music = Arc::new(MusicService::new(MusicDeps {
@@ -764,4 +768,153 @@ async fn radio_show_episodes_come_from_library_files() {
     let s = app.radio.get_show(id).await.unwrap();
     assert_eq!(s.title, "The Garden Hour");
     assert_eq!(s.station_id, None);
+}
+
+#[tokio::test]
+async fn match_now_swaps_the_typed_details_for_an_outside_match() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let (s, doc) = call(&app, Method::GET, "/api/v1/openapi.json", &admin, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(doc["paths"]["/api/v1/customitems/{kind}/{id}/match"]["post"].is_object());
+    assert!(doc["components"]["schemas"]["CustomItemMatch"].is_object());
+
+    let (root_id, root_path) = root(&app, &admin, "/api/v1/bookrootfolders", "audiobooks", "audiobook").await;
+    let folder = root_path.join("J Bloggs");
+    touch(&folder.join("Garden Diary.m4b"));
+    let (s, item) = call(
+        &app,
+        Method::POST,
+        "/api/v1/customitems",
+        &admin,
+        Some(
+            json!({"kind": "author", "root_folder_id": root_id, "path": folder.to_str().unwrap(),
+            "title": "J Bloggs", "image_data": png_data()}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{item}");
+    let id = item["id"].as_i64().unwrap();
+    app.books.scan_authors(&[id]).await.unwrap();
+    let url = format!("/api/v1/customitems/author/{id}/match");
+
+    // Plain users may not; a missing or malformed id, or one Open Library does not know, changes nothing.
+    let plain = user_with(&app, "plain", Permissions::ROLE_USER).await;
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        &url,
+        &plain,
+        Some(json!({"openlibrary_id": "OL77A"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    for (body, needle) in [
+        (json!({}), "openlibrary_id is required"),
+        (json!({"openlibrary_id": "77"}), "Open Library author id"),
+        (json!({"openlibrary_id": "OL78A"}), "no author with id OL78A"),
+    ] {
+        let (s, e) = call(&app, Method::POST, &url, &admin, Some(body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{e}");
+        assert!(e["message"].as_str().unwrap().contains(needle), "{e}");
+    }
+    assert!(app.books.get_author(id).await.unwrap().custom);
+
+    let (s, m) = call(
+        &app,
+        Method::POST,
+        &url,
+        &admin,
+        Some(json!({"openlibrary_id": " OL77A "})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{m}");
+    assert_eq!(m["id"], id);
+    assert_eq!(m["kind"], "author");
+    assert_eq!(m["title"], "Jo Bloggs");
+    assert_eq!(m["path"], folder.to_str().unwrap());
+    let a = app.books.get_author(id).await.unwrap();
+    assert!(!a.custom);
+    assert_eq!(a.openlibrary_id, "OL77A");
+    assert_eq!(a.audio_path.as_deref(), folder.to_str());
+    assert!(a.images.poster.is_none(), "{:?}", a.images);
+    // Reelix's copy of the typed picture is gone.
+    let (s, _) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/customitems/author/{id}/image"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // The book made from the file gives way to Open Library's work, which the scan links.
+    app.books.scan_authors(&[id]).await.unwrap();
+    let (s, books) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/books?author_id={id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{books}");
+    let items = books["items"].as_array().or(books.as_array()).unwrap().clone();
+    assert_eq!(items.len(), 1, "{books}");
+    assert_eq!(items[0]["openlibrary_work_id"], "OL770W");
+    assert!(!items[0]["audiobook_file"].is_null(), "{books}");
+    assert!(folder.join("Garden Diary.m4b").exists());
+
+    // Once matched, it is no longer a custom item.
+    let (s, e) = call(
+        &app,
+        Method::POST,
+        &url,
+        &admin,
+        Some(json!({"openlibrary_id": "OL77A"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{e}");
+
+    // Artists: MusicBrainz must know the id; radio shows cannot be matched; unknown kinds are 404.
+    let (mroot, mpath) = root(&app, &admin, "/api/v1/musicrootfolders", "music", "music").await;
+    let band = mpath.join("Band");
+    flac(&band.join("Demos/01 Demo.flac"), 20);
+    let (s, item) = call(
+        &app,
+        Method::POST,
+        "/api/v1/customitems",
+        &admin,
+        Some(json!({"kind": "artist", "root_folder_id": mroot, "path": band.to_str().unwrap(), "title": "Band"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{item}");
+    let aid = item["id"].as_i64().unwrap();
+    let murl = format!("/api/v1/customitems/artist/{aid}/match");
+    for body in [
+        json!({"musicbrainz_id": "not-an-id"}),
+        json!({"musicbrainz_id": "a74b1b7f-71a5-4011-9441-d0b5e4122711"}),
+    ] {
+        let (s, e) = call(&app, Method::POST, &murl, &admin, Some(body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{e}");
+    }
+    assert!(app.music.get_artist(aid).await.unwrap().custom);
+    let (s, e) = call(
+        &app,
+        Method::POST,
+        "/api/v1/customitems/radio_show/1/match",
+        &admin,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{e}");
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/api/v1/customitems/podcast/1/match",
+        &admin,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
 }

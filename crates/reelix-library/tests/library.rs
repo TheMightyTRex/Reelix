@@ -1108,3 +1108,137 @@ async fn library_import_many_series_then_scan_links_episodes() {
         assert_eq!(s.statistics.episode_file_count, 2, "{}", s.title);
     }
 }
+
+fn typed(title: &str) -> reelix_api_types::custom::CustomDetails {
+    reelix_api_types::custom::CustomDetails {
+        title: title.into(),
+        year: Some(2004),
+        overview: Some("Typed.".into()),
+    }
+}
+
+#[tokio::test]
+async fn a_custom_film_is_matched_to_tmdb_keeping_its_folder() {
+    let e = env().await;
+    let folder = e.movies_root.path().join("Matrix rip");
+    write(&folder.join("matrix.mkv"), 800);
+    let m = e
+        .svc
+        .add_custom_movie(
+            &typed("Matrix rip"),
+            e.movie_root_id,
+            folder.to_str().unwrap(),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    e.svc
+        .set_custom_movie_poster(
+            m.id,
+            Some(format!("/api/v1/customitems/movie/{}/image?v=1", m.id)),
+        )
+        .await
+        .unwrap();
+    // An id TMDB does not know, and one another film has, change nothing.
+    assert!(matches!(
+        e.svc.match_custom_movie(m.id, 999).await,
+        Err(LibraryError::Validation(_))
+    ));
+    let other = e.svc.add_movie(add_movie_req(&e, 604)).await.unwrap();
+    assert!(matches!(
+        e.svc.match_custom_movie(m.id, 604).await,
+        Err(LibraryError::Conflict(_))
+    ));
+    assert!(e.svc.get_movie(m.id).await.unwrap().custom);
+
+    let matched = e.svc.match_custom_movie(m.id, 603).await.unwrap();
+    assert_eq!(matched.id, m.id);
+    assert!(!matched.custom);
+    assert_eq!(matched.tmdb_id, 603);
+    assert_eq!(matched.title, "The Matrix");
+    assert_eq!(matched.year, Some(1999));
+    assert_eq!(matched.path, folder.to_str().unwrap());
+    assert!(matched.monitored);
+    assert!(matched.images.poster.is_none(), "{:?}", matched.images);
+    assert!(matched.collection.is_some());
+    assert!(folder.join("matrix.mkv").exists());
+    // Refreshes now follow TMDB, and the film can no longer be changed as a custom one.
+    e.svc.refresh_movie(m.id).await.unwrap();
+    assert_eq!(e.svc.get_movie(m.id).await.unwrap().title, "The Matrix");
+    assert!(matches!(
+        e.svc.match_custom_movie(m.id, 603).await,
+        Err(LibraryError::Validation(_))
+    ));
+    assert!(matches!(
+        e.svc.match_custom_movie(other.id, 603).await,
+        Err(LibraryError::Validation(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_custom_series_is_matched_to_tmdb_and_its_files_linked() {
+    let e = env().await;
+    let folder = e.tv_root.path().join("Show rips");
+    write(&folder.join("Season 01/Show S01E02.mkv"), 400);
+    write(&folder.join("Season 07/Show S07E01.mkv"), 400);
+    let s = e
+        .svc
+        .add_custom_series(
+            &typed("Show rips"),
+            e.tv_root_id,
+            folder.to_str().unwrap(),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    e.svc.scan_series(s.id).await.unwrap();
+    assert_eq!(e.svc.episodes(s.id, None).await.unwrap().len(), 2);
+    assert!(matches!(
+        e.svc.match_custom_series(s.id, None, None).await,
+        Err(LibraryError::Validation(_))
+    ));
+    assert!(matches!(
+        e.svc.match_custom_series(s.id, Some(5), None).await,
+        Err(LibraryError::Validation(_))
+    ));
+
+    // By TVDB id: the source finds TMDB's entry through it.
+    let matched = e.svc.match_custom_series(s.id, None, Some(2399)).await.unwrap();
+    assert!(!matched.custom);
+    assert_eq!((matched.tmdb_id, matched.tvdb_id), (Some(1399), Some(2399)));
+    assert_eq!(matched.title, "The Show");
+    assert_eq!(matched.path, folder.to_str().unwrap());
+    e.svc.scan_series(s.id).await.unwrap();
+    let eps = e.svc.episodes(s.id, None).await.unwrap();
+    let ep = |season, n| {
+        eps.iter()
+            .find(|x| x.season_number == season && x.episode_number == n)
+            .cloned()
+    };
+    // TMDB's episodes, the file linked; the episode made from a file TMDB lacks keeps its file.
+    assert_eq!(ep(1, 2).unwrap().title.as_deref(), Some("Episode 2"));
+    assert!(ep(1, 2).unwrap().has_file);
+    assert!(ep(2, 1).is_some());
+    assert!(ep(7, 1).unwrap().has_file);
+
+    // Another custom series cannot take the same TMDB entry.
+    let other = e.tv_root.path().join("Other");
+    std::fs::create_dir_all(&other).unwrap();
+    let o = e
+        .svc
+        .add_custom_series(
+            &typed("Other"),
+            e.tv_root_id,
+            other.to_str().unwrap(),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        e.svc.match_custom_series(o.id, Some(1399), None).await,
+        Err(LibraryError::Conflict(_))
+    ));
+}

@@ -24,6 +24,13 @@ use crate::repo::{authors as repo, books as book_repo, clean};
 use crate::scan::{Unit, find_units, match_name};
 use crate::service::path_of;
 
+/// An Open Library author id: `OL`, digits, `A`.
+fn is_author_olid(s: &str) -> bool {
+    s.strip_prefix("OL")
+        .and_then(|r| r.strip_suffix('A'))
+        .is_some_and(|d| !d.is_empty() && d.len() <= 12 && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// The book title a unit gives: the first sub-folder of the author folder it lies in, else the
 /// file name, cleaned as a release name (`Title (2004) [epub]` → `Title`).
 pub(crate) fn unit_title(u: &Unit, base: &Path) -> String {
@@ -173,6 +180,52 @@ impl BooksService {
         self.author_row(id).await
     }
 
+    /// Matches a custom author to an Open Library author ("match now"): Open Library's details
+    /// and works replace the typed ones, and later refreshes follow Open Library. The folders,
+    /// files, profiles and monitoring stay. The books made from the files are removed (the files
+    /// on disk stay) and a scan is queued, which links the files to Open Library's works.
+    /// `Conflict` when another author has that id; `Validation` when Open Library does not know
+    /// it (nothing is changed then).
+    pub async fn match_custom_author(&self, id: i64, openlibrary_id: &str) -> Result<AuthorDto> {
+        self.custom_author(id).await?;
+        let olid = openlibrary_id.trim();
+        if !is_author_olid(olid) {
+            return Err(BooksError::Validation(
+                "openlibrary_id is an Open Library author id such as OL23919A".into(),
+            ));
+        }
+        if let Some(other) = repo::id_by_olid(&self.db, olid).await?
+            && other != id
+        {
+            return Err(BooksError::Conflict(format!(
+                "author {olid} is already in the library (author {other})"
+            )));
+        }
+        // Checked before anything changes.
+        self.metadata.author(olid).await.map_err(|e| match e {
+            reelix_metadata::MetaError::NotFound => {
+                BooksError::Validation(format!("Open Library has no author with id {olid}"))
+            }
+            e => e.into(),
+        })?;
+        sqlx::query("UPDATE authors SET openlibrary_id = ?, custom = 0 WHERE id = ?")
+            .bind(olid)
+            .bind(id)
+            .execute(self.db.pool())
+            .await?;
+        sqlx::query("DELETE FROM books WHERE author_id = ? AND openlibrary_work_id LIKE 'custom:%'")
+            .bind(id)
+            .execute(self.db.pool())
+            .await?;
+        tracing::info!(id, openlibrary_id = olid, "custom author matched");
+        let mut a = self.author_row(id).await?;
+        a.images = ImagesDto::default();
+        self.refresh_author(&mut a, true).await?;
+        self.emit("author", "updated", id);
+        self.queue_scan(&[id], None).await?;
+        self.author_row(id).await
+    }
+
     /// Sets (or removes) the picture of a custom author.
     pub async fn set_custom_author_picture(&self, id: i64, poster: Option<String>) -> Result<()> {
         let mut a = self.custom_author(id).await?;
@@ -243,6 +296,15 @@ mod tests {
             path: PathBuf::from(path),
             files: files.iter().map(|f| (PathBuf::from(f), 1)).collect(),
         }
+    }
+
+    #[test]
+    fn open_library_author_ids() {
+        assert!(is_author_olid("OL23919A"));
+        assert!(!is_author_olid("OL23919W"));
+        assert!(!is_author_olid("OLA"));
+        assert!(!is_author_olid("custom:4"));
+        assert!(!is_author_olid("OL12x4A"));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use reelix_api_types::library::{
     EpisodeDto, ImagesDto, MovieDto, MovieStatus, SeasonDto, SeriesDto, SeriesStatus,
 };
 use reelix_core::MediaKind;
+use reelix_metadata::{MetaError, SeriesExternalId};
 use reelix_parser::{EpisodeInfo, ReleaseKind, parse_path};
 
 use crate::LibraryService;
@@ -238,6 +239,88 @@ impl LibraryService {
         Ok(())
     }
 
+    /// Matches a custom film to its TMDB entry ("match now"): the typed details give way to
+    /// TMDB's, as for any film, and later refreshes follow TMDB. The folder, files, quality
+    /// profile and monitoring stay. `Conflict` when another film has that TMDB id; `Validation`
+    /// when TMDB has no such film (nothing is changed then).
+    pub async fn match_custom_movie(&self, id: i64, tmdb_id: u32) -> Result<MovieDto> {
+        self.custom_movie(id).await?;
+        if tmdb_id == 0 {
+            return Err(LibraryError::validation("tmdb_id is required"));
+        }
+        if let Some(other) = movies::id_by_tmdb(&self.db, tmdb_id).await?
+            && other != id
+        {
+            return Err(LibraryError::Conflict(format!(
+                "film with TMDB id {tmdb_id} is already in the library (film {other})"
+            )));
+        }
+        // Checked before anything changes; the refresh below reads it from the client's cache.
+        self.metadata
+            .movie(tmdb_id)
+            .await
+            .map_err(|e| no_match(e, "TMDB", "film", tmdb_id))?;
+        sqlx::query("UPDATE movies SET tmdb_id = ?, custom = 0 WHERE id = ?")
+            .bind(i64::from(tmdb_id))
+            .bind(id)
+            .execute(self.db.pool())
+            .await?;
+        tracing::info!(id, tmdb_id, "custom film matched");
+        self.refresh_movie(id).await?;
+        self.queue_scan(&[id], &[]).await?;
+        self.get_movie(id).await
+    }
+
+    /// Matches a custom series to its TMDB entry (by TMDB id, or by TVDB id): TMDB's details,
+    /// seasons and episodes replace the typed ones, and later refreshes follow TMDB. The folder
+    /// and files stay; a scan is queued to link the files to TMDB's episodes. Episodes made from
+    /// file names that TMDB does not have are kept while they have a file.
+    pub async fn match_custom_series(
+        &self,
+        id: i64,
+        tmdb_id: Option<u32>,
+        tvdb_id: Option<u32>,
+    ) -> Result<SeriesDto> {
+        self.custom_series(id).await?;
+        let (ext, label) = match (tmdb_id.filter(|t| *t > 0), tvdb_id.filter(|t| *t > 0)) {
+            (Some(t), _) => (SeriesExternalId::Tmdb(t), ("TMDB", t)),
+            (None, Some(t)) => (SeriesExternalId::Tvdb(t), ("TVDB", t)),
+            (None, None) => return Err(LibraryError::validation("tmdb_id or tvdb_id is required")),
+        };
+        let meta = crate::series::series_metadata(self.metadata.as_ref(), ext, tvdb_id)
+            .await
+            .map_err(|e| no_match(e, label.0, "series", label.1))?;
+        let Some(tmdb) = meta.tmdb_id else {
+            return Err(LibraryError::validation("the series found has no TMDB id"));
+        };
+        if let Some(other) = series_repo::id_by_tmdb(&self.db, tmdb).await?
+            && other != id
+        {
+            return Err(LibraryError::Conflict(format!(
+                "series with TMDB id {tmdb} is already in the library (series {other})"
+            )));
+        }
+        let tvdb = meta.tvdb_id.or(meta.external_ids.tvdb).or(tvdb_id);
+        if let Some(t) = tvdb
+            && let Some(other) = series_repo::id_by_tvdb(&self.db, t).await?
+            && other != id
+        {
+            return Err(LibraryError::Conflict(format!(
+                "series with TVDB id {t} is already in the library (series {other})"
+            )));
+        }
+        sqlx::query("UPDATE series SET tmdb_id = ?, tvdb_id = ?, custom = 0 WHERE id = ?")
+            .bind(i64::from(tmdb))
+            .bind(tvdb.map(i64::from))
+            .bind(id)
+            .execute(self.db.pool())
+            .await?;
+        tracing::info!(id, tmdb_id = tmdb, "custom series matched");
+        self.refresh_series(id).await?;
+        self.queue_scan(&[], &[id]).await?;
+        self.get_series(id).await
+    }
+
     /// Seasons and episodes of a custom series from its video files: each file's season and
     /// episode numbers (`S01E02`, `1x02`, a `Season 1` folder). Files without both numbers stay
     /// unmatched. Existing episodes are kept; new ones follow the series' monitoring.
@@ -307,6 +390,14 @@ impl LibraryService {
             self.emit("episode", "created", id);
         }
         Ok(())
+    }
+}
+
+/// A failed look-up for "match now": an id the source does not know is the caller's mistake.
+fn no_match(e: MetaError, source: &str, what: &str, id: u32) -> LibraryError {
+    match e {
+        MetaError::NotFound => LibraryError::validation(format!("{source} has no {what} with id {id}")),
+        e => e.into(),
     }
 }
 
