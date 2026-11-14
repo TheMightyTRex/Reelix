@@ -28,6 +28,9 @@ bitflags! {
         const AUTO_APPROVE_MUSIC = 1 << 19;
         const REQUEST_RADIO      = 1 << 20;
         const AUTO_APPROVE_RADIO = 1 << 21;
+        /// Read-only system view: logs, jobs, scheduled tasks and the backup list. Every
+        /// system change, backup download and restore still needs `ADMIN`.
+        const VIEW_SYSTEM        = 1 << 22;
     }
 }
 
@@ -35,11 +38,13 @@ impl Permissions {
     /// Role preset: full control.
     pub const ROLE_ADMIN: Self = Self::ADMIN;
 
-    /// Role preset: manages library, requests, users and issues, but not system settings.
+    /// Role preset: manages library, requests, users and issues and can read the system logs,
+    /// jobs and backup list, but cannot change system settings.
     pub const ROLE_MANAGER: Self = Self::MANAGE_LIBRARY
         .union(Self::MANAGE_REQUESTS)
         .union(Self::MANAGE_USERS)
         .union(Self::MANAGE_ISSUES)
+        .union(Self::VIEW_SYSTEM)
         .union(Self::ROLE_POWER_USER);
 
     /// Role preset: advanced requester with auto-approval.
@@ -140,6 +145,15 @@ mod tests {
         let radio = Permissions::REQUEST_RADIO | Permissions::AUTO_APPROVE_RADIO;
         assert!(!Permissions::ROLE_USER.intersects(radio));
         assert!(Permissions::ROLE_POWER_USER.contains(radio));
+    }
+
+    #[test]
+    fn view_system_is_stable_and_for_managers_only() {
+        assert_eq!(Permissions::VIEW_SYSTEM.bits(), 1 << 22);
+        assert!(Permissions::ROLE_MANAGER.contains(Permissions::VIEW_SYSTEM));
+        assert!(!Permissions::ROLE_POWER_USER.intersects(Permissions::VIEW_SYSTEM));
+        assert!(!Permissions::VIEW_SYSTEM.is_admin());
+        assert!(Permissions::ADMIN.has(Permissions::VIEW_SYSTEM));
     }
 
     #[test]

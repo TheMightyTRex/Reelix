@@ -193,19 +193,25 @@ async fn file_response(path: PathBuf, name: &str, content_type: &'static str) ->
 
 // ---------- Backups ----------
 
-/// Backups, schedule and any pending restore (admin).
+/// Backups, schedule and any pending restore (admin or View system). Downloading a backup
+/// stays admin only, since the archive holds the secret key.
 #[utoipa::path(get, path = "/api/v1/system/backups", tag = "system",
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Backups", body = BackupsOverview),
-        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 403, description = "Needs Admin or View system", body = ApiErrorBody),
     ))]
 pub async fn list_backups(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> ApiResult<ApiJson<BackupsOverview>> {
-    user.require(Permissions::ADMIN)?;
-    Ok(ApiJson(backend(&state)?.backups().await?))
+    user.require(Permissions::VIEW_SYSTEM)?;
+    let mut overview = backend(&state)?.backups().await?;
+    // The server path is only for admins, as in `/system/status`.
+    if !user.is_admin() {
+        overview.backup_dir = String::new();
+    }
+    Ok(ApiJson(overview))
 }
 
 /// Backs up the database, config file and secret key now (admin).
@@ -378,13 +384,13 @@ pub async fn cancel_restore(State(state): State<AppState>, user: CurrentUser) ->
 
 // ---------- Logs ----------
 
-/// Recent log entries, newest first (admin).
+/// Recent log entries, newest first (admin or View system).
 #[utoipa::path(get, path = "/api/v1/system/logs", tag = "system",
     params(LogsQuery),
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Log entries", body = LogsDto),
-        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 403, description = "Needs Admin or View system", body = ApiErrorBody),
         (status = 404, description = "Unknown log file", body = ApiErrorBody),
     ))]
 pub async fn logs(
@@ -392,32 +398,32 @@ pub async fn logs(
     user: CurrentUser,
     ApiQuery(q): ApiQuery<LogsQuery>,
 ) -> ApiResult<ApiJson<LogsDto>> {
-    user.require(Permissions::ADMIN)?;
+    user.require(Permissions::VIEW_SYSTEM)?;
     Ok(ApiJson(backend(&state)?.logs(q).await?))
 }
 
-/// Log files on disk, newest first (admin).
+/// Log files on disk, newest first (admin or View system).
 #[utoipa::path(get, path = "/api/v1/system/logs/files", tag = "system",
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Log files", body = Vec<LogFileDto>),
-        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 403, description = "Needs Admin or View system", body = ApiErrorBody),
     ))]
 pub async fn log_files(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> ApiResult<ApiJson<Vec<LogFileDto>>> {
-    user.require(Permissions::ADMIN)?;
+    user.require(Permissions::VIEW_SYSTEM)?;
     Ok(ApiJson(backend(&state)?.log_files().await?))
 }
 
-/// Downloads a log file (admin).
+/// Downloads a log file (admin or View system).
 #[utoipa::path(get, path = "/api/v1/system/logs/files/{name}", tag = "system",
     params(("name" = String, Path, description = "Log file name")),
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Log file", content_type = "text/plain"),
-        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 403, description = "Needs Admin or View system", body = ApiErrorBody),
         (status = 404, description = "Unknown log file", body = ApiErrorBody),
     ))]
 pub async fn download_log(
@@ -425,7 +431,7 @@ pub async fn download_log(
     user: CurrentUser,
     ApiPath(name): ApiPath<String>,
 ) -> ApiResult<Response> {
-    user.require(Permissions::ADMIN)?;
+    user.require(Permissions::VIEW_SYSTEM)?;
     let path = backend(&state)?.log_path(&name)?;
     file_response(path, &name, "text/plain; charset=utf-8").await
 }
