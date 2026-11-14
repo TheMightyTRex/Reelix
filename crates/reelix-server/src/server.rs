@@ -52,6 +52,12 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .await
         .context("opening database")?;
     tracing::info!(kind = config.database_kind(), "database ready");
+    // Built-in custom formats (audio description, BSL), made once; a deleted one stays deleted.
+    match db.custom_formats().ensure_builtins().await {
+        Ok(made) if !made.is_empty() => tracing::info!(?made, "built-in custom formats added"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "could not add the built-in custom formats"),
+    }
 
     let secrets = load_secrets(&config)?;
     let events = EventBus::new(EVENT_BUS_CAPACITY);
