@@ -203,6 +203,18 @@ fn picture_rel(kind: CustomItemKind, id: i64, ext: &str) -> String {
     format!("{}/{id}.{ext}", picture_dir(kind))
 }
 
+/// The item's picture of `ext` inside the data folder. The name is built from a fixed kind and a
+/// number, so it cannot leave the folder; this checks it anyway, so a later change cannot either:
+/// every part must be a plain name (no `..`, no leading `/`) and the result must sit in `data_dir`.
+fn picture_path(data_dir: &Path, kind: CustomItemKind, id: i64, ext: &str) -> Option<PathBuf> {
+    let rel = picture_rel(kind, id, ext);
+    let plain = Path::new(&rel)
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    let path = data_dir.join(&rel);
+    (plain && path.starts_with(data_dir)).then_some(path)
+}
+
 fn etag(bytes: &[u8]) -> String {
     format!("\"{}\"", hex::encode(&Sha256::digest(bytes)[..16]))
 }
@@ -217,7 +229,9 @@ fn picture_address(kind: CustomItemKind, id: i64, bytes: &[u8]) -> String {
 /// Removes every stored picture of the item (any type).
 async fn remove_pictures(data_dir: &Path, kind: CustomItemKind, id: i64) {
     for k in PICTURE_KINDS {
-        let p = data_dir.join(picture_rel(kind, id, k.ext()));
+        let Some(p) = picture_path(data_dir, kind, id, k.ext()) else {
+            continue;
+        };
         if p.exists()
             && let Err(e) = tokio::fs::remove_file(&p).await
         {
@@ -231,7 +245,8 @@ async fn store_picture(state: &AppState, kind: CustomItemKind, id: i64, pic: &Pi
     let data_dir = state.config().data_dir.clone();
     remove_pictures(&data_dir, kind, id).await;
     let rel = picture_rel(kind, id, pic.kind.ext());
-    let path: PathBuf = data_dir.join(&rel);
+    let path: PathBuf = picture_path(&data_dir, kind, id, pic.kind.ext())
+        .ok_or_else(|| ApiError::internal("picture path outside the data folder"))?;
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -290,7 +305,10 @@ async fn set_picture(
 /// The stored picture of the item, if any.
 async fn read_picture(data_dir: &Path, kind: CustomItemKind, id: i64) -> Option<StoredImage> {
     for k in PICTURE_KINDS {
-        if let Ok(bytes) = tokio::fs::read(data_dir.join(picture_rel(kind, id, k.ext()))).await {
+        let Some(path) = picture_path(data_dir, kind, id, k.ext()) else {
+            continue;
+        };
+        if let Ok(bytes) = tokio::fs::read(path).await {
             return Some(StoredImage {
                 etag: etag(&bytes),
                 bytes,
@@ -612,6 +630,20 @@ mod tests {
         let mut big = PNG.to_vec();
         big.resize(IMAGE_MAX_BYTES + 1, 0);
         assert!(decode_data_url(&data_url("image/png", &big)).is_err());
+    }
+
+    #[test]
+    fn picture_paths_stay_in_the_data_folder() {
+        let data = Path::new("/data");
+        assert_eq!(
+            picture_path(data, CustomItemKind::Series, -7, "webp"),
+            Some(PathBuf::from("/data/custom/series/-7.webp"))
+        );
+        assert_eq!(
+            picture_path(data, CustomItemKind::Movie, 4, "png/../../../etc/x"),
+            None
+        );
+        assert_eq!(picture_path(data, CustomItemKind::Movie, 4, "png/../.."), None);
     }
 
     #[test]
