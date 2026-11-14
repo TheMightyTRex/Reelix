@@ -8,7 +8,9 @@ use futures::stream::{self, StreamExt};
 use reelix_api_types::library::{LibrarySearchKind, SearchRequest};
 
 use reelix_decision::{FormatInput, QualityProfile, matching_formats, score_formats};
-use reelix_import::files::{FileKind, FoundFile, SampleRules, ScanOptions, detect_sample, scan_async};
+use reelix_import::files::{
+    FileKind, FoundFile, SampleRules, ScanOptions, detect_extra, detect_sample, is_disc_image, scan_async,
+};
 use reelix_import::matching::{ExpectedEpisode, match_parsed_episodes};
 use reelix_import::mediainfo::{MediaInfo, ProbeConfig, probe};
 use reelix_parser::{ParsedRelease, Quality, QualityModel, parse_path};
@@ -67,6 +69,20 @@ pub(crate) fn score(
     (ids, s)
 }
 
+/// Parses a film file's name; a disc image is BR-DISK unless its name says DVD.
+fn parse_film(source: &str, disc_image: bool) -> ParsedRelease {
+    let mut parsed = parse_path(source);
+    if disc_image
+        && !matches!(
+            parsed.quality.quality,
+            Quality::BrDisk | Quality::Dvd | Quality::DvdR
+        )
+    {
+        parsed.quality.quality = Quality::BrDisk;
+    }
+    parsed
+}
+
 /// Quality from the name, refined by the probed resolution when the name has none.
 fn quality_of(parsed: &ParsedRelease, info: Option<&MediaInfo>) -> QualityModel {
     let mut q = parsed.quality;
@@ -107,7 +123,32 @@ impl LibraryService {
         }
     }
 
-    /// Scans a movie folder; keeps the largest non-sample video as the movie file.
+    /// A film folder's videos and disc images (`.iso`, `.img`), extras left out.
+    async fn films_in(&self, folder: &Path) -> Vec<FoundFile> {
+        if !folder.is_dir() {
+            return Vec::new();
+        }
+        let opts = ScanOptions {
+            include_non_video: true,
+            ..ScanOptions::default()
+        };
+        match scan_async(folder.to_path_buf(), opts).await {
+            Ok(v) => v
+                .into_iter()
+                .filter(|f| match f.kind {
+                    FileKind::Video => f.extra.is_none(),
+                    _ => is_disc_image(&f.path) && detect_extra(&f.path, Some(folder)).is_none(),
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!(folder = %folder.display(), error = %e, "scan failed");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Scans a movie folder; keeps the largest non-sample video or disc image as the movie
+    /// file. A disc image gets the BR-DISK quality and no media details.
     pub async fn scan_movie(&self, id: i64) -> Result<ScanReport> {
         let cache = self.profiles().await?;
         let Some(m) = movies::get(&self.db, id, &cache).await? else {
@@ -117,7 +158,7 @@ impl LibraryService {
         let mut report = ScanReport::default();
         let existing = files::list(&self.db, FileTable::Movie, Some(&[id])).await?;
         let candidate = self
-            .videos_in(&folder)
+            .films_in(&folder)
             .await
             .into_iter()
             .filter(|f| !named_sample(f))
@@ -141,18 +182,24 @@ impl LibraryService {
         if let Some(f) = candidate {
             let rel = f.relative.to_string_lossy().into_owned();
             let prev = existing.iter().find(|e| e.relative_path == rel);
-            if prev.is_some_and(|p| p.size == f.size && p.media_info.is_some()) {
+            let disc = is_disc_image(&f.path);
+            // A disc image is never probed, so it has no media details to wait for.
+            if prev.is_some_and(|p| p.size == f.size && (p.media_info.is_some() || disc)) {
                 // Unchanged: only rescore (profile / formats may have changed).
                 let p = prev.unwrap();
-                let parsed = parse_path(p.scene_name.as_deref().unwrap_or(&f.path.to_string_lossy()));
+                let parsed = parse_film(p.scene_name.as_deref().unwrap_or(&f.path.to_string_lossy()), disc);
                 let (ids, s) = score(&parsed, p.size, cache.profile(m.quality_profile_id), &cache);
                 files::set_scores(&self.db, FileTable::Movie, p.id, &ids, s).await?;
             } else {
-                let info = self.prober().await?.probe(&f.path).await;
+                let info = if disc {
+                    None
+                } else {
+                    self.prober().await?.probe(&f.path).await
+                };
                 let source = prev
                     .and_then(|p| p.scene_name.clone())
                     .unwrap_or_else(|| f.path.to_string_lossy().into_owned());
-                let parsed = parse_path(&source);
+                let parsed = parse_film(&source, disc);
                 let row = self.file_row(
                     id,
                     None,

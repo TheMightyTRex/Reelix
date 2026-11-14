@@ -10,7 +10,7 @@ use reelix_api_types::library::{
     LibraryImportRequest, LibraryImportResult, LookupResult, MovieMonitor, NewItemMonitor, UnmappedFolderDto,
 };
 use reelix_core::MediaKind;
-use reelix_import::files::{FileKind, ScanOptions, scan_async};
+use reelix_import::files::{FileKind, ScanOptions, is_disc_image, scan_async};
 use reelix_metadata::MetaError;
 
 use crate::error::{LibraryError, Result};
@@ -117,13 +117,17 @@ impl LibraryService {
                 let files = scan_async(
                     folder.path.clone().into(),
                     ScanOptions {
-                        include_non_video: false,
+                        // Film folders also count disc images (`.iso`, `.img`).
+                        include_non_video: root.media_kind == MediaKind::Movie,
                         max_depth: 3,
                     },
                 )
                 .await
                 .unwrap_or_default();
-                let videos: Vec<_> = files.iter().filter(|f| f.kind == FileKind::Video).collect();
+                let videos: Vec<_> = files
+                    .iter()
+                    .filter(|f| f.kind == FileKind::Video || is_disc_image(&f.path))
+                    .collect();
                 let (title, year, tmdb) = parse_folder_name(&folder.name);
                 let mut suggestions: Vec<LookupResult> = Vec::new();
                 let known = not_configured.lock().unwrap_or_else(|e| e.into_inner()).clone();
