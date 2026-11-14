@@ -1274,8 +1274,10 @@ impl ProviderService {
             (None, None) => Err(reelix_metadata::MetaError::NotConfigured("TMDB")),
         }
         .map(|auth| {
+            let (language, fallback_languages) = reelix_metadata::split_languages(&m.language);
             let mut o = TmdbOptions {
-                language: m.language.clone(),
+                language,
+                fallback_languages,
                 region: blank(&m.region),
                 ..Default::default()
             };
@@ -1286,7 +1288,7 @@ impl ProviderService {
         });
         let tvdb = Ok(blank(&m.tvdb_api_key).map(|key| {
             let mut o = TvdbOptions {
-                language: m.language.clone(),
+                language: reelix_metadata::split_languages(&m.language).0,
                 ..Default::default()
             };
             if let Some(u) = &self.opts.tvdb_base_url {
@@ -1338,18 +1340,31 @@ impl ProviderService {
         ] {
             *v = v.take().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
         }
-        m.language = m.language.trim().to_owned();
-        if m.language.is_empty() {
-            m.language = "en-US".into();
+        // One language, or several in order of preference (`cy-GB, en-GB`), fork issue #13.
+        let given: Vec<&str> = m
+            .language
+            .split(',')
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        if given.len() > reelix_metadata::MAX_LANGUAGES {
+            return Err(validation(format!(
+                "at most {} languages, in order of preference",
+                reelix_metadata::MAX_LANGUAGES
+            )));
         }
-        if m.language.len() > 16
-            || !m
-                .language
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            return Err(validation("language must look like `en-US`"));
+        if given.iter().any(|l| {
+            l.len() > 16
+                || !l
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        }) {
+            return Err(validation(
+                "language must look like `en-US`, or a list in order of preference such as `cy-GB, en-GB`",
+            ));
         }
+        let (first, rest) = reelix_metadata::split_languages(&m.language);
+        m.language = std::iter::once(first).chain(rest).collect::<Vec<_>>().join(", ");
         if let Some(r) = &m.region
             && (r.len() != 2 || !r.chars().all(|c| c.is_ascii_alphabetic()))
         {
