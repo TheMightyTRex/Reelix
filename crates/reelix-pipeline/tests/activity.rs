@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use reelix_api_types::library::{ImportMode, MediaManagementSettings};
 use reelix_api_types::pipeline::{
-    HistoryQuery, ManualImportFile, ManualImportQuery, ManualImportRequest, QueueBulkRemove,
+    HistoryQuery, ManualImportFile, ManualImportQuery, ManualImportRequest, QueueBulkRemove, StalledAction,
+    StalledSettings,
 };
 use reelix_core::bus::EventBus;
 use reelix_core::{DomainEvent, Protocol};
@@ -276,6 +277,8 @@ async fn track(
     .await
     .unwrap()
 }
+
+const HOUR: i64 = 3_600_000;
 
 fn item(id: &str, title: &str, state: DownloadState, output: Option<&Path>) -> DownloadItem {
     let mut i = DownloadItem::new(id, title, state);
@@ -609,6 +612,118 @@ async fn failed_usenet_download_blocklists_and_searches_again() {
             .iter()
             .any(|m| m.contains("out of disk space"))
     );
+}
+
+#[tokio::test]
+async fn a_stalled_download_is_flagged_after_six_hours_by_default() {
+    // DASH-407: no progress for the set time (6 hours by default) while downloading.
+    let e = env(Protocol::Torrent, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Downloading, None));
+    let messages = |e: &Env| {
+        let svc = e.svc.clone();
+        async move { svc.queue(None, None).await.unwrap().items[0].messages.clone() }
+    };
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(5 * HOUR);
+    e.svc.poll().await.unwrap();
+    assert!(messages(&e).await.is_empty(), "not yet");
+
+    // Paused time does not count.
+    e.client.items.lock().unwrap()[0].state = DownloadState::Paused;
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(2 * HOUR);
+    e.client.items.lock().unwrap()[0].state = DownloadState::Downloading;
+    e.svc.poll().await.unwrap();
+    assert!(messages(&e).await.is_empty(), "the clock started again");
+
+    e.svc.advance_stall_clock(6 * HOUR);
+    e.svc.poll().await.unwrap();
+    let m = messages(&e).await;
+    assert_eq!(m.len(), 1, "{m:?}");
+    assert!(m[0].starts_with("Stalled: no progress for 6 hours"), "{m:?}");
+    // Flag only: still downloading, nothing removed or blocklisted.
+    assert_eq!(state_of(&e, id).await, TrackedState::Downloading);
+    assert!(e.client.removed.lock().unwrap().is_empty());
+    assert_eq!(blocklist::list(&e.db, 0, 10).await.unwrap().1, 0);
+
+    // Progress clears the flag.
+    e.client.items.lock().unwrap()[0].remaining_bytes = 300;
+    e.svc.poll().await.unwrap();
+    assert!(messages(&e).await.is_empty());
+
+    // qBittorrent's stalledDL (a warning) keeps its own message as well.
+    {
+        let mut items = e.client.items.lock().unwrap();
+        items[0].state = DownloadState::Warning;
+        items[0].message = Some("The download is stalled with no connections".into());
+    }
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(7 * HOUR);
+    e.svc.poll().await.unwrap();
+    let m = messages(&e).await;
+    assert_eq!(m.len(), 2, "{m:?}");
+    assert!(m[1].starts_with("Stalled"), "{m:?}");
+
+    // Off.
+    e.svc
+        .set_stalled_settings(StalledSettings {
+            stalled_hours: 0,
+            action: StalledAction::Flag,
+        })
+        .await
+        .unwrap();
+    e.svc.poll().await.unwrap();
+    assert_eq!(messages(&e).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_stalled_download_can_be_removed_and_searched_again() {
+    let e = env(Protocol::Torrent, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    e.svc
+        .set_stalled_settings(StalledSettings {
+            stalled_hours: 2,
+            action: StalledAction::RemoveAndSearch,
+        })
+        .await
+        .unwrap();
+    assert!(
+        e.svc
+            .set_stalled_settings(StalledSettings {
+                stalled_hours: 10_000,
+                action: StalledAction::Flag,
+            })
+            .await
+            .is_err()
+    );
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Downloading, None));
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(2 * HOUR);
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::Failed);
+    let (bl, total) = blocklist::list(&e.db, 0, 10).await.unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(bl[0].message.as_deref(), Some("stalled"));
+    assert_eq!(history_events(&e).await, vec!["download_failed"]);
+    let jobs: Vec<String> = sqlx::query_scalar("SELECT kind FROM jobs")
+        .fetch_all(e.db.pool())
+        .await
+        .unwrap();
+    assert!(jobs.contains(&"search".to_owned()), "{jobs:?}");
+    assert_eq!(*e.client.removed.lock().unwrap(), vec!["hash1".to_owned()]);
 }
 
 #[tokio::test]
