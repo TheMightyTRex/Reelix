@@ -909,3 +909,161 @@ async fn library_import_and_root_folders() {
         Err(BooksError::Validation(_))
     ));
 }
+
+/// RFX-87: the parts of an audiobook are joined into one chaptered M4B in track order, the
+/// record points at it and the parts go; a failed join leaves everything as it was.
+#[cfg(unix)]
+#[tokio::test]
+async fn merge_audiobook_parts_into_one_m4b() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let env = env().await;
+    let tools = tempfile::tempdir().unwrap();
+    // Stand-ins: ffprobe gives each part 4 s and a track number (01 is track 2, 02 is track 1),
+    // and the merged file 12 s with three chapters; ffmpeg writes its concat list and chapter
+    // file into the output, and fails for The Well of Ascension.
+    let ffprobe = tools.path().join("ffprobe");
+    std::fs::write(
+        &ffprobe,
+        r#"#!/bin/sh
+for f in "$@"; do last="$f"; done
+case "$last" in
+  *.reelix-partial.m4b) echo '{"streams":[{"codec_name":"aac","bit_rate":"64000"}],"format":{"duration":"12.0"},"chapters":[{},{},{}]}' ;;
+  */01.mp3) echo '{"streams":[{"codec_name":"mp3","bit_rate":"64000"}],"format":{"duration":"4.0","tags":{"track":"2"}}}' ;;
+  */02.mp3) echo '{"streams":[{"codec_name":"mp3","bit_rate":"64000"}],"format":{"duration":"4.0","tags":{"track":"1"}}}' ;;
+  *) echo '{"streams":[{"codec_name":"mp3","bit_rate":"64000"}],"format":{"duration":"4.0","tags":{"track":"3"}}}' ;;
+esac
+"#,
+    )
+    .unwrap();
+    let ffmpeg = tools.path().join("ffmpeg");
+    std::fs::write(
+        &ffmpeg,
+        r#"#!/bin/sh
+list=""; meta=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -i) if [ -z "$list" ]; then list="$2"; else meta="$2"; fi; shift 2 ;;
+    *) out="$1"; shift ;;
+  esac
+done
+if grep -q Ascension "$list"; then echo "Invalid data found when processing input" >&2; exit 1; fi
+cat "$list" "$meta" > "$out"
+"#,
+    )
+    .unwrap();
+    for p in [&ffprobe, &ffmpeg] {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    BooksService::set_merge_tools(ffmpeg, ffprobe);
+    let mut settings = env.svc.settings().await.unwrap();
+    settings.write_metadata = false;
+    env.svc.set_settings(settings).await.unwrap();
+
+    let a = env
+        .svc
+        .add_author(add_req(&env, "OL1A", AuthorMonitor::All))
+        .await
+        .unwrap();
+    let ebooks = PathBuf::from(a.path.clone().unwrap());
+    let audio = PathBuf::from(a.audio_path.clone().unwrap());
+    let empire_dir = audio.join("The Final Empire (2006)");
+    for n in ["01", "02", "03"] {
+        write(&empire_dir.join(format!("{n}.mp3")), &mp3(5));
+    }
+    let well_dir = audio.join("The Well of Ascension (2007)");
+    for n in ["01", "02"] {
+        write(&well_dir.join(format!("{n}.mp3")), &mp3(5));
+    }
+    write(
+        &ebooks.join("The Final Empire/The Final Empire.epub"),
+        &epub("The Final Empire", None),
+    );
+    env.svc.scan_authors(&[a.id]).await.unwrap();
+    let books = books_of(&env, a.id).await;
+    let empire = by_title(&books, "The Final Empire");
+    let af = empire.audiobook_file.clone().unwrap();
+    assert_eq!(af.parts.len(), 3);
+
+    // Only multi-part audiobooks can be merged.
+    let ef = empire.ebook_file.clone().unwrap();
+    assert!(matches!(
+        env.svc.queue_merge(ef.id).await,
+        Err(BooksError::Validation(_))
+    ));
+    assert!(matches!(
+        env.svc.queue_merge(999_999).await,
+        Err(BooksError::NotFound(_))
+    ));
+    assert_eq!(
+        env.svc.queue_merge(af.id).await.unwrap(),
+        None,
+        "no queue in tests"
+    );
+
+    let out = env.svc.merge_book_file(af.id).await.unwrap();
+    assert_eq!(out.chapters, 3);
+    assert!(!out.copied, "MP3 parts are encoded to AAC");
+    assert_eq!(out.removed_parts, 3);
+    assert_eq!(out.relative_path, "The Final Empire (2006)/The Final Empire.m4b");
+    let merged = std::fs::read_to_string(empire_dir.join("The Final Empire.m4b")).unwrap();
+    let order: Vec<&str> = merged
+        .lines()
+        .filter(|l| l.starts_with("file '"))
+        .map(|l| &l[l.len() - 7..l.len() - 1])
+        .collect();
+    assert_eq!(
+        order,
+        vec!["02.mp3", "01.mp3", "03.mp3"],
+        "track tags decide the order"
+    );
+    assert!(
+        merged.contains("START=4000\nEND=8000\ntitle=Chapter 2\n"),
+        "{merged}"
+    );
+    assert!(merged.contains("title=The Final Empire\nartist=Brandon Sanderson\n"));
+    for n in ["01", "02", "03"] {
+        assert!(!empire_dir.join(format!("{n}.mp3")).exists(), "part {n} removed");
+    }
+    let names: Vec<String> = std::fs::read_dir(&empire_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["The Final Empire.m4b".to_string()],
+        "no helper files left"
+    );
+    let b = env.svc.get_book(empire.id).await.unwrap();
+    let f = b.audiobook_file.unwrap();
+    assert_eq!(f.id, af.id);
+    assert!(f.parts.is_empty());
+    assert_eq!(f.relative_path, "The Final Empire (2006)/The Final Empire.m4b");
+    assert_eq!(f.duration_seconds, Some(12));
+    // A rescan keeps the merged file as the book's audiobook.
+    env.svc.scan_authors(&[a.id]).await.unwrap();
+    let b = env.svc.get_book(empire.id).await.unwrap();
+    assert_eq!(
+        b.audiobook_file.unwrap().relative_path,
+        "The Final Empire (2006)/The Final Empire.m4b"
+    );
+    // Already one file now.
+    assert!(matches!(
+        env.svc.queue_merge(af.id).await,
+        Err(BooksError::Validation(_))
+    ));
+
+    // A failed join keeps the parts and the record, and leaves no unfinished file.
+    let well = by_title(&books, "The Well of Ascension");
+    let wf = well.audiobook_file.clone().unwrap();
+    let err = env.svc.merge_book_file(wf.id).await.unwrap_err();
+    assert!(err.to_string().contains("Invalid data"), "{err}");
+    let mut names: Vec<String> = std::fs::read_dir(&well_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["01.mp3".to_string(), "02.mp3".to_string()]);
+    let b = env.svc.get_book(well.id).await.unwrap();
+    assert_eq!(b.audiobook_file.unwrap().parts.len(), 2);
+}

@@ -448,6 +448,19 @@ async fn books_routes_flow_and_permissions() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(r["errors"].as_array().unwrap().len(), 1);
 
+    // Merging parts (RFX-87): library rights; only an existing multi-part audiobook.
+    let (s, _) = call(&app, Method::POST, "/api/v1/bookfiles/999999/merge", &plain, None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/api/v1/bookfiles/999999/merge",
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
     // Settings: admin only, validated.
     let (s, _) = call(&app, Method::GET, "/api/v1/settings/books", &manager, None).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
@@ -544,6 +557,7 @@ async fn openapi_documents_book_routes() {
         "/api/v1/bookrootfolders",
         "/api/v1/bookimport/scan",
         "/api/v1/settings/books",
+        "/api/v1/bookfiles/{id}/merge",
     ] {
         assert!(doc["paths"][p].is_object(), "{p} missing");
     }

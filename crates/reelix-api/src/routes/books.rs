@@ -52,6 +52,7 @@ pub fn routes() -> Router<AppState> {
         .route("/books/{id}/editions", get(book_editions))
         .route("/bookfiles", get(list_book_files))
         .route("/bookfiles/{id}", delete(delete_book_file))
+        .route("/bookfiles/{id}/merge", post(merge_book_file))
         .route("/bookseries", get(list_book_series))
         .route("/bookrootfolders", get(list_root_folders).post(add_root_folder))
         .route("/bookrootfolders/{id}", delete(delete_root_folder))
@@ -67,7 +68,7 @@ pub fn routes() -> Router<AppState> {
         list_authors, add_author, lookup_authors, get_author, edit_author, delete_author, refresh_author,
         rescan_author, list_books, add_book, lookup_books, monitor_books, search_books, wanted_books,
         rename_preview, rename_run, get_book, edit_book, delete_book, book_editions, list_book_files,
-        delete_book_file, list_book_series, list_root_folders, add_root_folder, delete_root_folder,
+        delete_book_file, merge_book_file, list_book_series, list_root_folders, add_root_folder, delete_root_folder,
         import_scan, import_match, library_import, get_settings, put_settings,
     ),
     components(schemas(
@@ -386,6 +387,27 @@ pub async fn get_book(
 ) -> ApiResult<ApiJson<BookDto>> {
     require_lib(&user)?;
     Ok(ApiJson(svc(&state)?.get_book(id).await?))
+}
+
+/// Queues the merge of a multi-part audiobook into one chaptered M4B (job `book_merge`): one
+/// chapter per part, ordered by track tags (or file names), AAC copied as it is and other audio
+/// encoded to AAC. The parts are kept until the merged file is checked, then removed like
+/// replaced files (into the recycle bin when one is set). Needs ffmpeg and ffprobe.
+#[utoipa::path(post, path = "/api/v1/bookfiles/{id}/merge", tag = "books",
+    params(("id" = i64, Path, description = "Book file id")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 202, description = "Queued", body = EnqueuedJob),
+        (status = 400, description = "Not a multi-part audiobook, or more than 2,000 parts", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    ))]
+pub async fn merge_book_file(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Response> {
+    require_lib(&user)?;
+    Ok(accepted(svc(&state)?.queue_merge(id).await?))
 }
 
 /// Edits a book (format monitoring, preferred edition).
