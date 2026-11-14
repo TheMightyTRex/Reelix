@@ -285,7 +285,8 @@ impl ProviderService {
                 return;
             }
         };
-        let count = loaded.store.list().len();
+        // Downloaded and custom definitions only; the built-in ones are always there.
+        let count = loaded.store.list().len() - loaded.builtin;
         *write(&self.definitions) = Arc::new(loaded.store);
         let mut cache = write(&self.cache);
         cache.definition_failed = loaded.failed;

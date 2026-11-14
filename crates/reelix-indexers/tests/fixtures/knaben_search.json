@@ -1,0 +1,40 @@
+{
+  "hits": [
+    {
+      "bytes": 928699593,
+      "cachedOrigin": "Example tracker",
+      "category": "Movies / HD",
+      "categoryId": [3001000],
+      "date": "2026-03-09T03:00:44+00:00",
+      "details": "https://tracker.example/details/5421757",
+      "grabs": 10,
+      "hash": "9EE38ECC0105ED61B0EF93A875325AFE784B6FB5",
+      "id": "2cfdf59484f0b479759fc1ac845ab03364356561",
+      "link": null,
+      "magnetUrl": "magnet:?xt=urn:btih:9EE38ECC0105ED61B0EF93A875325AFE784B6FB5&dn=Open.Movie.2026.1080p",
+      "peers": 3,
+      "seeders": 41,
+      "title": "Open.Movie.2026.1080p",
+      "tracker": "Example tracker",
+      "trackerId": "example"
+    },
+    {
+      "bytes": 76902560,
+      "category": "Audio / MP3",
+      "categoryId": [1001000, 1000000],
+      "date": "2025-08-11T00:00:00+02:00",
+      "details": "https://other.example/torrent/3168985/",
+      "hash": null,
+      "id": "edab57e04c7a0d9c62521bc4fe17e16d2daa11cc",
+      "link": "https://api.knaben.invalid/live/dl/other/?path=abc",
+      "magnetUrl": null,
+      "peers": 0,
+      "seeders": 4,
+      "title": "Open Album [MP3 320kbps] (2025)",
+      "tracker": "Other",
+      "trackerId": "other"
+    }
+  ],
+  "max_score": 30.0,
+  "total": {"relation": "eq", "value": 2}
+}
