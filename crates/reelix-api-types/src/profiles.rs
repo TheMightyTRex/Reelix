@@ -78,6 +78,17 @@ pub struct ParseResponse {
     pub decision: Option<ProfileDecisionDto>,
 }
 
+/// `GET /api/v1/customformats/builtin`: one built-in custom format by its stable key, and
+/// the format as it is now (`null` once an admin has deleted it).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BuiltinFormatDto {
+    /// Stable key (`audio_description`, `bsl`); the name can be changed, the key cannot.
+    pub key: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
+    pub format: Option<CustomFormat>,
+}
+
 /// A format created by `POST /api/v1/customformats/import`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
