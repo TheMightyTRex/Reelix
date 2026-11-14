@@ -96,6 +96,29 @@ fn classification_and_extras() {
     assert_eq!(classify(Path::new("a.ass")), FileKind::Subtitle);
     assert_eq!(classify(Path::new("poster.jpg")), FileKind::Image);
     assert_eq!(classify(Path::new("a.exe")), FileKind::Other);
+    for bad in [
+        "setup.exe",
+        "Film.mkv.exe",
+        "Play.LNK",
+        "run.bat",
+        "x.scr",
+        "a.js",
+        "b.vbs",
+        "c.msi",
+        "d.cmd",
+    ] {
+        assert!(reelix_import::files::is_dangerous(Path::new(bad)), "{bad}");
+    }
+    for ok in [
+        "film.mkv",
+        "film.nfo",
+        "cover.jpg",
+        "film.en.srt",
+        "notes.txt",
+        "book.epub",
+    ] {
+        assert!(!reelix_import::files::is_dangerous(Path::new(ok)), "{ok}");
+    }
     // Disc images are only taken by a film folder's library scan, never as a video.
     assert_eq!(classify(Path::new("Film (2020) BR-DISK.iso")), FileKind::Other);
     assert!(reelix_import::files::is_disc_image(Path::new(

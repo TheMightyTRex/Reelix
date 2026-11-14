@@ -430,6 +430,74 @@ async fn completed_torrent_movie_is_hardlinked_into_the_library() {
 }
 
 #[tokio::test]
+async fn a_download_with_programs_or_scripts_is_held_not_imported() {
+    // DASH-407: a "film" that holds an installer and a shortcut is most likely malware.
+    let e = env(Protocol::Torrent, true).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 5000);
+    write(&folder.join("Codec").join("setup.exe"), 1);
+    write(&folder.join("Play Movie.lnk"), 1);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Completed, Some(&folder)));
+
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    assert!(files_under(&e.movies).is_empty(), "nothing imported");
+    let q = e.svc.queue(None, None).await.unwrap();
+    let held = q.items.iter().find(|i| i.download_id == "hash1").unwrap();
+    assert!(
+        held.messages[0].starts_with("Held, not imported"),
+        "{:?}",
+        held.messages
+    );
+    assert!(held.messages[0].contains("setup.exe"), "{:?}", held.messages);
+    assert!(held.messages[0].contains("Play Movie.lnk"), "{:?}", held.messages);
+    assert_eq!(history_events(&e).await, vec!["import_failed"]);
+    // Not removed from the client or blocklisted: the person decides.
+    assert!(e.client.removed.lock().unwrap().is_empty());
+    assert!(
+        e.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|n| matches!(n, NotificationEvent::ManualInteractionRequired { .. }))
+    );
+    // A later poll leaves it held, without a second history row.
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    assert_eq!(history_events(&e).await, vec!["import_failed"]);
+}
+
+#[tokio::test]
+async fn a_download_disguising_a_program_as_a_video_is_held() {
+    let e = env(Protocol::Torrent, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.2160p.WEB-DL.x265-FAKE";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv.exe")), 5);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    let q = e.svc.queue(None, None).await.unwrap();
+    assert!(
+        q.items[0].messages[0].contains(".mkv.exe"),
+        "{:?}",
+        q.items[0].messages
+    );
+}
+
+#[tokio::test]
 async fn completed_usenet_movie_is_moved_and_removed_from_client() {
     let e = env(Protocol::Usenet, true).await;
     let movie = add_movie(&e).await;
