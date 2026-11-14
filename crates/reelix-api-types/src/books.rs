@@ -448,6 +448,8 @@ pub struct BookSettingsDto {
     pub write_covers: bool,
     pub calibre: CalibreSettingsDto,
     pub metadata_language: Option<String>,
+    /// Where audiobook details (narrators, length, recording) come from.
+    pub audiobook_metadata: AudiobookMetadataSettingsDto,
 }
 
 impl Default for BookSettingsDto {
@@ -458,8 +460,65 @@ impl Default for BookSettingsDto {
             write_covers: true,
             calibre: CalibreSettingsDto::default(),
             metadata_language: None,
+            audiobook_metadata: AudiobookMetadataSettingsDto::default(),
         }
     }
+}
+
+/// Audiobook detail sources (RFX-86). Audible and Audnexus are activated by default and asked
+/// only for books monitored as audiobooks; Libro.fm is deactivated by default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct AudiobookMetadataSettingsDto {
+    /// Audible's public catalogue.
+    pub audible: bool,
+    /// Audnexus fills narrators, length and dates Audible left empty.
+    pub audnexus: bool,
+    /// Libro.fm's public search, when Audible has no match.
+    pub librofm: bool,
+    /// Audible marketplace: `us`, `uk`, `au`, `ca`, `de`, `es`, `fr`, `in`, `it` or `jp`.
+    pub region: String,
+}
+
+impl Default for AudiobookMetadataSettingsDto {
+    fn default() -> Self {
+        Self {
+            audible: true,
+            audnexus: true,
+            librofm: false,
+            region: "us".into(),
+        }
+    }
+}
+
+/// `GET /books/{id}/audiobook`: one recording of a book, from the activated sources.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AudiobookDetailsDto {
+    pub book_id: i64,
+    /// False when no activated source has the book as an audiobook.
+    pub found: bool,
+    pub asin: Option<String>,
+    pub isbn: Option<String>,
+    pub title: Option<String>,
+    pub authors: Vec<String>,
+    pub narrators: Vec<String>,
+    pub runtime_minutes: Option<u32>,
+    /// True abridged, false unabridged, absent when not known.
+    pub abridged: Option<bool>,
+    /// Recording release date, `YYYY-MM-DD`.
+    pub recording_date: Option<String>,
+    pub language: Option<String>,
+    pub publisher: Option<String>,
+    pub series: Vec<BookSeriesRefDto>,
+    pub cover_url: Option<String>,
+    pub region: Option<String>,
+    /// Sources that gave details, in order: `audible`, `audnexus`, `librofm`.
+    pub sources: Vec<String>,
+    /// The recording's public page.
+    pub url: Option<String>,
+    pub looked_up: DateTime<Utc>,
 }
 
 /// A folder under a book root that is not yet in the library.

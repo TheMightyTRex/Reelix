@@ -31,6 +31,9 @@ fn errors(s: &BookSettingsDto) -> Vec<String> {
     if !n.audiobook_part_file.to_ascii_lowercase().contains("{part") {
         out.push("naming.audiobook_part_file: must contain {Part}".into());
     }
+    if let Some(e) = crate::audiobook::settings_errors(&s.audiobook_metadata) {
+        out.push(e);
+    }
     if s.calibre.enabled {
         match s.calibre.library_path.as_deref().map(str::trim) {
             Some(p) if Path::new(p).is_absolute() => {}
@@ -52,6 +55,7 @@ impl BooksService {
 
     /// Validates the templates and Calibre settings, then stores them.
     pub async fn set_settings(&self, mut s: BookSettingsDto) -> Result<BookSettingsDto> {
+        s.audiobook_metadata.region = s.audiobook_metadata.region.trim().to_ascii_lowercase();
         if let Some(e) = errors(&s).into_iter().next() {
             return Err(BooksError::Validation(e));
         }

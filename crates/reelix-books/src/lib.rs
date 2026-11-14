@@ -10,6 +10,7 @@
 //! Long-running work (refresh, disk scan, rename) runs as jobs registered by
 //! [`jobs::register`]; searches are only enqueued (`book_search`, handled by the pipeline).
 
+mod audiobook;
 mod authors;
 mod availability;
 mod books;

@@ -12,6 +12,7 @@
 //! # Ok(()) }
 //! ```
 
+pub mod audiobooks;
 pub mod books;
 pub mod http;
 pub mod listenbrainz;
@@ -29,6 +30,7 @@ use reelix_core::MediaKind;
 use reelix_core::provider::{FieldKind, FieldSchema, ProviderSchema};
 use serde::{Deserialize, Serialize};
 
+pub use audiobooks::{AudiobookDetails, AudiobookQuery, AudiobookSources, AudiobookSourcesOptions};
 pub use books::*;
 pub use listenbrainz::{ChartAlbum, ListenBrainz, ListenBrainzOptions, StatsRange};
 pub use model::*;

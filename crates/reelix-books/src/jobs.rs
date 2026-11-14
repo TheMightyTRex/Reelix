@@ -48,6 +48,11 @@ handler!(RefreshAuthors, kinds::REFRESH_AUTHORS, |svc, p| {
     }
     // New works may already be on disk.
     svc.scan_authors(&p.author_ids).await?;
+    // Narrators and length of books monitored as audiobooks (missing or stale only).
+    let looked_up = svc.refresh_audiobooks_of(&p.author_ids).await?;
+    if looked_up > 0 {
+        tracing::info!(looked_up, "audiobook details refreshed");
+    }
     Ok(())
 });
 
