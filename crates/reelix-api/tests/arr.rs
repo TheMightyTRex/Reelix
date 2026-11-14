@@ -735,3 +735,89 @@ async fn recyclarr_style_profile_format_and_definition_sync() {
             .any(|d| d["quality"]["name"] == "Bluray-1080p Remux")
     );
 }
+
+/// RFX-76: Bazarr's SignalR client negotiates, completes the handshake and stays connected
+/// (no events yet), instead of meeting a 405.
+#[tokio::test]
+async fn signalr_hub_answers_bazarr() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let app = app().await;
+    for prefix in ["/radarr", "/sonarr"] {
+        let negotiate = format!("{prefix}/signalr/messages/negotiate");
+        let (s, v) = call_as(
+            &app,
+            "",
+            Method::POST,
+            &format!("{negotiate}?access_token={}", app.key),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{prefix}: {v}");
+        assert_eq!(v["availableTransports"][0]["transport"], "WebSockets");
+        assert!(v["connectionId"].as_str().is_some_and(|c| !c.is_empty()));
+        let (s, _) = call_as(&app, "", Method::POST, &negotiate, None).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        let (s, _) = call_as(
+            &app,
+            "",
+            Method::POST,
+            &format!("{negotiate}?access_token=wrong"),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        let (s, _) = call_as(&app, &app.viewer_key, Method::POST, &negotiate, None).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "the *arr routes need Manage library");
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = app.router.clone();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    async fn upgrade(addr: std::net::SocketAddr, query: &str) -> (String, tokio::net::TcpStream) {
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let req = format!(
+            "GET /sonarr/signalr/messages{query} HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\n\
+             Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            s.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+        (String::from_utf8(head).unwrap(), s)
+    }
+
+    let (head, _) = upgrade(addr, "").await;
+    assert!(head.starts_with("HTTP/1.1 401"), "{head}");
+    let (head, mut ws) = upgrade(addr, &format!("?access_token={}&id=abc", app.key)).await;
+    assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+
+    // A client text frame must be masked; a zero mask leaves the payload as it is.
+    let handshake = "{\"protocol\":\"json\",\"version\":1}\u{1e}";
+    let mut frame = vec![0x81, 0x80 | handshake.len() as u8, 0, 0, 0, 0];
+    frame.extend_from_slice(handshake.as_bytes());
+    ws.write_all(&frame).await.unwrap();
+
+    let mut h = [0u8; 2];
+    tokio::time::timeout(std::time::Duration::from_secs(5), ws.read_exact(&mut h))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(h[0], 0x81, "a final text frame");
+    let mut payload = vec![0u8; usize::from(h[1] & 0x7f)];
+    ws.read_exact(&mut payload).await.unwrap();
+    assert_eq!(payload, b"{}\x1e", "the handshake succeeds");
+
+    // The connection stays open: nothing more arrives straight away (no events yet).
+    let mut more = [0u8; 1];
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(300), ws.read(&mut more))
+            .await
+            .is_err()
+    );
+}
