@@ -201,6 +201,66 @@ impl LibraryService {
         self.add_series_inner(req, true).await
     }
 
+    /// [`Self::add_series`], but a series the request's ids do not lead to is looked for by its
+    /// other ids before giving up (RFX-79): TMDB's find by the TVDB id (when the first try used
+    /// a TMDB id), then by the IMDb id. Sonarr knows some series only by their TVDB id, or carries
+    /// a TMDB id that no longer resolves, so a migration or a Sonarr client would otherwise leave
+    /// them out. A found entry linked to another TVDB id than the request's is not used, as the
+    /// two ids then name different shows. The first error is returned when nothing is found.
+    pub async fn add_series_by_any_id(
+        &self,
+        req: AddSeriesRequest,
+        imdb_id: Option<&str>,
+    ) -> Result<SeriesDto> {
+        let first = match self.add_series(req.clone()).await {
+            Err(e) if not_found_by_ids(&e) => e,
+            done => return done,
+        };
+        let mut lookups: Vec<(ExternalSource, String)> = Vec::new();
+        if req.tmdb_id.is_some()
+            && let Some(tv) = req.tvdb_id
+        {
+            lookups.push((ExternalSource::Tvdb, tv.to_string()));
+        }
+        if let Some(imdb) = imdb_id.map(str::trim).filter(|i| i.starts_with("tt")) {
+            lookups.push((ExternalSource::Imdb, imdb.to_string()));
+        }
+        let mut tried: Vec<u32> = req.tmdb_id.into_iter().collect();
+        for (source, id) in lookups {
+            let hits = match self.metadata.find(source, &id, MediaKind::Series).await {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::debug!(error = %e, id = %id, "series lookup by external id failed");
+                    continue;
+                }
+            };
+            for h in hits {
+                let Some(t) = h.tmdb_id else { continue };
+                if tried.contains(&t) {
+                    continue;
+                }
+                tried.push(t);
+                if let (Some(want), Some(got)) = (req.tvdb_id, h.tvdb_id)
+                    && want != got
+                {
+                    continue;
+                }
+                let mut r = req.clone();
+                r.tmdb_id = Some(t);
+                match self.add_series(r).await {
+                    Err(e) if not_found_by_ids(&e) => {}
+                    done => {
+                        if done.is_ok() {
+                            tracing::info!(tmdb_id = t, tvdb_id = ?req.tvdb_id, imdb_id = ?imdb_id, "series found by another id");
+                        }
+                        return done;
+                    }
+                }
+            }
+        }
+        Err(first)
+    }
+
     /// [`Self::add_series`]; with `scan` false the caller queues the disk scan itself.
     pub(crate) async fn add_series_inner(&self, req: AddSeriesRequest, scan: bool) -> Result<SeriesDto> {
         self.check_profile(req.quality_profile_id).await?;
@@ -226,7 +286,7 @@ impl LibraryService {
         };
         let meta = series_metadata(self.metadata.as_ref(), ext, req.tvdb_id).await?;
         let Some(tmdb_id) = meta.tmdb_id else {
-            return Err(LibraryError::validation("metadata has no TMDB id"));
+            return Err(LibraryError::validation(NO_TMDB_ID));
         };
         if repo::id_by_tmdb(&self.db, tmdb_id).await?.is_some() {
             return Err(LibraryError::Conflict(format!(
@@ -234,8 +294,10 @@ impl LibraryService {
             )));
         }
         // The TVDB id is checked too: a request may pair a new TMDB id with the TVDB id of a show
-        // already in the library, which would add that show a second time.
-        if let Some(tvdb_id) = meta.tvdb_id.or(meta.external_ids.tvdb)
+        // already in the library, which would add that show a second time. When the metadata has
+        // no TVDB link, the request's TVDB id is kept, so the series can be found by it later.
+        let tvdb = meta.tvdb_id.or(meta.external_ids.tvdb).or(req.tvdb_id);
+        if let Some(tvdb_id) = tvdb
             && repo::id_by_tvdb(&self.db, tvdb_id).await?.is_some()
         {
             return Err(LibraryError::Conflict(format!(
@@ -245,6 +307,7 @@ impl LibraryService {
         let mut s = blank_series();
         apply_series_metadata(&mut s, &meta);
         s.tmdb_id = Some(tmdb_id);
+        s.tvdb_id = tvdb;
         s.quality_profile_id = req.quality_profile_id;
         s.root_folder_id = root.id;
         s.series_type = req.series_type;
@@ -631,6 +694,14 @@ pub(crate) fn series_hit(m: &SeriesMetadata) -> reelix_metadata::SearchHit {
         popularity: m.ratings.popularity,
         adult: false,
     }
+}
+
+const NO_TMDB_ID: &str = "metadata has no TMDB id";
+
+/// An add that failed because the ids did not lead to a usable entry, so another id may.
+fn not_found_by_ids(e: &LibraryError) -> bool {
+    matches!(e, LibraryError::Metadata(MetaError::NotFound))
+        || matches!(e, LibraryError::Validation(m) if m == NO_TMDB_ID)
 }
 
 /// A series' metadata by `ext`. When that is a TMDB id the source cannot look up (open data
