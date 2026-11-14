@@ -27,7 +27,7 @@ use reelix_core::bus::EventBus;
 use reelix_core::{ContentKind, DomainEvent, MediaKind, Protocol};
 use reelix_db::{Db, NewJob, now_ms};
 use reelix_downloaders::{DownloadId, DownloadItem, DownloadState, FailureAction, UsenetFailure};
-use reelix_import::files::TransferMode;
+use reelix_import::files::{TransferMode, dangerous_files};
 use reelix_import::matching::{best_movie_match, match_parsed_episodes};
 use reelix_import::unpack::{UnpackConfig, remove_unpacked, unpack_download};
 use reelix_jobs::JobQueue;
@@ -681,6 +681,9 @@ impl ActivityService {
             self.needs_manual(t, vec![msg.to_owned()]).await?;
             return Ok(());
         }
+        if self.held_as_dangerous(t, &local).await? {
+            return Ok(());
+        }
         let mm = self.library.media_management().await?;
         let mode = transfer_mode(
             mm.import_mode,
@@ -693,6 +696,34 @@ impl ActivityService {
         }
         self.import_tracked(t, &local, mode, Some((h, item))).await?;
         Ok(())
+    }
+
+    /// DASH-407: a download holding programs or scripts (`.exe`, `.scr`, `.bat`, `.lnk`, `.js`
+    /// and the like) is held and flagged instead of imported, with an import-failed history
+    /// row. Returns whether it was held. Nothing is removed or blocklisted: the queue's Remove
+    /// does that, and manual import is still there for a download the person trusts.
+    async fn held_as_dangerous(&self, t: &TrackedDownload, source: &Path) -> Result<bool> {
+        let found = dangerous_files(source).await;
+        if found.is_empty() {
+            return Ok(false);
+        }
+        let message = dangerous_message(&found);
+        tracing::warn!(id = t.id, title = %t.title, files = ?found, "download held: it holds programs or scripts");
+        if t.state != TrackedState::ImportPending {
+            let mut h = NewHistory::new(HistoryEvent::ImportFailed, &t.title);
+            fill_media(&mut h, t.movie_id, t.series_id, t.episode_ids.first().copied());
+            self.fill_content(&mut h, &t.content).await;
+            fill_release(&mut h, &self.download_ref(t));
+            h.data = serde_json::json!({
+                "messages": [message.clone()],
+                "source_path": source,
+                "dangerous_files": found,
+            });
+            history::insert(&self.db, &h).await?;
+            self.emit("history", "created", 0);
+        }
+        self.needs_manual(t, vec![message]).await?;
+        Ok(true)
     }
 
     /// Marks a download as waiting for manual interaction (and notifies once).
@@ -1253,6 +1284,10 @@ impl ActivityService {
                 "the download isn't matched to a movie or series; use manual import",
             ));
         }
+        if self.held_as_dangerous(&t, Path::new(&path)).await? {
+            self.emit("queue", "updated", id);
+            return Ok(false);
+        }
         let mm = self.library.media_management().await?;
         let mode = transfer_mode(mm.import_mode, t.protocol == Protocol::Usenet, false);
         let ok = if t.content.is_empty() {
@@ -1379,6 +1414,24 @@ async fn futures_join(clients: &[ClientHandle]) -> Vec<std::result::Result<Vec<D
         }
     }
     out
+}
+
+/// The queue message for a download held for its programs or scripts (up to five named).
+pub(crate) fn dangerous_message(found: &[PathBuf]) -> String {
+    let mut names: Vec<String> = found
+        .iter()
+        .take(5)
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    if found.len() > 5 {
+        names.push(format!("and {} more", found.len() - 5));
+    }
+    format!(
+        "Held, not imported: the download has files that can run programs ({}), which media never \
+         needs, so it may be malware. Remove it from the queue and blocklist the release, or use \
+         manual import only if you trust it.",
+        names.join(", ")
+    )
 }
 
 pub(crate) fn fill_media(
