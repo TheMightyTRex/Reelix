@@ -32,3 +32,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ```
+
+## hyper-proxy2
+
+`vendor/hyper-proxy2` is a copy of hyper-proxy2 0.1.0 (<https://github.com/siketyan/hyper-proxy2>), changed on 14 November 2026 to use rustls 0.23 instead of 0.22 (see the note at the top of its `Cargo.toml`). It is used under the MIT License in `vendor/hyper-proxy2/LICENSE-MIT.md`.
