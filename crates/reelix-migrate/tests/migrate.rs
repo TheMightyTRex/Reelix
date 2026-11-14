@@ -847,3 +847,32 @@ async fn rejects_the_wrong_app_and_bad_keys() {
     let e = env.svc.test(&wrong_key).await.unwrap_err().to_string();
     assert!(e.contains("HTTP 404") || e.contains("rejected"), "{e}");
 }
+
+/// RFX-82: Prowlarr's built-in Knaben indexer moves to Reelix's built-in Knaben definition.
+#[tokio::test]
+async fn prowlarr_knaben_is_kept() {
+    let env = env().await;
+    let s = MockServer::start().await;
+    let v = "/api/v1";
+    mock(
+        &s,
+        v,
+        "/system/status",
+        json!({"appName": "Prowlarr", "version": "1.24.3.4754"}),
+    )
+    .await;
+    mock(&s, v, "/tag", json!([])).await;
+    mock(&s, v, "/indexer", json!([
+        {"id": 9, "name": "Knaben", "implementation": "Knaben", "definitionName": "Knaben", "protocol": "torrent",
+         "enable": true, "priority": 25, "tags": [],
+         "fields": [{"name": "baseUrl", "value": "https://knaben.org/"}]}
+    ]))
+    .await;
+    let plan = env
+        .svc
+        .preview(&connection(&env, SourceKind::Prowlarr, &s))
+        .await
+        .unwrap();
+    let knaben = find(&plan.items, "indexer:9");
+    assert_eq!(knaben.action, MigrateAction::Create, "{knaben:?}");
+}

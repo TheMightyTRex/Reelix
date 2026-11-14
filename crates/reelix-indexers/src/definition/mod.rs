@@ -134,6 +134,11 @@ pub(crate) fn base_name(k: &str) -> &str {
     k.split('|').next().unwrap_or(k)
 }
 
+/// Definitions written for Reelix and shipped with it (sites whose Prowlarr indexer is built
+/// into Prowlarr rather than a catalog definition, so a move from Prowlarr can keep them).
+/// A downloaded or custom definition with the same id takes their place.
+pub const BUILTIN: &[&str] = &[include_str!("../../definitions/knaben.yml")];
+
 /// Settings schema for a definition: `base_url` plus its declared settings.
 pub fn schema(d: &Definition) -> ProviderSchema {
     let mut fields = vec![

@@ -97,6 +97,17 @@ impl DefinitionIndexer {
         if !base_s.ends_with('/') {
             base_s.push('/');
         }
+        // An old address (one another app may still have stored) moves to the current one.
+        let same = |a: &str, b: &str| {
+            a.trim_end_matches('/')
+                .eq_ignore_ascii_case(b.trim_end_matches('/'))
+        };
+        if def.legacylinks.iter().any(|l| same(l, &base_s)) {
+            base_s = def.links[0].clone();
+            if !base_s.ends_with('/') {
+                base_s.push('/');
+            }
+        }
         let base = Url::parse(&base_s).map_err(|e| IndexerError::Config(format!("site URL: {e}")))?;
         let guard = ctx.guard();
         guard.check_literal(&base)?;
