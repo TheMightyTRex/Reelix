@@ -145,7 +145,7 @@ impl RequestService {
             let hits = self.library.radio_discover(row).await.map_err(upstream)?;
             hits.iter().map(ContentHit::radio).collect()
         } else {
-            if !kind.discover_rows().iter().any(|(id, _)| *id == row) {
+            if !kind.is_discover_row(row) {
                 return Err(Error::NotFound(format!(
                     "unknown {} discover row: {row}",
                     kind.as_str()
