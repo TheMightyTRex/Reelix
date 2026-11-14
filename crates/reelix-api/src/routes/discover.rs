@@ -5,9 +5,9 @@ use axum::extract::State;
 use axum::routing::get;
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::requests::{
-    BookSearchPageDto, ContentDetailDto, ContentRequestKind, ContentRowDto, DiscoverPageDto, GenreDto,
-    MediaDetailDto, MusicSearchPageDto, PageQuery, RadioDiscoverDto, RadioSearchPageDto, SearchPageDto,
-    radio_foreign_id,
+    BOOK_SUBJECTS, BookSearchPageDto, BookSubjectDto, ContentDetailDto, ContentRequestKind, ContentRowDto,
+    DiscoverPageDto, GenreDto, MediaDetailDto, MusicSearchPageDto, PageQuery, RadioDiscoverDto,
+    RadioSearchPageDto, SearchPageDto, radio_foreign_id,
 };
 use reelix_core::MediaKind;
 use utoipa::OpenApi;
@@ -21,6 +21,8 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/discover/genres/radio", get(radio_genres))
+        .route("/discover/genres/book", get(book_subjects))
+        .route("/discover/genres/audiobook", get(audiobook_subjects))
         .route("/discover/genres/{kind}", get(genres))
         .route("/discover/content/{kind}/{row}", get(discover_content))
         .route("/discover/{*feed}", get(discover))
@@ -39,7 +41,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(discover, discover_content, genres, radio_genres, search, movie, tv, recommendations, similar, search_books,
+    paths(discover, discover_content, genres, book_subjects, audiobook_subjects, radio_genres, search, movie, tv, recommendations, similar, search_books,
         search_music, search_radio, book, album, radio),
     components(schemas(
         reelix_api_types::requests::DiscoverItemDto,
@@ -69,6 +71,8 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::requests::RadioSearchPageDto,
         reelix_api_types::requests::RadioDiscoverDto,
         reelix_api_types::requests::RadioDiscoverListDto,
+        reelix_api_types::requests::BookSubjectDto,
+        reelix_api_types::requests::BookSubjectGroup,
     )),
     tags((name = "discover", description = "Discovery feeds, search and media details with availability")),
 )]
@@ -107,7 +111,8 @@ pub async fn discover(
     ))
 }
 
-/// Genres for genre chips (`movie` or `tv`).
+/// Genres for genre chips (`movie` or `tv`). Book subjects are at
+/// `GET /discover/genres/book`.
 #[utoipa::path(get, path = "/api/v1/discover/genres/{kind}", tag = "discover",
     params(("kind" = String, Path, description = "`movie` or `tv`")),
     security(("session" = []), ("api_key" = [])),
@@ -118,6 +123,30 @@ pub async fn genres(
     ApiPath(kind): ApiPath<String>,
 ) -> ApiResult<ApiJson<Vec<GenreDto>>> {
     Ok(ApiJson(svc(&state)?.genres(kind_of(&kind)?).await?))
+}
+
+/// Book Discover subjects, fiction then non-fiction. Each `id` is a row of
+/// `GET /discover/content/book/{row}`; `featured` ones are the Books tab's default rows.
+#[utoipa::path(get, path = "/api/v1/discover/genres/book", tag = "discover",
+    security(("session" = []), ("api_key" = [])),
+    responses((status = 200, description = "Book subjects", body = Vec<BookSubjectDto>)))]
+pub async fn book_subjects(_user: CurrentUser) -> ApiJson<Vec<BookSubjectDto>> {
+    ApiJson(BOOK_SUBJECTS.iter().map(BookSubjectDto::from).collect())
+}
+
+/// The book Discover subjects that suit audiobooks (the same rows, without subjects
+/// such as cooking that need the page).
+#[utoipa::path(get, path = "/api/v1/discover/genres/audiobook", tag = "discover",
+    security(("session" = []), ("api_key" = [])),
+    responses((status = 200, description = "Audiobook subjects", body = Vec<BookSubjectDto>)))]
+pub async fn audiobook_subjects(_user: CurrentUser) -> ApiJson<Vec<BookSubjectDto>> {
+    ApiJson(
+        BOOK_SUBJECTS
+            .iter()
+            .filter(|s| s.audiobooks)
+            .map(BookSubjectDto::from)
+            .collect(),
+    )
 }
 
 /// Movies, series and people matching `q`, with availability.

@@ -669,6 +669,109 @@ async fn delay_and_release_profiles() {
 }
 
 #[tokio::test]
+async fn builtin_formats_found_by_key_and_scored_by_a_profile() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    app.state.db().custom_formats().ensure_builtins().await.unwrap();
+
+    let (s, list) = call(&app, Method::GET, "/api/v1/customformats/builtin", &admin, None).await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    let keys: Vec<_> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["key"].clone())
+        .collect();
+    assert_eq!(keys, [json!("audio_description"), json!("bsl")]);
+    assert_eq!(list[0]["format"]["name"], "Audio description");
+
+    let (s, ad) = call(
+        &app,
+        Method::GET,
+        "/api/v1/customformats/builtin/audio_description",
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{ad}");
+    let ad_id = ad["id"].as_i64().unwrap();
+    let (s, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/customformats/builtin/nope",
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // The release-name tester shows it matching, and a profile can prefer it.
+    let (s, parsed) = call(
+        &app,
+        Method::POST,
+        "/api/v1/parse",
+        &admin,
+        Some(json!({"title": "The.Movie.2021.1080p.WEB-DL.Audio.Description.AAC2.0.H.264-GRP"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{parsed}");
+    assert_eq!(
+        parsed["matched_formats"][0]["name"], "Audio description",
+        "{parsed}"
+    );
+    assert_eq!(parsed["format_score"], 0);
+
+    let (_, profiles) = call(&app, Method::GET, "/api/v1/qualityprofiles", &admin, None).await;
+    let mut profile = profiles[0].clone();
+    let pid = profile["id"].as_i64().unwrap();
+    profile["format_items"] = json!([{"format_id": ad_id, "score": 100}]);
+    let (s, body) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/qualityprofiles/{pid}"),
+        &admin,
+        Some(profile),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, scored) = call(
+        &app,
+        Method::POST,
+        "/api/v1/parse",
+        &admin,
+        Some(json!({
+            "title": "Show.S01E01.1080p.iP.WEB-DL.AAC2.0.AD.H.264-GRP",
+            "profile_id": pid,
+        })),
+    )
+    .await;
+    assert_eq!(scored["format_score"], 100, "{scored}");
+    assert_eq!(scored["matched_formats"][0]["name"], "Audio description");
+
+    // Deleted: the key answers 404 and the list says so.
+    let (s, _) = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/customformats/{ad_id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = call(
+        &app,
+        Method::GET,
+        "/api/v1/customformats/builtin/audio_description",
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (_, list) = call(&app, Method::GET, "/api/v1/customformats/builtin", &admin, None).await;
+    assert!(list[0]["format"].is_null());
+}
+
+#[tokio::test]
 async fn openapi_lists_profile_routes() {
     let doc = serde_json::to_value(reelix_api::openapi()).unwrap();
     for path in [
@@ -677,6 +780,8 @@ async fn openapi_lists_profile_routes() {
         "/api/v1/qualitydefinitions",
         "/api/v1/customformats/import",
         "/api/v1/customformats/{id}/export",
+        "/api/v1/customformats/builtin",
+        "/api/v1/customformats/builtin/{key}",
         "/api/v1/delayprofiles",
         "/api/v1/releaseprofiles/{id}",
         "/api/v1/parse",
