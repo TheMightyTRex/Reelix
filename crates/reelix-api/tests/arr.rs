@@ -168,8 +168,19 @@ impl MetadataSource for FakeMeta {
     }
 }
 
+/// A health source whose findings a test sets.
+#[derive(Default)]
+struct FakeHealth(Mutex<Vec<reelix_api_types::HealthCheck>>);
+
+impl reelix_api::HealthSource for FakeHealth {
+    fn checks(&self) -> Vec<reelix_api_types::HealthCheck> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 struct TestApp {
     router: Router,
+    health: Arc<FakeHealth>,
     key: String,
     admin_key: String,
     viewer_key: String,
@@ -246,11 +257,16 @@ async fn app() -> TestApp {
     let key = key_for(&db, "homepage", Permissions::ROLE_MANAGER).await;
     let viewer_key = key_for(&db, "viewer", Permissions::ROLE_USER).await;
     let admin_key = key_for(&db, "recyclarr", Permissions::ADMIN).await;
+    let health = Arc::new(FakeHealth::default());
     let state = AppState::new(db, events, system.queue(), SecretBox::from_key([3u8; 32]), config)
         .with_extension(library)
-        .with_extension(providers);
+        .with_extension(providers)
+        .with_extension(Arc::new(reelix_api::HealthSources(vec![
+            health.clone() as Arc<dyn reelix_api::HealthSource>
+        ])));
     TestApp {
         router: reelix_api::router(state),
+        health,
         key,
         admin_key,
         viewer_key,
@@ -322,6 +338,64 @@ async fn status_and_auth_per_app() {
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "needs Manage library");
+}
+
+#[tokio::test]
+async fn health_lists_native_problems_in_arr_shape() {
+    use reelix_api_types::{HealthCheck, HealthLevel};
+    let app = app().await;
+    // Healthy: the database and data folder checks pass and *arr lists only problems.
+    for prefix in [
+        "/radarr/api/v3",
+        "/sonarr/api/v3",
+        "/readarr/api/v1",
+        "/lidarr/api/v1",
+    ] {
+        let (s, v) = call(&app, Method::GET, &format!("{prefix}/health"), None).await;
+        assert_eq!(s, StatusCode::OK, "{prefix}: {v}");
+        assert_eq!(v, json!([]), "{prefix}");
+    }
+    *app.health.0.lock().unwrap() = vec![
+        HealthCheck {
+            source: "indexers".into(),
+            level: HealthLevel::Warning,
+            message: "Indexer Example is failing".into(),
+        },
+        HealthCheck {
+            source: "downloadclients".into(),
+            level: HealthLevel::Ok,
+            message: "All download clients are reachable".into(),
+        },
+        HealthCheck {
+            source: "disk".into(),
+            level: HealthLevel::Error,
+            message: "Root folder /movies is missing".into(),
+        },
+    ];
+    for prefix in ["/radarr/api/v3", "/sonarr/api/v3"] {
+        let (s, v) = call(&app, Method::GET, &format!("{prefix}/health"), None).await;
+        assert_eq!(s, StatusCode::OK, "{prefix}: {v}");
+        assert_eq!(
+            v,
+            json!([
+                {"id": 1, "source": "indexers", "type": "warning",
+                 "message": "Indexer Example is failing", "wikiUrl": ""},
+                {"id": 2, "source": "disk", "type": "error",
+                 "message": "Root folder /movies is missing", "wikiUrl": ""},
+            ]),
+            "{prefix}"
+        );
+    }
+    // Messages name indexers and paths, so the Manage library right is still needed.
+    let (s, _) = call_as(
+        &app,
+        &app.viewer_key.clone(),
+        Method::GET,
+        "/sonarr/api/v3/health",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

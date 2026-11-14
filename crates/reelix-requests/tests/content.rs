@@ -581,4 +581,11 @@ async fn discover_rows_must_be_known() {
             t.svc.discover_content(&t.user, kind, row).await.unwrap();
         }
     }
+    // So is every book subject, featured or not.
+    for subject in reelix_api_types::requests::BOOK_SUBJECTS {
+        t.svc
+            .discover_content(&t.user, ContentRequestKind::Book, subject.id)
+            .await
+            .unwrap();
+    }
 }

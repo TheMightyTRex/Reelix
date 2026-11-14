@@ -8,9 +8,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use reelix_api_types::Permissions;
 use reelix_api_types::requests::{
-    ArtistItemDto, AvailabilityStatus, BookSearchPageDto, ContentDetailDto, ContentItemDto,
-    ContentRequestDto, ContentRequestKind, ContentRowDto, CreateContentRequestDto, MusicSearchPageDto,
-    QuotaDto, RadioSearchPageDto, RequestOptionsDto, RequestStatus,
+    ArtistItemDto, AvailabilityStatus, BOOK_SUBJECTS, BookSearchPageDto, BookSubject, BookSubjectGroup,
+    ContentDetailDto, ContentItemDto, ContentRequestDto, ContentRequestKind, ContentRowDto,
+    CreateContentRequestDto, MusicSearchPageDto, QuotaDto, RadioSearchPageDto, RequestOptionsDto,
+    RequestStatus,
 };
 use reelix_core::BookFormat;
 
@@ -582,6 +583,45 @@ fn ContentRow(
     view! { <MediaRow title=title>{body}</MediaRow> }
 }
 
+/// The book subjects that are not default rows, as chips under "More fiction" and
+/// "More non-fiction"; a picked subject shows as a row below them.
+#[component]
+fn BookSubjectChips(on_open: Callback<ContentItemDto>) -> impl IntoView {
+    let picked = RwSignal::new(None::<&'static BookSubject>);
+    let group = move |group: BookSubjectGroup, heading: &'static str| {
+        view! {
+            <section class="media-row">
+                <header class="media-row-head"><h2 class="media-row-title">{heading}</h2></header>
+                <div class="chip-row" role="list">
+                    {BOOK_SUBJECTS
+                        .iter()
+                        .filter(|s| !s.featured && s.group == group)
+                        .map(|subject| {
+                            let active = move || picked.get().is_some_and(|p| p.id == subject.id);
+                            view! {
+                                <button type="button" class="pill-link" role="listitem"
+                                    class:active=active aria-pressed=move || active().to_string()
+                                    on:click=move |_| picked.update(|p| {
+                                        *p = if p.is_some_and(|x| x.id == subject.id) { None } else { Some(subject) };
+                                    })>
+                                    {subject.name}
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+            </section>
+        }
+    };
+    view! {
+        {group(BookSubjectGroup::Fiction, "More fiction")}
+        {group(BookSubjectGroup::NonFiction, "More non-fiction")}
+        {move || picked.get().map(|s| view! {
+            <ContentRow kind=ContentRequestKind::Book row=s.id title=s.name on_open=on_open />
+        })}
+    }
+}
+
 /// Every Discover row of `kind`, sharing one request dialog.
 #[component]
 fn ContentRows(kind: ContentRequestKind) -> impl IntoView {
@@ -595,9 +635,10 @@ fn ContentRows(kind: ContentRequestKind) -> impl IntoView {
         <div class="discover">
             {kind
                 .discover_rows()
-                .iter()
-                .map(|&(row, title)| view! { <ContentRow kind=kind row=row title=title on_open=on_open /> })
+                .into_iter()
+                .map(|(row, title)| view! { <ContentRow kind=kind row=row title=title on_open=on_open /> })
                 .collect_view()}
+            {(kind == ContentRequestKind::Book).then(|| view! { <BookSubjectChips on_open=on_open /> })}
         </div>
         <ContentRequestModal open=open kind=kind item=current />
     }
