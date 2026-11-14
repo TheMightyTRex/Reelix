@@ -109,8 +109,9 @@ fn MetadataForm(initial: MetadataSettingsDto) -> impl IntoView {
                 <div class="field-row">
                     <div class="field">
                         <label for="md-lang">"Language"</label>
-                        <input id="md-lang" class="input" placeholder="en-US"
+                        <input id="md-lang" class="input" placeholder="en-US" aria-describedby="md-lang-hint"
                             prop:value=move || language.get() on:input=move |e| language.set(event_target_value(&e)) />
+                        <p id="md-lang-hint" class="field-hint">"For titles and descriptions. To fall back on other languages, list them in order, for example cy-GB, en-GB."</p>
                     </div>
                     <div class="field">
                         <label for="md-region">"Region"</label>

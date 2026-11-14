@@ -560,8 +560,45 @@ async fn metadata_and_indexer_settings_masked() {
             .contains("api_key=tmdbkey")
     );
     // Saving the masked form back keeps the key.
-    e.svc.set_metadata_settings(saved).await.unwrap();
+    e.svc.set_metadata_settings(saved.clone()).await.unwrap();
     assert_eq!(e.svc.metadata_config().tmdb_api_key.as_deref(), Some("tmdbkey"));
+
+    // Fork issue #13: several languages in order of preference, tidied; a single value still works.
+    let langs = e
+        .svc
+        .set_metadata_settings(MetadataSettingsDto {
+            language: " cy-GB,en-GB , cy-GB,, ".into(),
+            ..saved.clone()
+        })
+        .await
+        .unwrap();
+    assert_eq!(langs.language, "cy-GB, en-GB");
+    assert_eq!(e.svc.metadata_config().primary_language(), "cy-GB");
+    for bad in [
+        "en-US, fr-FR, de-DE, es-ES, it-IT, nl-NL",
+        "cy-GB; en-GB",
+        "en US",
+    ] {
+        assert!(
+            e.svc
+                .set_metadata_settings(MetadataSettingsDto {
+                    language: bad.into(),
+                    ..saved.clone()
+                })
+                .await
+                .is_err(),
+            "{bad}"
+        );
+    }
+    let one = e
+        .svc
+        .set_metadata_settings(MetadataSettingsDto {
+            language: "en-GB".into(),
+            ..saved.clone()
+        })
+        .await
+        .unwrap();
+    assert_eq!(one.language, "en-GB");
 
     // Indexer settings: proxy password masked, validation.
     let s = e

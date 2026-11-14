@@ -52,8 +52,11 @@ impl std::fmt::Debug for TmdbAuth {
 pub struct TmdbOptions {
     pub base_url: String,
     pub image_base_url: String,
-    /// e.g. `en-US`.
+    /// e.g. `en-US`. Requests ask for this language.
     pub language: String,
+    /// Languages to fall back on, in order, when a film or series has no title or description
+    /// in [`Self::language`] (fork issue #13). Empty: TMDB's own fallback, as before.
+    pub fallback_languages: Vec<String>,
     /// ISO 3166-1 region; `US` is assumed for release dates when unset.
     pub region: Option<String>,
     pub include_adult: bool,
@@ -75,6 +78,7 @@ impl Default for TmdbOptions {
             base_url: DEFAULT_BASE_URL.into(),
             image_base_url: DEFAULT_IMAGE_BASE_URL.into(),
             language: "en-US".into(),
+            fallback_languages: Vec::new(),
             region: None,
             include_adult: false,
             // TMDB dropped its 40-per-10s limit in 2019 and now tolerates roughly 50 requests
@@ -87,6 +91,27 @@ impl Default for TmdbOptions {
             cache_entries: 300,
         }
     }
+}
+
+/// The most languages a metadata language list may hold.
+pub const MAX_LANGUAGES: usize = 5;
+
+/// Splits a metadata language setting into the preferred language and its fallbacks, in order
+/// (fork issue #13). `"cy-GB, en-GB"` gives `("cy-GB", ["en-GB"])`; a single value, as stored
+/// before, gives no fallbacks. Blanks and repeats are dropped; an empty setting means `en-US`.
+pub fn split_languages(setting: &str) -> (String, Vec<String>) {
+    let mut list: Vec<String> = Vec::new();
+    for l in setting.split(',').map(str::trim).filter(|l| !l.is_empty()) {
+        if !list.iter().any(|x| x.eq_ignore_ascii_case(l)) {
+            list.push(l.to_owned());
+        }
+    }
+    list.truncate(MAX_LANGUAGES);
+    if list.is_empty() {
+        return ("en-US".into(), Vec::new());
+    }
+    let first = list.remove(0);
+    (first, list)
 }
 
 /// External id sources accepted by `/find`.
@@ -263,15 +288,32 @@ impl Tmdb {
         ]
     }
 
+    /// `append` plus TMDB's translations when there are languages to fall back on.
+    fn with_translations(&self, append: &str) -> String {
+        if self.inner.opts.fallback_languages.is_empty() {
+            append.to_owned()
+        } else {
+            format!("{append},translations")
+        }
+    }
+
+    /// The preferred language first, then the fallbacks.
+    fn preferred_languages(&self) -> Vec<&str> {
+        std::iter::once(self.inner.opts.language.as_str())
+            .chain(self.inner.opts.fallback_languages.iter().map(String::as_str))
+            .collect()
+    }
+
     /// Movie details with release dates, credits, images, videos, keywords and recommendations.
     pub async fn movie_details(&self, id: TmdbId) -> Result<MovieMetadata, MetaError> {
-        let raw: wire::WMovie = self
+        let mut raw: wire::WMovie = self
             .get(
                 &format!("/movie/{id}"),
-                &self.media_params(MOVIE_APPEND),
+                &self.media_params(&self.with_translations(MOVIE_APPEND)),
                 self.details_ttl(),
             )
             .await?;
+        raw.apply_translations(&self.preferred_languages());
         Ok(raw.into_model(&self.img(), self.region()))
     }
 
@@ -284,13 +326,14 @@ impl Tmdb {
 
     /// Full series by TMDB id: details plus every season with episodes.
     pub async fn tv_details(&self, id: TmdbId) -> Result<SeriesMetadata, MetaError> {
-        let raw: wire::WTv = self
+        let mut raw: wire::WTv = self
             .get(
                 &format!("/tv/{id}"),
-                &self.media_params(TV_APPEND),
+                &self.media_params(&self.with_translations(TV_APPEND)),
                 self.details_ttl(),
             )
             .await?;
+        raw.apply_translations(&self.preferred_languages());
         let numbers: Vec<u32> = raw.seasons.iter().map(|s| s.season_number).collect();
         let mut seasons = Vec::with_capacity(numbers.len());
         // Seasons are fetched in batches through append_to_response to save requests.
