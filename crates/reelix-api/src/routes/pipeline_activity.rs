@@ -32,6 +32,10 @@ pub fn routes() -> Router<AppState> {
         .route("/history", get(history))
         .route("/history/{id}/failed", post(mark_failed))
         .route("/manualimport", get(manual_import_preview).post(manual_import))
+        .route(
+            "/settings/stalled",
+            get(get_stalled_settings).put(put_stalled_settings),
+        )
 }
 
 #[derive(OpenApi)]
@@ -43,6 +47,8 @@ pub fn routes() -> Router<AppState> {
         retry_import,
         ignore_queue_item,
         history,
+        get_stalled_settings,
+        put_stalled_settings,
         mark_failed,
         manual_import_preview,
         manual_import,
@@ -53,6 +59,8 @@ pub fn routes() -> Router<AppState> {
         QueueBulkRemoveResult,
         QueueBulkFailure,
         HistoryDto,
+        reelix_api_types::pipeline::StalledSettings,
+        reelix_api_types::pipeline::StalledAction,
         ManualImportItemDto,
         ManualImportRequest,
         reelix_api_types::pipeline::ManualImportFile,
@@ -220,6 +228,42 @@ pub async fn history(
 ) -> ApiResult<ApiJson<Paged<HistoryDto>>> {
     require(&user)?;
     Ok(ApiJson(svc(&state)?.history(&q).await?))
+}
+
+/// Stalled downloads (admin): hours without progress before a download counts as stalled
+/// (default 6, 0 off) and what then happens (`flag`, the default, or `remove_and_search`).
+#[utoipa::path(get, path = "/api/v1/settings/stalled", tag = "pipeline",
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Stalled download settings", body = reelix_api_types::pipeline::StalledSettings),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn get_stalled_settings(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> ApiResult<ApiJson<reelix_api_types::pipeline::StalledSettings>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(svc(&state)?.stalled_settings().await?))
+}
+
+/// Sets the stalled download settings (admin; `stalled_hours` 0 to 720, 0 turns it off).
+/// `flag` says so in the queue; `remove_and_search` removes the download from its client,
+/// blocklists the release and searches again.
+#[utoipa::path(put, path = "/api/v1/settings/stalled", tag = "pipeline",
+    request_body = reelix_api_types::pipeline::StalledSettings,
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Saved", body = reelix_api_types::pipeline::StalledSettings),
+        (status = 400, description = "stalled_hours out of range", body = ApiErrorBody),
+        (status = 403, description = "Requires ADMIN", body = ApiErrorBody),
+    ))]
+pub async fn put_stalled_settings(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiJson(settings): ApiJson<reelix_api_types::pipeline::StalledSettings>,
+) -> ApiResult<ApiJson<reelix_api_types::pipeline::StalledSettings>> {
+    user.require(Permissions::ADMIN)?;
+    Ok(ApiJson(svc(&state)?.set_stalled_settings(settings).await?))
 }
 
 /// Marks a grabbed release as failed: history `download_failed`, blocklist, re-search.
