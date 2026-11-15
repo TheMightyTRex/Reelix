@@ -470,6 +470,34 @@ async fn small_files_already_in_the_library_are_not_samples() {
 }
 
 #[tokio::test]
+async fn a_film_kept_as_a_disc_image_is_its_file_with_the_br_disk_quality() {
+    // A Blu-ray copy migrated from Radarr (`Name (Year) BR-DISK.iso`) and a disc image with no
+    // quality in its name are both the film's file, as BR-DISK, without media details.
+    let e = env().await;
+    let m = e.svc.add_movie(add_movie_req(&e, 603)).await.unwrap();
+    let folder = Path::new(&m.path);
+    write(&folder.join("The Matrix (1999) BR-DISK.iso"), 40);
+    write(&folder.join("Featurettes").join("Making of.iso"), 60);
+    let r = e.svc.scan_movie(m.id).await.unwrap();
+    assert_eq!(r.added, 1, "{r:?}");
+    let m2 = e.svc.get_movie(m.id).await.unwrap();
+    assert!(m2.has_file);
+    let f = m2.movie_file.as_ref().unwrap();
+    assert!(f.file.path.ends_with("BR-DISK.iso"), "{}", f.file.path);
+    assert_eq!(f.file.quality_name, "BR-DISK");
+    // Never probed, so a rescan leaves it alone instead of waiting for media details.
+    let r = e.svc.scan_movie(m.id).await.unwrap();
+    assert_eq!((r.added, r.updated, r.removed), (0, 0, 0), "{r:?}");
+
+    let reloaded = e.svc.add_movie(add_movie_req(&e, 604)).await.unwrap();
+    let folder = Path::new(&reloaded.path);
+    write(&folder.join("The Matrix Reloaded (2003).img"), 30);
+    e.svc.scan_movie(reloaded.id).await.unwrap();
+    let r2 = e.svc.get_movie(reloaded.id).await.unwrap();
+    assert_eq!(r2.movie_file.unwrap().file.quality_name, "BR-DISK");
+}
+
+#[tokio::test]
 async fn a_series_the_source_cannot_find_by_tmdb_id_is_found_by_tvdb_and_not_deleted() {
     // Open data (no TMDB key) can't always turn a TMDB id into a show; the TVDB id is tried next,
     // the known TMDB id is kept, and a refresh doesn't mark the series deleted.

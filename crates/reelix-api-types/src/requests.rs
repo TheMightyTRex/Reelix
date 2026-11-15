@@ -19,6 +19,7 @@
 //!   `GET/PUT/DELETE /requests/media/{id}`, `POST /requests/media/{id}/approve|decline|retry`
 //! - book/music discovery: `GET /search/books?q=`, `GET /search/music?q=`,
 //!   `GET /media/book/{workId}`, `GET /media/album/{releaseGroupId}`
+//! - book subjects: `GET /discover/genres/book`, `GET /discover/genres/audiobook`
 //! - radio discovery: `GET /discover/genres/radio`, `GET /discover/content/radio/{row}`,
 //!   `GET /search/radio?q=`, `GET /media/radio/{provider}/{externalId}`
 
@@ -798,19 +799,281 @@ pub struct RadioDiscoverDto {
     pub categories: Vec<RadioDiscoverListDto>,
 }
 
-/// Discover rows for books: `(row id, title)`. Subject rows use Open Library subject keys.
-pub const BOOK_DISCOVER_ROWS: &[(&str, &str)] = &[
-    ("trending", "Trending this week"),
-    ("subject-fantasy", "Fantasy"),
-    ("subject-science_fiction", "Science fiction"),
-    ("subject-mystery", "Mystery"),
-    ("subject-thriller", "Thriller"),
-    ("subject-romance", "Romance"),
-    ("subject-horror", "Horror"),
-    ("subject-historical_fiction", "Historical fiction"),
-    ("subject-young_adult_fiction", "Young adult"),
-    ("subject-biography", "Biography"),
+/// Fiction or non-fiction, for grouping book subjects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum BookSubjectGroup {
+    Fiction,
+    NonFiction,
+}
+
+/// A book Discover subject: one Open Library subject, shown as a row of books and
+/// audiobooks. [`BOOK_SUBJECTS`] is the one list of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BookSubject {
+    /// Row id for `GET /discover/content/book/{row}`: `subject-` and the Open Library
+    /// subject key.
+    pub id: &'static str,
+    pub name: &'static str,
+    pub group: BookSubjectGroup,
+    /// Shown as a row on the Books tab without being picked.
+    pub featured: bool,
+    /// Suits audiobooks too (false for subjects that need the page, such as cooking).
+    pub audiobooks: bool,
+}
+
+impl BookSubject {
+    const fn new(
+        id: &'static str,
+        name: &'static str,
+        group: BookSubjectGroup,
+        featured: bool,
+        audiobooks: bool,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            group,
+            featured,
+            audiobooks,
+        }
+    }
+
+    /// The Open Library subject key (`humor` for `subject-humor`).
+    pub fn key(&self) -> &'static str {
+        self.id.strip_prefix("subject-").unwrap_or(self.id)
+    }
+}
+
+/// Every book Discover subject, fiction first: the one place the list is kept. The
+/// featured ones are the Books tab's default rows; `GET /discover/genres/book` and
+/// `GET /discover/genres/audiobook` list them for clients.
+pub const BOOK_SUBJECTS: &[BookSubject] = &[
+    BookSubject::new(
+        "subject-fantasy",
+        "Fantasy",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new(
+        "subject-science_fiction",
+        "Science fiction",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new(
+        "subject-mystery",
+        "Mystery",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new(
+        "subject-thriller",
+        "Thriller",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new(
+        "subject-romance",
+        "Romance",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new("subject-horror", "Horror", BookSubjectGroup::Fiction, true, true),
+    BookSubject::new(
+        "subject-historical_fiction",
+        "Historical fiction",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new(
+        "subject-young_adult_fiction",
+        "Young adult",
+        BookSubjectGroup::Fiction,
+        true,
+        true,
+    ),
+    BookSubject::new("subject-humor", "Humour", BookSubjectGroup::Fiction, false, true),
+    BookSubject::new(
+        "subject-adventure",
+        "Adventure",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new("subject-crime", "Crime", BookSubjectGroup::Fiction, false, true),
+    BookSubject::new(
+        "subject-classic_literature",
+        "Classics",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-dystopias",
+        "Dystopian",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-space_opera",
+        "Space opera",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-short_stories",
+        "Short stories",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-westerns",
+        "Westerns",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new("subject-war", "War", BookSubjectGroup::Fiction, false, true),
+    BookSubject::new(
+        "subject-juvenile_fiction",
+        "Children's",
+        BookSubjectGroup::Fiction,
+        false,
+        true,
+    ),
+    BookSubject::new("subject-poetry", "Poetry", BookSubjectGroup::Fiction, false, true),
+    BookSubject::new("subject-plays", "Plays", BookSubjectGroup::Fiction, false, true),
+    BookSubject::new(
+        "subject-graphic_novels",
+        "Graphic novels",
+        BookSubjectGroup::Fiction,
+        false,
+        false,
+    ),
+    BookSubject::new(
+        "subject-biography",
+        "Biography",
+        BookSubjectGroup::NonFiction,
+        true,
+        true,
+    ),
+    BookSubject::new(
+        "subject-history",
+        "History",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-true_crime",
+        "True crime",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-science",
+        "Science",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-philosophy",
+        "Philosophy",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-psychology",
+        "Psychology",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-self-help",
+        "Self-help",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-business",
+        "Business",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-nature",
+        "Nature",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-travel",
+        "Travel",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-sports",
+        "Sport",
+        BookSubjectGroup::NonFiction,
+        false,
+        true,
+    ),
+    BookSubject::new(
+        "subject-cooking",
+        "Cooking",
+        BookSubjectGroup::NonFiction,
+        false,
+        false,
+    ),
+    BookSubject::new("subject-art", "Art", BookSubjectGroup::NonFiction, false, false),
 ];
+
+/// The book Discover row that is not a subject: Open Library's trending works.
+pub const BOOK_TRENDING_ROW: (&str, &str) = ("trending", "Trending this week");
+
+/// `GET /discover/genres/book` and `GET /discover/genres/audiobook`: one book subject.
+/// `id` is the row id of `GET /discover/content/book/{id}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BookSubjectDto {
+    pub id: String,
+    pub name: String,
+    pub group: BookSubjectGroup,
+    pub featured: bool,
+    pub audiobooks: bool,
+}
+
+impl From<&BookSubject> for BookSubjectDto {
+    fn from(s: &BookSubject) -> Self {
+        Self {
+            id: s.id.to_string(),
+            name: s.name.to_string(),
+            group: s.group,
+            featured: s.featured,
+            audiobooks: s.audiobooks,
+        }
+    }
+}
 
 /// Discover rows for music: `(row id, title)`.
 pub const MUSIC_DISCOVER_ROWS: &[(&str, &str)] = &[
@@ -820,13 +1083,32 @@ pub const MUSIC_DISCOVER_ROWS: &[(&str, &str)] = &[
 ];
 
 impl ContentRequestKind {
-    /// The fixed Discover rows of this kind: `(row id, title)`. Radio rows depend on the
-    /// enabled sources and are listed by `GET /discover/genres/radio` instead (empty here).
-    pub fn discover_rows(self) -> &'static [(&'static str, &'static str)] {
+    /// The default Discover rows of this kind: `(row id, title)`. Books show trending and
+    /// the featured [`BOOK_SUBJECTS`]; the other subjects are rows too
+    /// ([`Self::is_discover_row`]). Radio rows depend on the enabled sources and are
+    /// listed by `GET /discover/genres/radio` instead (empty here).
+    pub fn discover_rows(self) -> Vec<(&'static str, &'static str)> {
         match self {
-            Self::Book => BOOK_DISCOVER_ROWS,
-            Self::Music => MUSIC_DISCOVER_ROWS,
-            Self::Radio => &[],
+            Self::Book => std::iter::once(BOOK_TRENDING_ROW)
+                .chain(
+                    BOOK_SUBJECTS
+                        .iter()
+                        .filter(|s| s.featured)
+                        .map(|s| (s.id, s.name)),
+                )
+                .collect(),
+            Self::Music => MUSIC_DISCOVER_ROWS.to_vec(),
+            Self::Radio => Vec::new(),
+        }
+    }
+
+    /// Whether `row` is a fixed Discover row of this kind: a default row or, for books,
+    /// any of [`BOOK_SUBJECTS`]. Radio rows are checked against the enabled sources.
+    pub fn is_discover_row(self, row: &str) -> bool {
+        match self {
+            Self::Book => row == BOOK_TRENDING_ROW.0 || BOOK_SUBJECTS.iter().any(|s| s.id == row),
+            Self::Music => MUSIC_DISCOVER_ROWS.iter().any(|(id, _)| *id == row),
+            Self::Radio => false,
         }
     }
 }
@@ -1514,6 +1796,76 @@ impl Default for NotificationPrefsDto {
             pushover_user_key: None,
             watchlist_sync_movies: false,
             watchlist_sync_series: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod book_subject_tests {
+    use super::*;
+
+    #[test]
+    fn subjects_are_unique_open_library_keys() {
+        let mut ids = std::collections::HashSet::new();
+        for s in BOOK_SUBJECTS {
+            assert!(ids.insert(s.id), "{} listed twice", s.id);
+            assert!(s.id.starts_with("subject-"), "{}", s.id);
+            assert!(
+                s.key()
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_' || c == '-'),
+                "{} is not a plain Open Library subject key",
+                s.id
+            );
+        }
+        assert!(!ids.contains(BOOK_TRENDING_ROW.0));
+    }
+
+    #[test]
+    fn default_book_rows_are_unchanged_and_the_rest_are_rows_too() {
+        let rows: Vec<_> = ContentRequestKind::Book
+            .discover_rows()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                "trending",
+                "subject-fantasy",
+                "subject-science_fiction",
+                "subject-mystery",
+                "subject-thriller",
+                "subject-romance",
+                "subject-horror",
+                "subject-historical_fiction",
+                "subject-young_adult_fiction",
+                "subject-biography",
+            ]
+        );
+        for s in BOOK_SUBJECTS {
+            assert!(ContentRequestKind::Book.is_discover_row(s.id), "{}", s.id);
+        }
+        assert!(!ContentRequestKind::Book.is_discover_row("subject-anything"));
+        assert!(!ContentRequestKind::Music.is_discover_row("subject-humor"));
+    }
+
+    #[test]
+    fn both_groups_have_subjects_asked_for_in_the_issue() {
+        for key in [
+            "humor",
+            "adventure",
+            "crime",
+            "classic_literature",
+            "poetry",
+            "plays",
+        ] {
+            let s = BOOK_SUBJECTS.iter().find(|s| s.key() == key).unwrap();
+            assert_eq!(s.group, BookSubjectGroup::Fiction, "{key}");
+        }
+        for key in ["history", "science", "self-help", "cooking", "travel"] {
+            let s = BOOK_SUBJECTS.iter().find(|s| s.key() == key).unwrap();
+            assert_eq!(s.group, BookSubjectGroup::NonFiction, "{key}");
         }
     }
 }
