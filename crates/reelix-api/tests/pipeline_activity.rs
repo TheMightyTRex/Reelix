@@ -113,6 +113,30 @@ async fn admin(app: &TestApp) -> String {
     .await
 }
 
+async fn user_with(app: &TestApp, name: &str, permissions: Permissions) -> String {
+    let hash = reelix_api::auth::hash_password("user-password").unwrap();
+    app.state
+        .db()
+        .users()
+        .create(NewUser {
+            username: name.into(),
+            email: None,
+            display_name: None,
+            password_hash: Some(hash),
+            auth_source: AuthSource::Local,
+            permissions,
+        })
+        .await
+        .unwrap();
+    cookie_from(
+        app,
+        "/api/v1/auth/login",
+        json!({"username": name, "password": "user-password"}),
+        StatusCode::OK,
+    )
+    .await
+}
+
 async fn plain_user(app: &TestApp) -> String {
     let hash = reelix_api::auth::hash_password("user-password").unwrap();
     app.state
