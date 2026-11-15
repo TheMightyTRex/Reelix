@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use reelix_api_types::library::{ImportMode, MediaManagementSettings};
 use reelix_api_types::pipeline::{
-    HistoryQuery, ManualImportFile, ManualImportQuery, ManualImportRequest, QueueBulkRemove,
+    HistoryQuery, ManualImportFile, ManualImportQuery, ManualImportRequest, QueueBulkRemove, StalledAction,
+    StalledSettings,
 };
 use reelix_core::bus::EventBus;
 use reelix_core::{DomainEvent, Protocol};
@@ -277,6 +278,8 @@ async fn track(
     .unwrap()
 }
 
+const HOUR: i64 = 3_600_000;
+
 fn item(id: &str, title: &str, state: DownloadState, output: Option<&Path>) -> DownloadItem {
     let mut i = DownloadItem::new(id, title, state);
     i.total_bytes = 1000;
@@ -427,6 +430,74 @@ async fn completed_torrent_movie_is_hardlinked_into_the_library() {
     )));
     // Queue no longer lists it.
     assert_eq!(e.svc.queue(None, None).await.unwrap().total, 0);
+}
+
+#[tokio::test]
+async fn a_download_with_programs_or_scripts_is_held_not_imported() {
+    // DASH-407: a "film" that holds an installer and a shortcut is most likely malware.
+    let e = env(Protocol::Torrent, true).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 5000);
+    write(&folder.join("Codec").join("setup.exe"), 1);
+    write(&folder.join("Play Movie.lnk"), 1);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Completed, Some(&folder)));
+
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    assert!(files_under(&e.movies).is_empty(), "nothing imported");
+    let q = e.svc.queue(None, None).await.unwrap();
+    let held = q.items.iter().find(|i| i.download_id == "hash1").unwrap();
+    assert!(
+        held.messages[0].starts_with("Held, not imported"),
+        "{:?}",
+        held.messages
+    );
+    assert!(held.messages[0].contains("setup.exe"), "{:?}", held.messages);
+    assert!(held.messages[0].contains("Play Movie.lnk"), "{:?}", held.messages);
+    assert_eq!(history_events(&e).await, vec!["import_failed"]);
+    // Not removed from the client or blocklisted: the person decides.
+    assert!(e.client.removed.lock().unwrap().is_empty());
+    assert!(
+        e.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|n| matches!(n, NotificationEvent::ManualInteractionRequired { .. }))
+    );
+    // A later poll leaves it held, without a second history row.
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    assert_eq!(history_events(&e).await, vec!["import_failed"]);
+}
+
+#[tokio::test]
+async fn a_download_disguising_a_program_as_a_video_is_held() {
+    let e = env(Protocol::Torrent, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.2160p.WEB-DL.x265-FAKE";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv.exe")), 5);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    let q = e.svc.queue(None, None).await.unwrap();
+    assert!(
+        q.items[0].messages[0].contains(".mkv.exe"),
+        "{:?}",
+        q.items[0].messages
+    );
 }
 
 #[tokio::test]
@@ -609,6 +680,118 @@ async fn failed_usenet_download_blocklists_and_searches_again() {
             .iter()
             .any(|m| m.contains("out of disk space"))
     );
+}
+
+#[tokio::test]
+async fn a_stalled_download_is_flagged_after_six_hours_by_default() {
+    // DASH-407: no progress for the set time (6 hours by default) while downloading.
+    let e = env(Protocol::Torrent, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Downloading, None));
+    let messages = |e: &Env| {
+        let svc = e.svc.clone();
+        async move { svc.queue(None, None).await.unwrap().items[0].messages.clone() }
+    };
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(5 * HOUR);
+    e.svc.poll().await.unwrap();
+    assert!(messages(&e).await.is_empty(), "not yet");
+
+    // Paused time does not count.
+    e.client.items.lock().unwrap()[0].state = DownloadState::Paused;
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(2 * HOUR);
+    e.client.items.lock().unwrap()[0].state = DownloadState::Downloading;
+    e.svc.poll().await.unwrap();
+    assert!(messages(&e).await.is_empty(), "the clock started again");
+
+    e.svc.advance_stall_clock(6 * HOUR);
+    e.svc.poll().await.unwrap();
+    let m = messages(&e).await;
+    assert_eq!(m.len(), 1, "{m:?}");
+    assert!(m[0].starts_with("Stalled: no progress for 6 hours"), "{m:?}");
+    // Flag only: still downloading, nothing removed or blocklisted.
+    assert_eq!(state_of(&e, id).await, TrackedState::Downloading);
+    assert!(e.client.removed.lock().unwrap().is_empty());
+    assert_eq!(blocklist::list(&e.db, 0, 10).await.unwrap().1, 0);
+
+    // Progress clears the flag.
+    e.client.items.lock().unwrap()[0].remaining_bytes = 300;
+    e.svc.poll().await.unwrap();
+    assert!(messages(&e).await.is_empty());
+
+    // qBittorrent's stalledDL (a warning) keeps its own message as well.
+    {
+        let mut items = e.client.items.lock().unwrap();
+        items[0].state = DownloadState::Warning;
+        items[0].message = Some("The download is stalled with no connections".into());
+    }
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(7 * HOUR);
+    e.svc.poll().await.unwrap();
+    let m = messages(&e).await;
+    assert_eq!(m.len(), 2, "{m:?}");
+    assert!(m[1].starts_with("Stalled"), "{m:?}");
+
+    // Off.
+    e.svc
+        .set_stalled_settings(StalledSettings {
+            stalled_hours: 0,
+            action: StalledAction::Flag,
+        })
+        .await
+        .unwrap();
+    e.svc.poll().await.unwrap();
+    assert_eq!(messages(&e).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_stalled_download_can_be_removed_and_searched_again() {
+    let e = env(Protocol::Torrent, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
+    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    e.svc
+        .set_stalled_settings(StalledSettings {
+            stalled_hours: 2,
+            action: StalledAction::RemoveAndSearch,
+        })
+        .await
+        .unwrap();
+    assert!(
+        e.svc
+            .set_stalled_settings(StalledSettings {
+                stalled_hours: 10_000,
+                action: StalledAction::Flag,
+            })
+            .await
+            .is_err()
+    );
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("hash1", title, DownloadState::Downloading, None));
+    e.svc.poll().await.unwrap();
+    e.svc.advance_stall_clock(2 * HOUR);
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::Failed);
+    let (bl, total) = blocklist::list(&e.db, 0, 10).await.unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(bl[0].message.as_deref(), Some("stalled"));
+    assert_eq!(history_events(&e).await, vec!["download_failed"]);
+    let jobs: Vec<String> = sqlx::query_scalar("SELECT kind FROM jobs")
+        .fetch_all(e.db.pool())
+        .await
+        .unwrap();
+    assert!(jobs.contains(&"search".to_owned()), "{jobs:?}");
+    assert_eq!(*e.client.removed.lock().unwrap(), vec!["hash1".to_owned()]);
 }
 
 #[tokio::test]

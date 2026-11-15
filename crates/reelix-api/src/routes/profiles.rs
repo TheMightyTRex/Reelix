@@ -10,12 +10,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::profiles::{
-    ImportedFormatDto, MatchedFormatDto, ParseRequest, ParseResponse, ProfileDecisionDto, RejectionDto,
+    BuiltinFormatDto, ImportedFormatDto, MatchedFormatDto, ParseRequest, ParseResponse, ProfileDecisionDto,
+    RejectionDto,
 };
 use reelix_core::{BookFormat, Permissions};
 use reelix_decision::{
-    CustomFormat, DecisionContext, DelayProfile, QualityDefinition, QualityProfile, RejectionKind,
-    ReleaseCandidate, ReleaseProfile, SearchKind, trash,
+    BUILTIN_FORMATS, CustomFormat, DecisionContext, DelayProfile, QualityDefinition, QualityProfile,
+    RejectionKind, ReleaseCandidate, ReleaseProfile, SearchKind, trash,
 };
 use reelix_parser::QualityFamily;
 use serde::Deserialize;
@@ -40,6 +41,8 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/customformats", get(list_formats).post(create_format))
         .route("/customformats/import", post(import_formats))
+        .route("/customformats/builtin", get(list_builtin_formats))
+        .route("/customformats/builtin/{key}", get(get_builtin_format))
         .route(
             "/customformats/{id}",
             get(get_format).put(update_format).delete(delete_format),
@@ -63,7 +66,7 @@ pub fn routes() -> Router<AppState> {
     paths(
         list_profiles, get_profile, create_profile, update_profile, delete_profile,
         list_definitions, update_definitions,
-        list_formats, get_format, create_format, update_format, delete_format, import_formats, export_format,
+        list_formats, get_format, list_builtin_formats, get_builtin_format, create_format, update_format, delete_format, import_formats, export_format,
         list_delay, get_delay, create_delay, update_delay, delete_delay,
         list_release, get_release, create_release, update_release, delete_release,
         parse,
@@ -75,6 +78,7 @@ pub fn routes() -> Router<AppState> {
         reelix_api_types::profiles::RejectionDto,
         reelix_api_types::profiles::ProfileDecisionDto,
         reelix_api_types::profiles::ImportedFormatDto,
+        reelix_api_types::profiles::BuiltinFormatDto,
     )),
     tags((name = "profiles", description = "Quality profiles, definitions, custom formats, delay/release profiles and the release parser")),
 )]
@@ -352,6 +356,49 @@ pub async fn get_format(
 ) -> ApiResult<ApiJson<CustomFormat>> {
     user.require(Permissions::MANAGE_LIBRARY)?;
     found(state.db().custom_formats().get(id).await?, "custom format")
+}
+
+/// Reelix's built-in custom formats (audio description, British Sign Language) by their
+/// stable keys. They match by release title and score nothing until a quality profile
+/// gives them a score; a client looks one up here rather than adding its own.
+#[utoipa::path(get, path = "/api/v1/customformats/builtin", tag = "profiles",
+    security(("session" = []), ("api_key" = [])),
+    responses((status = 200, description = "Built-in formats", body = Vec<BuiltinFormatDto>)))]
+pub async fn list_builtin_formats(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> ApiResult<ApiJson<Vec<BuiltinFormatDto>>> {
+    user.require(Permissions::MANAGE_LIBRARY)?;
+    let repo = state.db().custom_formats();
+    let mut out = Vec::with_capacity(BUILTIN_FORMATS.len());
+    for b in BUILTIN_FORMATS {
+        out.push(BuiltinFormatDto {
+            key: b.key.to_string(),
+            format: repo.builtin(b.key).await?,
+        });
+    }
+    Ok(ApiJson(out))
+}
+
+/// One built-in custom format by its stable key (`audio_description` or `bsl`), even after
+/// an admin renamed it.
+#[utoipa::path(get, path = "/api/v1/customformats/builtin/{key}", tag = "profiles",
+    params(("key" = String, Path, description = "`audio_description` or `bsl`")),
+    security(("session" = []), ("api_key" = [])),
+    responses(
+        (status = 200, description = "Custom format", body = Object),
+        (status = 404, description = "Unknown key, or the format was deleted", body = ApiErrorBody),
+    ))]
+pub async fn get_builtin_format(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(key): ApiPath<String>,
+) -> ApiResult<ApiJson<CustomFormat>> {
+    user.require(Permissions::MANAGE_LIBRARY)?;
+    found(
+        state.db().custom_formats().builtin(&key).await?,
+        "built-in custom format",
+    )
 }
 
 /// Creates a custom format (admin).

@@ -113,6 +113,30 @@ async fn admin(app: &TestApp) -> String {
     .await
 }
 
+async fn user_with(app: &TestApp, name: &str, permissions: Permissions) -> String {
+    let hash = reelix_api::auth::hash_password("user-password").unwrap();
+    app.state
+        .db()
+        .users()
+        .create(NewUser {
+            username: name.into(),
+            email: None,
+            display_name: None,
+            password_hash: Some(hash),
+            auth_source: AuthSource::Local,
+            permissions,
+        })
+        .await
+        .unwrap();
+    cookie_from(
+        app,
+        "/api/v1/auth/login",
+        json!({"username": name, "password": "user-password"}),
+        StatusCode::OK,
+    )
+    .await
+}
+
 async fn plain_user(app: &TestApp) -> String {
     let hash = reelix_api::auth::hash_password("user-password").unwrap();
     app.state
@@ -333,4 +357,42 @@ async fn manual_import_routes_validate() {
     .await;
     assert_eq!(s, StatusCode::ACCEPTED);
     assert!(job["job_id"].is_i64());
+}
+
+#[tokio::test]
+async fn stalled_settings_round_trip() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let manager = user_with(&app, "manager", Permissions::ROLE_MANAGER).await;
+
+    let (s, _) = call(&app, Method::GET, "/api/v1/settings/stalled", &manager, None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, body) = call(&app, Method::GET, "/api/v1/settings/stalled", &admin, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        body,
+        json!({"stalled_hours": 6, "action": "flag"}),
+        "recommended default"
+    );
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/stalled",
+        &admin,
+        Some(json!({"stalled_hours": 721})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, body) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/stalled",
+        &admin,
+        Some(json!({"stalled_hours": 12, "action": "remove_and_search"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, json!({"stalled_hours": 12, "action": "remove_and_search"}));
+    let (_, body) = call(&app, Method::GET, "/api/v1/settings/stalled", &admin, None).await;
+    assert_eq!(body["action"], "remove_and_search");
 }

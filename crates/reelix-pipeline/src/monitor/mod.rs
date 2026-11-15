@@ -9,6 +9,7 @@ mod content;
 pub mod error;
 pub mod jobs;
 pub mod providers;
+mod stalled;
 pub(crate) mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -26,7 +27,7 @@ use reelix_core::bus::EventBus;
 use reelix_core::{ContentKind, DomainEvent, MediaKind, Protocol};
 use reelix_db::{Db, NewJob, now_ms};
 use reelix_downloaders::{DownloadId, DownloadItem, DownloadState, FailureAction, UsenetFailure};
-use reelix_import::files::TransferMode;
+use reelix_import::files::{TransferMode, dangerous_files};
 use reelix_import::matching::{best_movie_match, match_parsed_episodes};
 use reelix_import::unpack::{UnpackConfig, remove_unpacked, unpack_download};
 use reelix_jobs::JobQueue;
@@ -37,6 +38,7 @@ use reelix_parser::parse;
 
 pub use error::{ActivityError, Result};
 pub use providers::{ActivityProviders, ClientHandle, StaticProviders};
+pub use stalled::STALLED_SETTINGS_KEY;
 
 use crate::import::{FileImporter, Hint, ImportedItem, Target, transfer_mode};
 use crate::store::blocklist::{self, NewBlocklist};
@@ -185,6 +187,10 @@ pub struct ActivityService {
     /// (client id, download id) removed from a client during the current poll.
     removed: Mutex<HashSet<(i64, String)>>,
     dirty: AtomicBool,
+    /// Stalled downloads: tracked id to (bytes left, since when in ms), noted at each poll.
+    progress: Mutex<HashMap<i64, (u64, i64)>>,
+    /// Added to the stall clock (tests only).
+    stall_clock: std::sync::atomic::AtomicI64,
     poll_lock: tokio::sync::Mutex<()>,
     last_poll: Mutex<Option<Instant>>,
     queue: OnceLock<JobQueue>,
@@ -225,6 +231,8 @@ impl ActivityService {
             busy: Mutex::default(),
             removed: Mutex::default(),
             dirty: AtomicBool::new(false),
+            progress: Mutex::default(),
+            stall_clock: std::sync::atomic::AtomicI64::new(0),
             poll_lock: tokio::sync::Mutex::new(()),
             last_poll: Mutex::default(),
             queue: OnceLock::new(),
@@ -402,7 +410,10 @@ impl ActivityService {
         }
 
         // Active tracked downloads.
-        for t in tracked::active(&self.db).await? {
+        let active = tracked::active(&self.db).await?;
+        // Forget the progress of downloads that are no longer active (stalled downloads).
+        lock(&self.progress).retain(|id, _| active.iter().any(|t| t.id == *id));
+        for t in active {
             let Some((h, items)) = ok.get(&t.download_client_id) else {
                 continue;
             };
@@ -615,6 +626,11 @@ impl ActivityService {
         }
     }
 
+    /// Matched to a film, series, book, album or radio show (not an unknown download).
+    fn is_matched(&self, t: &TrackedDownload) -> bool {
+        t.movie_id.is_some() || t.series_id.is_some() || !t.content.is_empty()
+    }
+
     async fn process(&self, t: &TrackedDownload, h: &ClientHandle, item: &DownloadItem) -> Result<()> {
         match (t.state, item.state) {
             (TrackedState::Importing, _) => {
@@ -633,12 +649,20 @@ impl ActivityService {
                     .message
                     .clone()
                     .unwrap_or_else(|| "The download client reported a problem".into());
-                self.set_state(t, TrackedState::Downloading, vec![msg]).await
+                let mut messages = vec![msg];
+                if self.is_matched(t) && self.check_stalled(t, h, item, &mut messages).await? {
+                    return Ok(());
+                }
+                self.set_state(t, TrackedState::Downloading, messages).await
             }
             _ => {
                 // Clear transient messages once the download moves again (keep "unknown").
-                if t.movie_id.is_some() || t.series_id.is_some() || !t.content.is_empty() {
-                    self.set_state(t, TrackedState::Downloading, Vec::new()).await?;
+                if self.is_matched(t) {
+                    let mut messages = Vec::new();
+                    if self.check_stalled(t, h, item, &mut messages).await? {
+                        return Ok(());
+                    }
+                    self.set_state(t, TrackedState::Downloading, messages).await?;
                 }
                 Ok(())
             }
@@ -677,6 +701,9 @@ impl ActivityService {
             self.needs_manual(t, vec![msg.to_owned()]).await?;
             return Ok(());
         }
+        if self.held_as_dangerous(t, &local).await? {
+            return Ok(());
+        }
         let mm = self.library.media_management().await?;
         let mode = transfer_mode(
             mm.import_mode,
@@ -689,6 +716,34 @@ impl ActivityService {
         }
         self.import_tracked(t, &local, mode, Some((h, item))).await?;
         Ok(())
+    }
+
+    /// DASH-407: a download holding programs or scripts (`.exe`, `.scr`, `.bat`, `.lnk`, `.js`
+    /// and the like) is held and flagged instead of imported, with an import-failed history
+    /// row. Returns whether it was held. Nothing is removed or blocklisted: the queue's Remove
+    /// does that, and manual import is still there for a download the person trusts.
+    async fn held_as_dangerous(&self, t: &TrackedDownload, source: &Path) -> Result<bool> {
+        let found = dangerous_files(source).await;
+        if found.is_empty() {
+            return Ok(false);
+        }
+        let message = dangerous_message(&found);
+        tracing::warn!(id = t.id, title = %t.title, files = ?found, "download held: it holds programs or scripts");
+        if t.state != TrackedState::ImportPending {
+            let mut h = NewHistory::new(HistoryEvent::ImportFailed, &t.title);
+            fill_media(&mut h, t.movie_id, t.series_id, t.episode_ids.first().copied());
+            self.fill_content(&mut h, &t.content).await;
+            fill_release(&mut h, &self.download_ref(t));
+            h.data = serde_json::json!({
+                "messages": [message.clone()],
+                "source_path": source,
+                "dangerous_files": found,
+            });
+            history::insert(&self.db, &h).await?;
+            self.emit("history", "created", 0);
+        }
+        self.needs_manual(t, vec![message]).await?;
+        Ok(true)
     }
 
     /// Marks a download as waiting for manual interaction (and notifies once).
@@ -1240,6 +1295,10 @@ impl ActivityService {
                 "the download isn't matched to a movie or series; use manual import",
             ));
         }
+        if self.held_as_dangerous(&t, Path::new(&path)).await? {
+            self.emit("queue", "updated", id);
+            return Ok(false);
+        }
         let mm = self.library.media_management().await?;
         let mode = transfer_mode(mm.import_mode, t.protocol == Protocol::Usenet, false);
         let ok = if t.content.is_empty() {
@@ -1366,6 +1425,24 @@ async fn futures_join(clients: &[ClientHandle]) -> Vec<std::result::Result<Vec<D
         }
     }
     out
+}
+
+/// The queue message for a download held for its programs or scripts (up to five named).
+pub(crate) fn dangerous_message(found: &[PathBuf]) -> String {
+    let mut names: Vec<String> = found
+        .iter()
+        .take(5)
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    if found.len() > 5 {
+        names.push(format!("and {} more", found.len() - 5));
+    }
+    format!(
+        "Held, not imported: the download has files that can run programs ({}), which media never \
+         needs, so it may be malware. Remove it from the queue and blocklist the release, or use \
+         manual import only if you trust it.",
+        names.join(", ")
+    )
 }
 
 pub(crate) fn fill_media(

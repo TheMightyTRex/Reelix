@@ -1,6 +1,8 @@
 //! Custom formats (specifications stored as JSON).
 
-use reelix_decision::{CustomFormat, FormatSpecification};
+use std::collections::BTreeMap;
+
+use reelix_decision::{BUILTIN_FORMATS, BuiltinFormat, CustomFormat, FormatSpecification};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
@@ -31,6 +33,9 @@ fn conflict(e: sqlx::Error, name: &str) -> DbError {
 }
 
 const COLS: &str = "id, name, include_in_rename, specifications";
+
+/// Settings key holding the id of each built-in format by its key, once it has been made.
+const BUILTIN_KEY: &str = "custom_formats.builtin";
 
 impl CustomFormatRepo<'_> {
     pub async fn list(&self) -> Result<Vec<CustomFormat>> {
@@ -113,6 +118,52 @@ impl CustomFormatRepo<'_> {
         tx.commit().await?;
         Ok(res.rows_affected() > 0)
     }
+
+    /// The id of each built-in format by its key, for those made so far. The id stays
+    /// recorded after the format is deleted, so a deleted built-in is not made again.
+    pub async fn builtin_ids(&self) -> Result<BTreeMap<String, i64>> {
+        Ok(self.db.settings().get(BUILTIN_KEY).await?.unwrap_or_default())
+    }
+
+    /// Makes every built-in format not made before (run at start). A format that already
+    /// has the built-in's name (made by hand or by a client) becomes the built-in instead
+    /// of a second one being added. Returns the keys made or adopted.
+    pub async fn ensure_builtins(&self) -> Result<Vec<&'static str>> {
+        let mut ids = self.builtin_ids().await?;
+        let mut done = Vec::new();
+        for b in BUILTIN_FORMATS {
+            if ids.contains_key(b.key) {
+                continue;
+            }
+            let existing = self
+                .list()
+                .await?
+                .into_iter()
+                .find(|f| f.name.eq_ignore_ascii_case(b.name));
+            let id = match existing {
+                Some(f) => f.id,
+                None => self.create(&b.format(), None).await?.id,
+            };
+            ids.insert(b.key.to_string(), id);
+            done.push(b.key);
+        }
+        if !done.is_empty() {
+            self.db.settings().set(BUILTIN_KEY, &ids).await?;
+        }
+        Ok(done)
+    }
+
+    /// The built-in format with this key, as it is now (an admin may have renamed or
+    /// changed it); `None` for an unknown key or one that was deleted.
+    pub async fn builtin(&self, key: &str) -> Result<Option<CustomFormat>> {
+        if BuiltinFormat::by_key(key).is_none() {
+            return Ok(None);
+        }
+        match self.builtin_ids().await?.get(key) {
+            Some(id) => self.get(*id).await,
+            None => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -161,5 +212,55 @@ mod tests {
         assert!(repo.list().await.unwrap().is_empty());
         let after = db.quality_profiles().get(profile.id).await.unwrap().unwrap();
         assert!(after.format_items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn builtins_are_made_once_adopt_a_same_named_format_and_stay_deleted() {
+        let db = Db::in_memory().await.unwrap();
+        let repo = db.custom_formats();
+        // A client made its own "audio description" format first.
+        let own = repo
+            .create(
+                &CustomFormat {
+                    id: 0,
+                    name: "audio description".into(),
+                    include_in_rename: false,
+                    specifications: vec![],
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repo.ensure_builtins().await.unwrap(),
+            ["audio_description", "bsl"]
+        );
+        let formats = repo.list().await.unwrap();
+        assert_eq!(formats.len(), 2, "{formats:?}");
+        assert_eq!(
+            repo.builtin("audio_description").await.unwrap().unwrap().id,
+            own.id
+        );
+        let bsl = repo.builtin("bsl").await.unwrap().unwrap();
+        assert_eq!(bsl.name, "BSL");
+        assert!(!bsl.specifications.is_empty());
+        assert!(repo.builtin("nope").await.unwrap().is_none());
+
+        // Found by key after a rename; nothing made twice.
+        let mut renamed = bsl.clone();
+        renamed.name = "British Sign Language".into();
+        repo.update(bsl.id, &renamed).await.unwrap();
+        assert!(repo.ensure_builtins().await.unwrap().is_empty());
+        assert_eq!(
+            repo.builtin("bsl").await.unwrap().unwrap().name,
+            "British Sign Language"
+        );
+
+        // Deleted stays deleted.
+        repo.delete(bsl.id).await.unwrap();
+        assert!(repo.ensure_builtins().await.unwrap().is_empty());
+        assert!(repo.builtin("bsl").await.unwrap().is_none());
+        assert_eq!(repo.list().await.unwrap().len(), 1);
     }
 }
