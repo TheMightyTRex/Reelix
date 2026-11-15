@@ -33,6 +33,13 @@ pub const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "sub", "idx", "s
 pub const METADATA_EXTENSIONS: &[&str] = &["nfo", "xml"];
 /// Image sidecar extensions (posters, fanart).
 pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "tbn"];
+/// Programs and scripts (lowercase, without dot). A film, episode, book or album never
+/// needs one, so a download holding any is held instead of imported: it is most likely
+/// malware passed off as media.
+pub const DANGEROUS_EXTENSIONS: &[&str] = &[
+    "exe", "scr", "com", "pif", "cpl", "msi", "msp", "bat", "cmd", "lnk", "js", "jse", "vbs", "vbe", "wsf",
+    "wsh", "hta", "ps1", "psm1", "jar", "reg", "dll",
+];
 /// Download client in-progress markers; such files are never imported.
 pub const PARTIAL_EXTENSIONS: &[&str] = &["part", "partial", "!qb", "!ut", "crdownload", "tmp", "dlpart"];
 
@@ -84,6 +91,28 @@ pub fn extension(path: &Path) -> Option<String> {
 
 pub fn is_video(path: &Path) -> bool {
     extension(path).is_some_and(|e| VIDEO_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// True for a program or script ([`DANGEROUS_EXTENSIONS`]), including a disguised one
+/// such as `Film.mkv.exe`.
+pub fn is_dangerous(path: &Path) -> bool {
+    extension(path).is_some_and(|e| DANGEROUS_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// The programs and scripts below `source` (a folder or a single file), as paths relative to
+/// it, sorted. Unreadable folders are skipped.
+pub async fn dangerous_files(source: &Path) -> Vec<PathBuf> {
+    let opts = ScanOptions {
+        include_non_video: true,
+        ..ScanOptions::default()
+    };
+    scan_async(source.to_path_buf(), opts)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| is_dangerous(&f.path))
+        .map(|f| f.relative)
+        .collect()
 }
 
 pub fn classify(path: &Path) -> FileKind {

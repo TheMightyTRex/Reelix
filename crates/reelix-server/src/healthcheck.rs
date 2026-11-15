@@ -117,18 +117,25 @@ mod tests {
         (addr, handle)
     }
 
+    // Runs inside `figment::Jail`, only for its lock: the config tests' `clear_env` removes every
+    // environment variable for a moment, and Windows cannot start its sockets without SystemRoot
+    // (error 10106 when this test ran at the same time).
     #[test]
+    #[allow(clippy::result_large_err)]
     fn probe_against_local_server() {
-        let (addr, h) = serve_once("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
-        assert_eq!(probe(addr, "/x/api/v1/system/health").unwrap(), 200);
-        assert!(
-            h.join()
-                .unwrap()
-                .starts_with("GET /x/api/v1/system/health HTTP/1.0\r\n")
-        );
+        figment::Jail::expect_with(|_| {
+            let (addr, h) = serve_once("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
+            assert_eq!(probe(addr, "/x/api/v1/system/health").unwrap(), 200);
+            assert!(
+                h.join()
+                    .unwrap()
+                    .starts_with("GET /x/api/v1/system/health HTTP/1.0\r\n")
+            );
 
-        let (addr, h) = serve_once("HTTP/1.1 503 Service Unavailable\r\n\r\n");
-        assert_eq!(probe(addr, "/").unwrap(), 503);
-        h.join().unwrap();
+            let (addr, h) = serve_once("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+            assert_eq!(probe(addr, "/").unwrap(), 503);
+            h.join().unwrap();
+            Ok(())
+        });
     }
 }
