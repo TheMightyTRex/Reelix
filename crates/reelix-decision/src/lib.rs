@@ -3,6 +3,7 @@
 //!
 //! Everything here is pure and synchronous so the web UI can reuse it (wasm-compatible).
 
+pub mod builtin;
 pub mod definition;
 pub mod delay;
 pub mod engine;
@@ -12,6 +13,7 @@ pub mod profile;
 pub mod release_profile;
 pub mod trash;
 
+pub use builtin::{BUILTIN_FORMATS, BuiltinFormat};
 pub use definition::{QualityDefinition, SizeBasis, default_definitions, default_definitions_for};
 pub use delay::DelayProfile;
 pub use engine::{
