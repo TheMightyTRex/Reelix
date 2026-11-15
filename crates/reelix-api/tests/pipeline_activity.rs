@@ -432,3 +432,41 @@ async fn history_settings_round_trip() {
     let (_, body) = call(&app, Method::GET, "/api/v1/settings/history", &admin, None).await;
     assert_eq!(body, json!({"keep_days": 0}));
 }
+
+#[tokio::test]
+async fn stalled_settings_round_trip() {
+    let app = app().await;
+    let admin = admin(&app).await;
+    let manager = user_with(&app, "manager", Permissions::ROLE_MANAGER).await;
+
+    let (s, _) = call(&app, Method::GET, "/api/v1/settings/stalled", &manager, None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, body) = call(&app, Method::GET, "/api/v1/settings/stalled", &admin, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        body,
+        json!({"stalled_hours": 6, "action": "flag"}),
+        "recommended default"
+    );
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/stalled",
+        &admin,
+        Some(json!({"stalled_hours": 721})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, body) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/stalled",
+        &admin,
+        Some(json!({"stalled_hours": 12, "action": "remove_and_search"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body, json!({"stalled_hours": 12, "action": "remove_and_search"}));
+    let (_, body) = call(&app, Method::GET, "/api/v1/settings/stalled", &admin, None).await;
+    assert_eq!(body["action"], "remove_and_search");
+}

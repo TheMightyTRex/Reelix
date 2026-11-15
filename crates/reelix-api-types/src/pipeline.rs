@@ -300,6 +300,50 @@ impl Default for HistorySettings {
     }
 }
 
+/// What Reelix does with a stalled download (`/settings/stalled`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum StalledAction {
+    /// Say so in the queue and leave it (the default).
+    #[default]
+    Flag,
+    /// Remove it from the download client, blocklist the release and search again.
+    RemoveAndSearch,
+}
+
+/// Stalled downloads (`GET`/`PUT /settings/stalled`): a download that has made no progress
+/// for `stalled_hours` while downloading is flagged, or removed and searched for again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StalledSettings {
+    /// Hours without progress before a download counts as stalled; 0 turns the check off.
+    #[serde(default = "StalledSettings::default_hours")]
+    pub stalled_hours: u32,
+    #[serde(default)]
+    pub action: StalledAction,
+}
+
+impl StalledSettings {
+    /// Recommended: 6 hours, long enough for a slow torrent to find a seeder.
+    pub const DEFAULT_HOURS: u32 = 6;
+    /// Upper limit (30 days); larger values are refused.
+    pub const MAX_HOURS: u32 = 720;
+
+    fn default_hours() -> u32 {
+        Self::DEFAULT_HOURS
+    }
+}
+
+impl Default for StalledSettings {
+    fn default() -> Self {
+        Self {
+            stalled_hours: Self::DEFAULT_HOURS,
+            action: StalledAction::Flag,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HistoryDto {

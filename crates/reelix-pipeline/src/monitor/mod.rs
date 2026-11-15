@@ -10,6 +10,7 @@ pub mod error;
 pub mod jobs;
 pub mod providers;
 mod retention;
+mod stalled;
 pub(crate) mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -39,6 +40,7 @@ use reelix_parser::parse;
 pub use error::{ActivityError, Result};
 pub use providers::{ActivityProviders, ClientHandle, StaticProviders};
 pub use retention::HISTORY_SETTINGS_KEY;
+pub use stalled::STALLED_SETTINGS_KEY;
 
 use crate::import::{FileImporter, Hint, ImportedItem, Target, transfer_mode};
 use crate::store::blocklist::{self, NewBlocklist};
@@ -189,6 +191,10 @@ pub struct ActivityService {
     /// (client id, download id) removed from a client during the current poll.
     removed: Mutex<HashSet<(i64, String)>>,
     dirty: AtomicBool,
+    /// Stalled downloads: tracked id to (bytes left, since when in ms), noted at each poll.
+    progress: Mutex<HashMap<i64, (u64, i64)>>,
+    /// Added to the stall clock (tests only).
+    stall_clock: std::sync::atomic::AtomicI64,
     poll_lock: tokio::sync::Mutex<()>,
     last_poll: Mutex<Option<Instant>>,
     queue: OnceLock<JobQueue>,
@@ -229,6 +235,8 @@ impl ActivityService {
             busy: Mutex::default(),
             removed: Mutex::default(),
             dirty: AtomicBool::new(false),
+            progress: Mutex::default(),
+            stall_clock: std::sync::atomic::AtomicI64::new(0),
             poll_lock: tokio::sync::Mutex::new(()),
             last_poll: Mutex::default(),
             queue: OnceLock::new(),
@@ -406,7 +414,10 @@ impl ActivityService {
         }
 
         // Active tracked downloads.
-        for t in tracked::active(&self.db).await? {
+        let active = tracked::active(&self.db).await?;
+        // Forget the progress of downloads that are no longer active (stalled downloads).
+        lock(&self.progress).retain(|id, _| active.iter().any(|t| t.id == *id));
+        for t in active {
             let Some((h, items)) = ok.get(&t.download_client_id) else {
                 continue;
             };
@@ -619,6 +630,11 @@ impl ActivityService {
         }
     }
 
+    /// Matched to a film, series, book, album or radio show (not an unknown download).
+    fn is_matched(&self, t: &TrackedDownload) -> bool {
+        t.movie_id.is_some() || t.series_id.is_some() || !t.content.is_empty()
+    }
+
     async fn process(&self, t: &TrackedDownload, h: &ClientHandle, item: &DownloadItem) -> Result<()> {
         match (t.state, item.state) {
             (TrackedState::Importing, _) => {
@@ -637,12 +653,20 @@ impl ActivityService {
                     .message
                     .clone()
                     .unwrap_or_else(|| "The download client reported a problem".into());
-                self.set_state(t, TrackedState::Downloading, vec![msg]).await
+                let mut messages = vec![msg];
+                if self.is_matched(t) && self.check_stalled(t, h, item, &mut messages).await? {
+                    return Ok(());
+                }
+                self.set_state(t, TrackedState::Downloading, messages).await
             }
             _ => {
                 // Clear transient messages once the download moves again (keep "unknown").
-                if t.movie_id.is_some() || t.series_id.is_some() || !t.content.is_empty() {
-                    self.set_state(t, TrackedState::Downloading, Vec::new()).await?;
+                if self.is_matched(t) {
+                    let mut messages = Vec::new();
+                    if self.check_stalled(t, h, item, &mut messages).await? {
+                        return Ok(());
+                    }
+                    self.set_state(t, TrackedState::Downloading, messages).await?;
                 }
                 Ok(())
             }
