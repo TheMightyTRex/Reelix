@@ -403,6 +403,12 @@ impl LibraryService {
             .await?;
         }
         let existing = repo::episodes(&self.db, series_id, None).await?;
+        // Episodes whose details have not changed are not written again: a refresh of an unchanged
+        // library (every 12 hours) then makes no episode writes at all, instead of a read and a write each.
+        let by_number: HashMap<(u32, u32), &EpisodeDto> = existing
+            .iter()
+            .map(|e| ((e.season_number, e.episode_number), e))
+            .collect();
         let mut seen = std::collections::HashSet::new();
         for e in meta.episodes() {
             let monitored = season_monitor.get(&e.season_number).copied().unwrap_or(false);
@@ -427,6 +433,12 @@ impl LibraryService {
                 episode_file_id: None,
                 episode_file: None,
             };
+            if let Some(old) = by_number.get(&(dto.season_number, dto.episode_number))
+                && same_episode_details(old, &dto)
+            {
+                seen.insert(old.id);
+                continue;
+            }
             let (id, inserted) = repo::upsert_episode(&self.db, &dto).await?;
             seen.insert(id);
             if inserted && !is_new {
@@ -627,6 +639,37 @@ impl LibraryService {
             .collect())
     }
 
+    /// [`Self::episode_files_of`] for many series at once, by series id: a handful of reads in all instead
+    /// of four for each series (an RSS sync loads every monitored series).
+    pub(crate) async fn episode_files_of_many(
+        &self,
+        series: &[SeriesDto],
+    ) -> Result<HashMap<i64, Vec<EpisodeFileDto>>> {
+        let mut out: HashMap<i64, Vec<EpisodeFileDto>> = HashMap::new();
+        if series.is_empty() {
+            return Ok(out);
+        }
+        let profiles = self.profiles().await?;
+        let map = repo::file_episode_map(&self.db, None).await?;
+        let by_id: HashMap<i64, &SeriesDto> = series.iter().map(|s| (s.id, s)).collect();
+        for chunk in series.chunks(500) {
+            let ids: Vec<i64> = chunk.iter().map(|s| s.id).collect();
+            for f in files::list(&self.db, FileTable::Episode, Some(&ids)).await? {
+                let Some(s) = by_id.get(&f.owner_id) else {
+                    continue;
+                };
+                let profile = profiles.profile(s.quality_profile_id);
+                out.entry(s.id).or_default().push(EpisodeFileDto {
+                    series_id: s.id,
+                    season_number: f.season_number.unwrap_or(0),
+                    episode_ids: map.get(&f.id).cloned().unwrap_or_default(),
+                    file: f.to_dto(&s.path, profile, &profiles.format_names),
+                });
+            }
+        }
+        Ok(out)
+    }
+
     /// Deletes an episode file from disk (recycle bin when configured) and the database.
     pub async fn delete_episode_file(&self, file_id: i64) -> Result<()> {
         let f = files::get(&self.db, FileTable::Episode, file_id)
@@ -749,4 +792,16 @@ pub(crate) async fn series_metadata(
         }
         (result, _, _) => result,
     }
+}
+
+/// Whether `new` would change nothing [`repo::upsert_episode`] writes over `old` (it never writes
+/// `monitored` or the file of an existing episode).
+fn same_episode_details(old: &EpisodeDto, new: &EpisodeDto) -> bool {
+    old.absolute_number == new.absolute_number
+        && old.title == new.title
+        && old.overview == new.overview
+        && old.air_date == new.air_date
+        && old.runtime_minutes == new.runtime_minutes
+        && old.still == new.still
+        && old.finale == new.finale
 }

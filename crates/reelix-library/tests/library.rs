@@ -1406,3 +1406,96 @@ async fn an_aired_order_with_tmdb_numbers_is_not_kept() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn a_refresh_keeps_unchanged_episodes_and_writes_changed_ones() {
+    let e = env().await;
+    e.meta.series.lock().unwrap().insert(
+        7400,
+        show(
+            7400,
+            vec![season(
+                1,
+                vec![episode(1, 1, "2020-01-01"), episode(1, 2, "2020-01-08")],
+            )],
+        ),
+    );
+    let added = e.svc.add_series(add_series_req(&e, 7400, 8400)).await.unwrap();
+    let first = e.svc.episodes(added.id, None).await.unwrap();
+    // Nothing changed at the source: the same episodes, ids and details.
+    e.svc.refresh_series(added.id).await.unwrap();
+    let again = e.svc.episodes(added.id, None).await.unwrap();
+    assert_eq!(format!("{first:?}"), format!("{again:?}"));
+    // One episode renamed and a new one: only those change.
+    {
+        let mut map = e.meta.series.lock().unwrap();
+        let s = map.get_mut(&7400).unwrap();
+        s.seasons[0].episodes[1].title = Some("Renamed".into());
+        s.seasons[0].episodes.push(episode(1, 3, "2020-01-15"));
+    }
+    e.svc.refresh_series(added.id).await.unwrap();
+    let after = e.svc.episodes(added.id, None).await.unwrap();
+    assert_eq!(after.len(), 3);
+    assert_eq!(after[0].id, first[0].id);
+    assert_eq!(after[0].title.as_deref(), Some("Episode 1"));
+    assert_eq!(after[1].id, first[1].id);
+    assert_eq!(after[1].title.as_deref(), Some("Renamed"));
+    assert_eq!(after[2].title.as_deref(), Some("Episode 3"));
+}
+
+#[tokio::test]
+async fn episodes_of_many_matches_one_series_at_a_time() {
+    let e = env().await;
+    let mut all = Vec::new();
+    for id in [7500u32, 7501] {
+        e.meta.series.lock().unwrap().insert(
+            id,
+            show(
+                id,
+                vec![
+                    season(1, vec![episode(1, 1, "2020-01-01"), episode(1, 2, "2020-01-08")]),
+                    season(2, vec![episode(2, 1, "2021-01-01"), episode(2, 2, "2021-01-08")]),
+                ],
+            ),
+        );
+        all.push(e.svc.add_series(add_series_req(&e, id, id + 1000)).await.unwrap());
+    }
+    // Files in the first series only, one of them a double episode.
+    let root = Path::new(&all[0].path);
+    write(
+        &root.join("Season 01/The.Show.S01E01.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    write(
+        &root.join("Season 02/The.Show.S02E01E02.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv"),
+        900,
+    );
+    e.svc.scan_series(all[0].id).await.unwrap();
+    let all: Vec<_> = {
+        let mut v = Vec::new();
+        for s in &all {
+            v.push(e.svc.get_series(s.id).await.unwrap());
+        }
+        v
+    };
+    let api = e.svc.search_api();
+    let many = api.episodes_of_many(&all).await.unwrap();
+    assert_eq!(many.len(), 2);
+    for s in &all {
+        let one = api.episodes_of(s, None).await.unwrap();
+        assert_eq!(
+            format!("{one:?}"),
+            format!("{:?}", many[&s.id]),
+            "series {}",
+            s.id
+        );
+    }
+    assert_eq!(
+        many[&all[0].id]
+            .iter()
+            .filter(|x| x.episode_file.is_some())
+            .count(),
+        3
+    );
+    assert!(many[&all[1].id].iter().all(|x| x.episode_file.is_none()));
+}

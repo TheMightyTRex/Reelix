@@ -45,10 +45,10 @@ RUN set -eu; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
 
-COPY bin/${TARGETARCH}/reelix /app/reelix
+# --chmod on COPY, not a later RUN chmod, which would store a second copy of the binary in a new layer.
+COPY --chmod=0755 bin/${TARGETARCH}/reelix /app/reelix
 COPY web /app/web
-COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod 0755 /app/entrypoint.sh /app/reelix
+COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh
 
 LABEL org.opencontainers.image.title="Reelix" \
       org.opencontainers.image.version="${VERSION}" \

@@ -210,6 +210,17 @@ pub async fn by_download(db: &Db, client_id: i64, download_id: &str) -> Result<O
     Ok(row.map(Into::into))
 }
 
+/// The download ids already tracked for one client, in any state: one read for a whole poll instead of
+/// one [`by_download`] per item in the client.
+pub async fn download_ids_of(db: &Db, client_id: i64) -> Result<std::collections::HashSet<String>> {
+    let ids: Vec<String> =
+        sqlx::query_scalar("SELECT download_id FROM tracked_downloads WHERE download_client_id = ?")
+            .bind(client_id)
+            .fetch_all(db.pool())
+            .await?;
+    Ok(ids.into_iter().collect())
+}
+
 /// Downloads still in the queue (see [`TrackedState::is_active`]), oldest first.
 pub async fn active(db: &Db) -> Result<Vec<TrackedDownload>> {
     let rows: Vec<Row> = sqlx::query_as(&format!(

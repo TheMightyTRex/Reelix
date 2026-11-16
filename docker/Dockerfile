@@ -13,6 +13,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ---- Server binary -----------------------------------------------------------
 FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
+# The workspace patches hyper-proxy2 from vendor/, which cargo needs before cooking the dependencies.
+COPY vendor vendor
 RUN cargo chef cook --release --locked --recipe-path recipe.json --package reelix-server
 COPY . .
 RUN cargo build --release --locked --package reelix-server --bin reelix \
@@ -23,6 +25,8 @@ FROM chef AS web
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install --locked trunk
 COPY --from=planner /src/recipe.json recipe.json
+# The workspace patches hyper-proxy2 from vendor/, which cargo needs before cooking the dependencies.
+COPY vendor vendor
 RUN cargo chef cook --release --locked --recipe-path recipe.json \
     --target wasm32-unknown-unknown --package reelix-web
 COPY . .
@@ -73,10 +77,10 @@ RUN set -eu; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /reelix /app/reelix
+# --chmod on COPY, not a later RUN chmod, which would store a second copy of the binary in a new layer.
+COPY --from=builder --chmod=0755 /reelix /app/reelix
 COPY --from=web /src/crates/reelix-web/dist /app/web
-COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod 0755 /app/entrypoint.sh /app/reelix
+COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh
 
 # Two glibc malloc arenas instead of one per thread: about a third less memory, no measurable cost.
 ENV REELIX_DATA_DIR=/config \
