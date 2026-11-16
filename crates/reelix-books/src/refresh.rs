@@ -152,7 +152,7 @@ impl BooksService {
         Ok(failed)
     }
 
-    async fn refresh_author(&self, a: &mut AuthorDto, manual: bool) -> Result<usize> {
+    pub(crate) async fn refresh_author(&self, a: &mut AuthorDto, manual: bool) -> Result<usize> {
         let meta = self.metadata.author(&a.openlibrary_id).await?;
         let works = self.metadata.author_works(&a.openlibrary_id).await?;
         apply_author(a, &meta);

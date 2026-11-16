@@ -149,6 +149,55 @@ impl MusicService {
         self.get_artist(id).await
     }
 
+    /// Matches a custom artist to a MusicBrainz artist ("match now"): MusicBrainz's details and
+    /// albums replace the typed ones, and later refreshes follow MusicBrainz. The folder,
+    /// files, profiles and monitoring stay. The albums made from the folders are removed (the
+    /// files on disk stay) and the artist is scanned, which links the files to MusicBrainz's
+    /// albums. `Conflict` when another artist has that id; `Validation` when MusicBrainz does
+    /// not know it (nothing is changed then).
+    pub async fn match_custom_artist(&self, id: i64, musicbrainz_id: &str) -> Result<ArtistDto> {
+        self.custom_artist(id).await?;
+        let mbid = musicbrainz_id.trim().to_ascii_lowercase();
+        if !is_mbid(&mbid) {
+            return Err(MusicError::Validation(
+                "musicbrainz_id is a MusicBrainz artist id (36 characters, such as a74b1b7f-71a5-4011-9441-d0b5e4122711)"
+                    .into(),
+            ));
+        }
+        if let Some(other) = repo::artists::by_mbid(&self.db, &mbid).await?
+            && other.id != id
+        {
+            return Err(MusicError::Conflict(format!(
+                "artist {mbid} is already in the library ({}, artist {})",
+                other.name, other.id
+            )));
+        }
+        // Checked before anything changes.
+        self.metadata.artist(&mbid).await.map_err(|e| match e {
+            reelix_metadata::MetaError::NotFound => {
+                MusicError::Validation(format!("MusicBrainz has no artist with id {mbid}"))
+            }
+            e => e.into(),
+        })?;
+        sqlx::query("UPDATE artists SET musicbrainz_id = ?, custom = 0 WHERE id = ?")
+            .bind(&mbid)
+            .bind(id)
+            .execute(self.db.pool())
+            .await?;
+        sqlx::query(
+            "DELETE FROM albums WHERE artist_id = ? AND musicbrainz_release_group_id LIKE 'custom:%'",
+        )
+        .bind(id)
+        .execute(self.db.pool())
+        .await?;
+        tracing::info!(id, musicbrainz_id = %mbid, "custom artist matched");
+        self.refresh_artist(id, false).await?;
+        if let Err(e) = self.scan_artists(&[id]).await {
+            tracing::warn!(artist_id = id, error = %e, "scan after match failed");
+        }
+        self.get_artist(id).await
+    }
+
     /// Sets (or removes) the picture of a custom artist.
     pub async fn set_custom_artist_picture(&self, id: i64, poster: Option<String>) -> Result<()> {
         let mut a = self.custom_artist(id).await?;
@@ -189,5 +238,26 @@ impl MusicService {
         repo::albums::mark_synced(&self.db, id).await?;
         self.emit("album", "created", id);
         Ok(Some(repo::albums::require(&self.db, id).await?))
+    }
+}
+
+/// A MusicBrainz id: 36 characters, hexadecimal digits in groups of 8, 4, 4, 4 and 12.
+fn is_mbid(s: &str) -> bool {
+    let groups: Vec<&str> = s.split('-').collect();
+    groups.len() == 5
+        && groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+        && groups.iter().all(|g| g.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn musicbrainz_ids() {
+        assert!(is_mbid("a74b1b7f-71a5-4011-9441-d0b5e4122711"));
+        assert!(!is_mbid("custom:4"));
+        assert!(!is_mbid("a74b1b7f71a540119441d0b5e4122711"));
+        assert!(!is_mbid("a74b1b7f-71a5-4011-9441-d0b5e412271g"));
     }
 }
