@@ -402,10 +402,13 @@ impl ActivityService {
             if h.client.protocol() == Protocol::Soulseek {
                 continue;
             }
-            for item in items.iter().filter(|i| adoptable(i, now_secs)) {
-                if tracked::by_download(&self.db, h.id, &item.download_id.0)
-                    .await?
-                    .is_none()
+            let mut adoptable_items = items.iter().filter(|i| adoptable(i, now_secs)).peekable();
+            if adoptable_items.peek().is_none() {
+                continue;
+            }
+            let known = tracked::download_ids_of(&self.db, h.id).await?;
+            for item in adoptable_items {
+                if !known.contains(&item.download_id.0)
                     && let Err(e) = self.track_unknown(h, item).await
                 {
                     tracing::warn!(title = %item.title, error = %e, "could not track download");
