@@ -117,9 +117,13 @@ impl MusicService {
         Ok(())
     }
 
-    /// Refreshes one artist; `force_releases` re-fetches the tracklists of monitored albums.
+    /// Refreshes one artist; `force_releases` re-fetches the tracklists of monitored albums. A
+    /// custom artist is left as it is.
     pub(crate) async fn refresh_artist(&self, id: i64, force_releases: bool) -> Result<()> {
         let artist = repo::artists::require(&self.db, id).await?;
+        if artist.custom {
+            return Ok(()); // typed details, no MusicBrainz artist; albums come from the scan
+        }
         let meta = self.metadata.artist(&artist.musicbrainz_id).await?;
         repo::artists::update_fields(&self.db, id, &artist_fields(&meta)).await?;
         let artist = repo::artists::require(&self.db, id).await?;

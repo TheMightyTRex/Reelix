@@ -72,7 +72,7 @@ impl Modules {
                 std::sync::Arc::new(reelix_metadata::OpenData::new(
                     deps.http.clone(),
                     reelix_metadata::OpenDataOptions {
-                        language: providers.metadata_config().language,
+                        language: providers.metadata_config().primary_language(),
                         ..Default::default()
                     },
                 ));
@@ -122,7 +122,8 @@ impl Modules {
             http: deps.http.clone(),
             providers: {
                 use reelix_radio::providers::{
-                    AppleProvider, ArchiveProvider, BbcProvider, PodcastIndexProvider, RssProvider,
+                    AppleProvider, ArchiveProvider, BbcProvider, GlobalPlayerProvider, MixcloudProvider,
+                    NtsProvider, PodcastIndexProvider, RssProvider,
                 };
                 use std::sync::Arc;
                 // Feeds read for Discover and requests reach public addresses only.
@@ -134,6 +135,10 @@ impl Modules {
                     ))
                     .with(Arc::new(PodcastIndexProvider::new(deps.http.clone())))
                     .with(Arc::new(ArchiveProvider::new(deps.http.clone())))
+                    // RFX-97 to 99: off until switched on in the radio settings; audio through catch-up only.
+                    .with(Arc::new(GlobalPlayerProvider::new(deps.http.clone())))
+                    .with(Arc::new(NtsProvider::new(deps.http.clone())))
+                    .with(Arc::new(MixcloudProvider::new(deps.http.clone())))
                     .with(Arc::new(
                         RssProvider::new(deps.http.clone()).with_public_client(public_http),
                     ))
@@ -269,6 +274,7 @@ impl Modules {
         search.set_radio(radio.clone());
         activity.set_radio(radio.clone());
         integrations.set_music(music.clone());
+        integrations.set_books(books.clone());
         // maintenance: backups, logs, update checks, server settings
         let maintenance =
             crate::maintenance::MaintenanceService::new(deps.db.clone(), deps.http.clone(), &deps.config)
@@ -334,7 +340,7 @@ impl Modules {
         builder = crate::integrations::register(builder, &self.integrations);
         // pipeline search (search, rss_sync, process_pending)
         builder = reelix_pipeline::search::jobs::register(builder, &self.search);
-        // pipeline activity (download_monitor, process_download, manual_import, prune_finished)
+        // pipeline activity (download_monitor, process_download, manual_import, prune_finished, prune_history)
         builder = reelix_pipeline::monitor::jobs::register(builder, &self.activity);
         // maintenance (backup, update_check)
         builder = crate::maintenance::MaintenanceService::register(builder, &self.maintenance);

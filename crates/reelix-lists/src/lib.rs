@@ -1,14 +1,18 @@
 //! Import list adapters: TMDB, Trakt, IMDb, MDBList, Plex watchlist, Jellyfin/Emby favourites,
 //! generic JSON URL lists and other Reelix instances (movies/series), plus Last.fm, ListenBrainz
 //! and Spotify (music: artists and albums, see [`ListContent::Music`] and
-//! [`ImportList::fetch_music`]).
+//! [`ImportList::fetch_music`]), and Goodreads, Hardcover and book exports (books, see
+//! [`ListContent::Books`] and [`ImportList::fetch_books`]).
 //!
 //! Every adapter implements [`ImportList`], publishes a [`ProviderSchema`] via [`schemas`] and is
 //! constructed from a validated settings object via [`build`]. Upstream base URLs default to the
 //! real services ([`BaseUrls`]) and can be overridden per instance (`base_url` setting) or globally
 //! through [`BuildContext`], which is how the tests point adapters at wiremock.
 
+pub mod book_export;
 mod common;
+pub mod goodreads;
+pub mod hardcover;
 pub mod imdb;
 pub mod jellyfin;
 pub mod lastfm;
@@ -71,6 +75,7 @@ pub enum ListContent {
     #[default]
     Video,
     Music,
+    Books,
 }
 
 impl ListContent {
@@ -78,6 +83,7 @@ impl ListContent {
         match self {
             Self::Video => "video",
             Self::Music => "music",
+            Self::Books => "books",
         }
     }
 }
@@ -86,8 +92,74 @@ impl ListContent {
 pub fn content_of(implementation: &str) -> ListContent {
     match implementation {
         lastfm::IMPLEMENTATION | listenbrainz::IMPLEMENTATION | spotify::IMPLEMENTATION => ListContent::Music,
+        goodreads::IMPLEMENTATION | hardcover::IMPLEMENTATION | book_export::IMPLEMENTATION => {
+            ListContent::Books
+        }
         _ => ListContent::Video,
     }
+}
+
+/// One entry of a book import list (RFX-88). The sync looks a book up by ISBN first, then by
+/// title and author.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BookListItem {
+    pub title: String,
+    pub authors: Vec<String>,
+    /// ISBN-13 or ISBN-10, digits (and a final `X`) only.
+    pub isbn: Option<String>,
+    pub asin: Option<String>,
+    pub year: Option<i32>,
+    /// The entry's id at the source (`goodreads:123`, `hardcover:456`, `export:<isbn or title>`),
+    /// so a list adds each entry once.
+    pub source_id: String,
+}
+
+impl BookListItem {
+    /// Human-readable label for logs (`Title by Author`).
+    pub fn label(&self) -> String {
+        match self.authors.first() {
+            Some(a) => format!("{} by {a}", self.title),
+            None => self.title.clone(),
+        }
+    }
+}
+
+/// Digits of an ISBN-10 or ISBN-13 (`="0439023483"` and `978-0-…` forms accepted), else `None`.
+pub fn clean_isbn(s: &str) -> Option<String> {
+    let out: String = s
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == 'X' || *c == 'x')
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    let ok = match out.len() {
+        13 => out.chars().all(|c| c.is_ascii_digit()),
+        10 => out[..9].chars().all(|c| c.is_ascii_digit()),
+        _ => false,
+    };
+    ok.then_some(out)
+}
+
+/// Removes duplicate book entries (same source id, ISBN or lower-cased title and first author).
+pub fn dedupe_books(items: Vec<BookListItem>) -> Vec<BookListItem> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::with_capacity(items.len());
+    for i in items {
+        let mut keys = vec![format!("src:{}", i.source_id)];
+        if let Some(isbn) = &i.isbn {
+            keys.push(format!("isbn:{isbn}"));
+        }
+        keys.push(format!(
+            "title:{}:{}",
+            i.title.to_lowercase(),
+            i.authors.first().map(|a| a.to_lowercase()).unwrap_or_default()
+        ));
+        if keys.iter().any(|k| seen.contains(k)) {
+            continue;
+        }
+        seen.extend(keys);
+        out.push(i);
+    }
+    out
 }
 
 /// Whether a music list entry is an artist or an album (release group).
@@ -226,6 +298,11 @@ pub trait ImportList: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Fetches a book list's entries, de-duplicated (empty for other lists).
+    async fn fetch_books(&self) -> Result<Vec<BookListItem>, ListError> {
+        Ok(Vec::new())
+    }
+
     /// Verifies credentials and that the list exists.
     async fn test(&self) -> Result<(), ListError> {
         self.fetch().await.map(|_| ())
@@ -249,6 +326,9 @@ pub struct BaseUrls {
     pub spotify_api: String,
     /// Spotify accounts service (`/api/token`).
     pub spotify_accounts: String,
+    pub goodreads: String,
+    /// Hardcover GraphQL endpoint.
+    pub hardcover: String,
 }
 
 impl Default for BaseUrls {
@@ -263,6 +343,8 @@ impl Default for BaseUrls {
             listenbrainz: "https://api.listenbrainz.org".into(),
             spotify_api: "https://api.spotify.com".into(),
             spotify_accounts: "https://accounts.spotify.com".into(),
+            goodreads: "https://www.goodreads.com".into(),
+            hardcover: "https://api.hardcover.app/v1/graphql".into(),
         }
     }
 }
@@ -295,7 +377,9 @@ impl BuildContext {
             lastfm: b.clone(),
             listenbrainz: b.clone(),
             spotify_api: b.clone(),
-            spotify_accounts: b,
+            spotify_accounts: b.clone(),
+            goodreads: b.clone(),
+            hardcover: format!("{b}/v1/graphql"),
         };
         self
     }
@@ -316,6 +400,9 @@ pub fn schemas() -> Vec<ProviderSchema> {
         lastfm::schema(),
         listenbrainz::schema(),
         spotify::schema(),
+        goodreads::schema(),
+        hardcover::schema(),
+        book_export::schema(),
     ]
 }
 
@@ -348,6 +435,9 @@ pub fn build(
             Box::new(listenbrainz::ListenBrainzList::from_settings(settings, ctx)?)
         }
         spotify::IMPLEMENTATION => Box::new(spotify::SpotifyList::from_settings(settings, ctx)?),
+        goodreads::IMPLEMENTATION => Box::new(goodreads::GoodreadsShelf::from_settings(settings, ctx)?),
+        hardcover::IMPLEMENTATION => Box::new(hardcover::HardcoverList::from_settings(settings, ctx)?),
+        book_export::IMPLEMENTATION => Box::new(book_export::BookExport::from_settings(settings, ctx)?),
         other => return Err(ListError::UnknownImplementation(other.into())),
     })
 }
@@ -401,7 +491,13 @@ mod tests {
     #[test]
     fn every_schema_has_sync_interval_and_builds_unknown_fails() {
         let all = schemas();
-        assert_eq!(all.len(), 12);
+        assert_eq!(all.len(), 15);
+        let books: Vec<_> = all
+            .iter()
+            .filter(|s| content_of(&s.implementation) == ListContent::Books)
+            .map(|s| s.implementation.as_str())
+            .collect();
+        assert_eq!(books, ["goodreads", "hardcover", "book_export"]);
         let music: Vec<_> = all
             .iter()
             .filter(|s| content_of(&s.implementation) == ListContent::Music)
@@ -457,6 +553,44 @@ mod tests {
         let e = ListItem::new(MediaKind::Movie, "X");
         let out = dedupe(vec![a.clone(), b, c.clone(), d.clone(), e.clone(), e.clone()]);
         assert_eq!(out, vec![a, c, d, e]);
+    }
+
+    #[test]
+    fn isbns_and_book_dedupe() {
+        assert_eq!(clean_isbn("=\"0439023483\"").as_deref(), Some("0439023483"));
+        assert_eq!(clean_isbn("978-0-7653-1688-2").as_deref(), Some("9780765316882"));
+        assert_eq!(clean_isbn("080442957x").as_deref(), Some("080442957X"));
+        assert_eq!(clean_isbn("=\"\""), None);
+        assert_eq!(clean_isbn("12345"), None);
+        let a = BookListItem {
+            title: "Dune".into(),
+            authors: vec!["Frank Herbert".into()],
+            isbn: Some("9780441013593".into()),
+            source_id: "goodreads:1".into(),
+            ..BookListItem::default()
+        };
+        let same_isbn = BookListItem {
+            source_id: "goodreads:2".into(),
+            title: "Dune (Deluxe)".into(),
+            ..a.clone()
+        };
+        let same_title = BookListItem {
+            isbn: None,
+            source_id: "goodreads:3".into(),
+            title: "DUNE".into(),
+            ..a.clone()
+        };
+        let other = BookListItem {
+            title: "Emma".into(),
+            authors: vec!["Jane Austen".into()],
+            isbn: None,
+            source_id: "goodreads:4".into(),
+            ..BookListItem::default()
+        };
+        assert_eq!(
+            dedupe_books(vec![a.clone(), same_isbn, same_title, other.clone()]),
+            vec![a, other]
+        );
     }
 
     #[test]

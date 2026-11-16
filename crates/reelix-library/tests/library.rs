@@ -170,10 +170,23 @@ struct FakeMeta {
     collections: Mutex<HashMap<u32, CollectionMetadata>>,
     /// Answer a TMDB id it does not have with `Unsupported`, as open data does, not `NotFound`.
     open_data: std::sync::atomic::AtomicBool,
+    /// Episode groups in aired order, by TMDB id.
+    groups: Mutex<HashMap<u32, EpisodeGroup>>,
+    /// Fail every episode group request.
+    groups_fail: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl MetadataSource for FakeMeta {
+    async fn episode_order(&self, id: u32) -> Result<Option<EpisodeGroup>, MetaError> {
+        if self.groups_fail.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(MetaError::Status {
+                status: 500,
+                message: "down".into(),
+            });
+        }
+        Ok(self.groups.lock().unwrap().get(&id).cloned())
+    }
     async fn movie(&self, id: u32) -> Result<MovieMetadata, MetaError> {
         self.movies
             .lock()
@@ -467,6 +480,34 @@ async fn small_files_already_in_the_library_are_not_samples() {
     assert_eq!(r.added, 1, "{r:?}");
     let m2 = e.svc.get_movie(m.id).await.unwrap();
     assert!(m2.movie_file.unwrap().file.path.ends_with("SDTV.wmv"));
+}
+
+#[tokio::test]
+async fn a_film_kept_as_a_disc_image_is_its_file_with_the_br_disk_quality() {
+    // A Blu-ray copy migrated from Radarr (`Name (Year) BR-DISK.iso`) and a disc image with no
+    // quality in its name are both the film's file, as BR-DISK, without media details.
+    let e = env().await;
+    let m = e.svc.add_movie(add_movie_req(&e, 603)).await.unwrap();
+    let folder = Path::new(&m.path);
+    write(&folder.join("The Matrix (1999) BR-DISK.iso"), 40);
+    write(&folder.join("Featurettes").join("Making of.iso"), 60);
+    let r = e.svc.scan_movie(m.id).await.unwrap();
+    assert_eq!(r.added, 1, "{r:?}");
+    let m2 = e.svc.get_movie(m.id).await.unwrap();
+    assert!(m2.has_file);
+    let f = m2.movie_file.as_ref().unwrap();
+    assert!(f.file.path.ends_with("BR-DISK.iso"), "{}", f.file.path);
+    assert_eq!(f.file.quality_name, "BR-DISK");
+    // Never probed, so a rescan leaves it alone instead of waiting for media details.
+    let r = e.svc.scan_movie(m.id).await.unwrap();
+    assert_eq!((r.added, r.updated, r.removed), (0, 0, 0), "{r:?}");
+
+    let reloaded = e.svc.add_movie(add_movie_req(&e, 604)).await.unwrap();
+    let folder = Path::new(&reloaded.path);
+    write(&folder.join("The Matrix Reloaded (2003).img"), 30);
+    e.svc.scan_movie(reloaded.id).await.unwrap();
+    let r2 = e.svc.get_movie(reloaded.id).await.unwrap();
+    assert_eq!(r2.movie_file.unwrap().file.quality_name, "BR-DISK");
 }
 
 #[tokio::test]
@@ -1107,4 +1148,354 @@ async fn library_import_many_series_then_scan_links_episodes() {
         let s = e.svc.get_series(*id).await.unwrap();
         assert_eq!(s.statistics.episode_file_count, 2, "{}", s.title);
     }
+}
+
+fn typed(title: &str) -> reelix_api_types::custom::CustomDetails {
+    reelix_api_types::custom::CustomDetails {
+        title: title.into(),
+        year: Some(2004),
+        overview: Some("Typed.".into()),
+    }
+}
+
+#[tokio::test]
+async fn a_custom_film_is_matched_to_tmdb_keeping_its_folder() {
+    let e = env().await;
+    let folder = e.movies_root.path().join("Matrix rip");
+    write(&folder.join("matrix.mkv"), 800);
+    let m = e
+        .svc
+        .add_custom_movie(
+            &typed("Matrix rip"),
+            e.movie_root_id,
+            folder.to_str().unwrap(),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    e.svc
+        .set_custom_movie_poster(
+            m.id,
+            Some(format!("/api/v1/customitems/movie/{}/image?v=1", m.id)),
+        )
+        .await
+        .unwrap();
+    // An id TMDB does not know, and one another film has, change nothing.
+    assert!(matches!(
+        e.svc.match_custom_movie(m.id, 999).await,
+        Err(LibraryError::Validation(_))
+    ));
+    let other = e.svc.add_movie(add_movie_req(&e, 604)).await.unwrap();
+    assert!(matches!(
+        e.svc.match_custom_movie(m.id, 604).await,
+        Err(LibraryError::Conflict(_))
+    ));
+    assert!(e.svc.get_movie(m.id).await.unwrap().custom);
+
+    let matched = e.svc.match_custom_movie(m.id, 603).await.unwrap();
+    assert_eq!(matched.id, m.id);
+    assert!(!matched.custom);
+    assert_eq!(matched.tmdb_id, 603);
+    assert_eq!(matched.title, "The Matrix");
+    assert_eq!(matched.year, Some(1999));
+    assert_eq!(matched.path, folder.to_str().unwrap());
+    assert!(matched.monitored);
+    assert!(matched.images.poster.is_none(), "{:?}", matched.images);
+    assert!(matched.collection.is_some());
+    assert!(folder.join("matrix.mkv").exists());
+    // Refreshes now follow TMDB, and the film can no longer be changed as a custom one.
+    e.svc.refresh_movie(m.id).await.unwrap();
+    assert_eq!(e.svc.get_movie(m.id).await.unwrap().title, "The Matrix");
+    assert!(matches!(
+        e.svc.match_custom_movie(m.id, 603).await,
+        Err(LibraryError::Validation(_))
+    ));
+    assert!(matches!(
+        e.svc.match_custom_movie(other.id, 603).await,
+        Err(LibraryError::Validation(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_custom_series_is_matched_to_tmdb_and_its_files_linked() {
+    let e = env().await;
+    let folder = e.tv_root.path().join("Show rips");
+    write(&folder.join("Season 01/Show S01E02.mkv"), 400);
+    write(&folder.join("Season 07/Show S07E01.mkv"), 400);
+    let s = e
+        .svc
+        .add_custom_series(
+            &typed("Show rips"),
+            e.tv_root_id,
+            folder.to_str().unwrap(),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    e.svc.scan_series(s.id).await.unwrap();
+    assert_eq!(e.svc.episodes(s.id, None).await.unwrap().len(), 2);
+    assert!(matches!(
+        e.svc.match_custom_series(s.id, None, None).await,
+        Err(LibraryError::Validation(_))
+    ));
+    assert!(matches!(
+        e.svc.match_custom_series(s.id, Some(5), None).await,
+        Err(LibraryError::Validation(_))
+    ));
+
+    // By TVDB id: the source finds TMDB's entry through it.
+    let matched = e.svc.match_custom_series(s.id, None, Some(2399)).await.unwrap();
+    assert!(!matched.custom);
+    assert_eq!((matched.tmdb_id, matched.tvdb_id), (Some(1399), Some(2399)));
+    assert_eq!(matched.title, "The Show");
+    assert_eq!(matched.path, folder.to_str().unwrap());
+    e.svc.scan_series(s.id).await.unwrap();
+    let eps = e.svc.episodes(s.id, None).await.unwrap();
+    let ep = |season, n| {
+        eps.iter()
+            .find(|x| x.season_number == season && x.episode_number == n)
+            .cloned()
+    };
+    // TMDB's episodes, the file linked; the episode made from a file TMDB lacks keeps its file.
+    assert_eq!(ep(1, 2).unwrap().title.as_deref(), Some("Episode 2"));
+    assert!(ep(1, 2).unwrap().has_file);
+    assert!(ep(2, 1).is_some());
+    assert!(ep(7, 1).unwrap().has_file);
+
+    // Another custom series cannot take the same TMDB entry.
+    let other = e.tv_root.path().join("Other");
+    std::fs::create_dir_all(&other).unwrap();
+    let o = e
+        .svc
+        .add_custom_series(
+            &typed("Other"),
+            e.tv_root_id,
+            other.to_str().unwrap(),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        e.svc.match_custom_series(o.id, Some(1399), None).await,
+        Err(LibraryError::Conflict(_))
+    ));
+}
+
+/// An aired order with season 1 as three episodes, where TMDB has two in season 1 and the third
+/// as season 2's first.
+fn aired_group() -> EpisodeGroup {
+    let ep = |season_number, episode_number, order| EpisodeGroupEpisode {
+        season_number,
+        episode_number,
+        order,
+    };
+    EpisodeGroup {
+        id: "5b1f0c0e0e0a2b7d4f00a001".into(),
+        name: "Aired Order".into(),
+        kind: 1,
+        groups: vec![
+            EpisodeGroupSeason {
+                name: "Season 1".into(),
+                order: 1,
+                episodes: vec![ep(1, 1, 0), ep(1, 2, 1), ep(2, 1, 2)],
+            },
+            EpisodeGroupSeason {
+                name: "Season 2".into(),
+                order: 2,
+                episodes: vec![ep(2, 2, 0)],
+            },
+        ],
+    }
+}
+
+#[tokio::test]
+async fn the_aired_order_map_is_kept_with_the_series_and_used_by_the_scan() {
+    let e = env().await;
+    e.meta.groups.lock().unwrap().insert(1399, aired_group());
+    let s = e.svc.add_series(add_series_req(&e, 1399, 2399)).await.unwrap();
+    let map = e
+        .svc
+        .importer()
+        .series_target(s.id)
+        .await
+        .unwrap()
+        .episode_map
+        .unwrap();
+    assert_eq!(map.group_name, "Aired Order");
+    assert_eq!(map.tmdb_for(1, 3), Some((2, 1)));
+    assert_eq!(map.tmdb_for(2, 1), Some((2, 2)));
+
+    // A file named with the aired numbers TMDB lacks (S01E03) goes to TMDB's S02E01.
+    let root = Path::new(&s.path);
+    write(
+        &root.join("Season 01/The.Show.S01E03.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    // TMDB's own numbers still come first for numbers it has.
+    write(
+        &root.join("Season 01/The.Show.S01E01.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    let r = e.svc.scan_series(s.id).await.unwrap();
+    assert_eq!((r.added, r.unmatched.len()), (2, 0), "{r:?}");
+    let eps = e.svc.episodes(s.id, None).await.unwrap();
+    let has = |season, n| {
+        eps.iter()
+            .find(|x| x.season_number == season && x.episode_number == n)
+            .unwrap()
+            .has_file
+    };
+    assert!(has(1, 1) && has(2, 1));
+    assert!(!has(1, 2) && !has(2, 2));
+
+    // A failed request keeps the old map; a series without the group loses it.
+    e.meta
+        .groups_fail
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    e.svc.refresh_series(s.id).await.unwrap();
+    assert!(
+        e.svc
+            .importer()
+            .series_target(s.id)
+            .await
+            .unwrap()
+            .episode_map
+            .is_some()
+    );
+    e.meta
+        .groups_fail
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    e.meta.groups.lock().unwrap().clear();
+    e.svc.refresh_series(s.id).await.unwrap();
+    assert!(
+        e.svc
+            .importer()
+            .series_target(s.id)
+            .await
+            .unwrap()
+            .episode_map
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn an_aired_order_with_tmdb_numbers_is_not_kept() {
+    let e = env().await;
+    let mut g = aired_group();
+    g.groups = vec![EpisodeGroupSeason {
+        name: "Season 1".into(),
+        order: 1,
+        episodes: vec![EpisodeGroupEpisode {
+            season_number: 1,
+            episode_number: 1,
+            order: 0,
+        }],
+    }];
+    e.meta.groups.lock().unwrap().insert(1399, g);
+    let s = e.svc.add_series(add_series_req(&e, 1399, 2399)).await.unwrap();
+    assert!(
+        e.svc
+            .importer()
+            .series_target(s.id)
+            .await
+            .unwrap()
+            .episode_map
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_keeps_unchanged_episodes_and_writes_changed_ones() {
+    let e = env().await;
+    e.meta.series.lock().unwrap().insert(
+        7400,
+        show(
+            7400,
+            vec![season(
+                1,
+                vec![episode(1, 1, "2020-01-01"), episode(1, 2, "2020-01-08")],
+            )],
+        ),
+    );
+    let added = e.svc.add_series(add_series_req(&e, 7400, 8400)).await.unwrap();
+    let first = e.svc.episodes(added.id, None).await.unwrap();
+    // Nothing changed at the source: the same episodes, ids and details.
+    e.svc.refresh_series(added.id).await.unwrap();
+    let again = e.svc.episodes(added.id, None).await.unwrap();
+    assert_eq!(format!("{first:?}"), format!("{again:?}"));
+    // One episode renamed and a new one: only those change.
+    {
+        let mut map = e.meta.series.lock().unwrap();
+        let s = map.get_mut(&7400).unwrap();
+        s.seasons[0].episodes[1].title = Some("Renamed".into());
+        s.seasons[0].episodes.push(episode(1, 3, "2020-01-15"));
+    }
+    e.svc.refresh_series(added.id).await.unwrap();
+    let after = e.svc.episodes(added.id, None).await.unwrap();
+    assert_eq!(after.len(), 3);
+    assert_eq!(after[0].id, first[0].id);
+    assert_eq!(after[0].title.as_deref(), Some("Episode 1"));
+    assert_eq!(after[1].id, first[1].id);
+    assert_eq!(after[1].title.as_deref(), Some("Renamed"));
+    assert_eq!(after[2].title.as_deref(), Some("Episode 3"));
+}
+
+#[tokio::test]
+async fn episodes_of_many_matches_one_series_at_a_time() {
+    let e = env().await;
+    let mut all = Vec::new();
+    for id in [7500u32, 7501] {
+        e.meta.series.lock().unwrap().insert(
+            id,
+            show(
+                id,
+                vec![
+                    season(1, vec![episode(1, 1, "2020-01-01"), episode(1, 2, "2020-01-08")]),
+                    season(2, vec![episode(2, 1, "2021-01-01"), episode(2, 2, "2021-01-08")]),
+                ],
+            ),
+        );
+        all.push(e.svc.add_series(add_series_req(&e, id, id + 1000)).await.unwrap());
+    }
+    // Files in the first series only, one of them a double episode.
+    let root = Path::new(&all[0].path);
+    write(
+        &root.join("Season 01/The.Show.S01E01.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    write(
+        &root.join("Season 02/The.Show.S02E01E02.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv"),
+        900,
+    );
+    e.svc.scan_series(all[0].id).await.unwrap();
+    let all: Vec<_> = {
+        let mut v = Vec::new();
+        for s in &all {
+            v.push(e.svc.get_series(s.id).await.unwrap());
+        }
+        v
+    };
+    let api = e.svc.search_api();
+    let many = api.episodes_of_many(&all).await.unwrap();
+    assert_eq!(many.len(), 2);
+    for s in &all {
+        let one = api.episodes_of(s, None).await.unwrap();
+        assert_eq!(
+            format!("{one:?}"),
+            format!("{:?}", many[&s.id]),
+            "series {}",
+            s.id
+        );
+    }
+    assert_eq!(
+        many[&all[0].id]
+            .iter()
+            .filter(|x| x.episode_file.is_some())
+            .count(),
+        3
+    );
+    assert!(many[&all[1].id].iter().all(|x| x.episode_file.is_none()));
 }

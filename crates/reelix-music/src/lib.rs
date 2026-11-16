@@ -11,6 +11,7 @@ mod albums;
 mod artists;
 mod availability;
 mod convert;
+mod custom;
 mod error;
 pub mod import_api;
 pub mod jobs;

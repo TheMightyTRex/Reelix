@@ -203,7 +203,10 @@ fn bbc_lists_stations_and_every_category_in_groups() {
         "station-bbc_radio_four_extra",
         "Popular on Radio 4 Extra"
     )));
-    let categories: Vec<&DiscoverList> = lists.iter().filter(|l| l.category).collect();
+    let categories: Vec<&DiscoverList> = lists
+        .iter()
+        .filter(|l| l.category && !l.id.starts_with("network-"))
+        .collect();
     assert_eq!(categories.len(), 32);
     assert!(categories.iter().all(|c| c.group.is_some()));
     // BBC Sounds has no science fiction category of its own: it is a drama sub-genre.
@@ -216,6 +219,58 @@ fn bbc_lists_stations_and_every_category_in_groups() {
     let mut groups: Vec<&str> = categories.iter().filter_map(|c| c.group.as_deref()).collect();
     groups.dedup();
     assert_eq!(groups, ["Comedy", "Drama", "Factual", "Sport and music"]);
+}
+
+#[test]
+fn bbc_lists_every_station_by_group() {
+    // RFX-94: all 66 networks BBC Sounds lists, national, the nations and local, each a category of its own.
+    let lists = BbcProvider::new(reqwest::Client::new()).discover_lists();
+    let networks: Vec<&DiscoverList> = lists.iter().filter(|l| l.id.starts_with("network-")).collect();
+    assert_eq!(networks.len(), 66);
+    assert!(networks.iter().all(|n| n.category));
+    let mut groups: Vec<&str> = networks.iter().filter_map(|c| c.group.as_deref()).collect();
+    groups.dedup();
+    assert_eq!(
+        groups,
+        [
+            "BBC stations: national",
+            "BBC stations: nations",
+            "BBC stations: local"
+        ]
+    );
+    assert!(lists.contains(
+        &DiscoverList::category("network-bbc_radio_kent", "BBC Radio Kent").in_group("BBC stations: local")
+    ));
+    assert!(
+        lists.contains(
+            &DiscoverList::category("network-bbc_radio_scotland", "BBC Radio Scotland")
+                .in_group("BBC stations: nations")
+        )
+    );
+}
+
+#[tokio::test]
+async fn bbc_popular_programmes_of_a_local_station() {
+    let s = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/programmes/playable"))
+        .and(query_param("network", "bbc_radio_kent"))
+        .respond_with(json("bbc_popular_station.json"))
+        .mount(&s)
+        .await;
+    let p = BbcProvider::new(reqwest::Client::new())
+        .with_base_urls(&s.uri(), &s.uri())
+        .with_interval(Duration::ZERO);
+    assert!(
+        !p.discover("network-bbc_radio_kent", &gb())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        p.discover("network-bbc_radio_nowhere", &gb()).await,
+        Err(ProviderError::NotFound(_))
+    ));
 }
 
 #[tokio::test]

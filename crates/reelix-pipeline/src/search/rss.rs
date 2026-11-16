@@ -86,13 +86,12 @@ impl SearchService {
             .into_iter()
             .filter(|s| s.monitored)
             .collect();
-        let mut all_eps = HashMap::new();
-        let mut expected: HashMap<i64, Vec<ExpectedEpisode>> = HashMap::new();
-        for s in &series {
-            let eps = api.episodes_of(s, None).await?;
-            expected.insert(s.id, expected_episodes(&eps));
-            all_eps.insert(s.id, eps);
-        }
+        // Every monitored series' episodes in a few reads, not about five reads per series.
+        let mut all_eps = api.episodes_of_many(&series).await?;
+        let expected: HashMap<i64, Vec<ExpectedEpisode>> = all_eps
+            .iter()
+            .map(|(id, eps)| (*id, expected_episodes(eps)))
+            .collect();
         let index = MediaIndex::new(movies, series, expected);
 
         // Group releases by media.
@@ -118,6 +117,7 @@ impl SearchService {
             },
             None => Vec::new(),
         };
+        let mut book_library: Option<Vec<reelix_api_types::books::BookDto>> = None;
         for r in releases {
             if !seen.insert((r.indexer_id, r.guid.clone())) {
                 continue;
@@ -139,7 +139,19 @@ impl SearchService {
                             BookFormat::Ebook
                         };
                         let parsed = reelix_parser::parse_book(&r.title, Some(hint));
-                        match books.search_api().match_release(&parsed).await {
+                        let api = books.search_api();
+                        // The whole book library, read once for this sync's first book release.
+                        if book_library.is_none() {
+                            match api.books_for_matching().await {
+                                Ok(all) => book_library = Some(all),
+                                Err(e) => {
+                                    tracing::warn!(title = %r.title, error = %e, "RSS: book matching failed");
+                                    continue;
+                                }
+                            }
+                        }
+                        let library = book_library.as_deref().unwrap_or_default();
+                        match api.match_release_in(library, &parsed).await {
                             Ok(Some(key)) => books_hit.entry(key).or_default().push(r),
                             Ok(None) => {}
                             Err(e) => {

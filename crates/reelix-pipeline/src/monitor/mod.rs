@@ -9,6 +9,7 @@ mod content;
 pub mod error;
 pub mod jobs;
 pub mod providers;
+mod retention;
 mod stalled;
 pub(crate) mod views;
 
@@ -38,6 +39,7 @@ use reelix_parser::parse;
 
 pub use error::{ActivityError, Result};
 pub use providers::{ActivityProviders, ClientHandle, StaticProviders};
+pub use retention::HISTORY_SETTINGS_KEY;
 pub use stalled::STALLED_SETTINGS_KEY;
 
 use crate::import::{FileImporter, Hint, ImportedItem, Target, transfer_mode};
@@ -56,6 +58,8 @@ pub mod kinds {
     pub const MANUAL_IMPORT: &str = "manual_import";
     /// Daily housekeeping: forget finished tracked downloads older than 30 days.
     pub const PRUNE_FINISHED: &str = "prune_finished";
+    /// Daily: removes history older than the days to keep (Settings, history; 0 keeps everything).
+    pub const PRUNE_HISTORY: &str = "prune_history";
 }
 
 const IDLE_POLL: Duration = Duration::from_secs(120);
@@ -398,10 +402,14 @@ impl ActivityService {
             if h.client.protocol() == Protocol::Soulseek {
                 continue;
             }
-            for item in items.iter().filter(|i| adoptable(i, now_secs)) {
-                if tracked::by_download(&self.db, h.id, &item.download_id.0)
-                    .await?
-                    .is_none()
+            let adoptable_items: Vec<&DownloadItem> =
+                items.iter().filter(|i| adoptable(i, now_secs)).collect();
+            if adoptable_items.is_empty() {
+                continue;
+            }
+            let known = tracked::download_ids_of(&self.db, h.id).await?;
+            for item in adoptable_items {
+                if !known.contains(&item.download_id.0)
                     && let Err(e) = self.track_unknown(h, item).await
                 {
                     tracing::warn!(title = %item.title, error = %e, "could not track download");
@@ -795,8 +803,17 @@ impl ActivityService {
                     .iter()
                     .flat_map(|i| i.target.episode_ids().iter().copied())
                     .collect();
-                let complete = !imported.is_empty()
-                    && (t.series_id.is_none() || t.episode_ids.iter().all(|e| covered.contains(e)));
+                // An episode found by its title stands in for a grab episode named with other
+                // numbering (broadcast or TVDB), one for one.
+                let by_title = imported
+                    .iter()
+                    .filter(|i| i.other_numbering)
+                    .flat_map(|i| i.target.episode_ids().iter().copied())
+                    .filter(|e| !t.episode_ids.contains(e))
+                    .collect::<HashSet<i64>>()
+                    .len();
+                let missing = t.episode_ids.iter().filter(|e| !covered.contains(e)).count();
+                let complete = !imported.is_empty() && (t.series_id.is_none() || missing <= by_title);
                 if complete {
                     self.set_state(&current, TrackedState::Imported, Vec::new())
                         .await?;

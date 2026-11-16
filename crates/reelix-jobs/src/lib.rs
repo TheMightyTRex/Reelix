@@ -337,10 +337,11 @@ async fn run_loop(shared: Arc<Shared>, cancel: CancellationToken) {
     let rotation = AtomicUsize::new(0);
     while !cancel.is_cancelled() {
         dispatch(&shared, &tracker, &cancel, &rotation).await;
+        let wait = next_wait(&shared).await;
         tokio::select! {
             _ = cancel.cancelled() => break,
             _ = shared.queue.inner.notify.notified() => {}
-            _ = tokio::time::sleep(shared.cfg.poll) => {}
+            _ = tokio::time::sleep(wait) => {}
         }
     }
     tracker.close();
@@ -359,6 +360,32 @@ async fn run_loop(shared: Arc<Shared>, cancel: CancellationToken) {
 }
 
 /// Claims and spawns as many jobs as the concurrency limits allow.
+/// The longest the runner sleeps with nothing queued. Every enqueue and every finished job wakes it at once,
+/// so this is only a safety net.
+const IDLE_WAIT_MAX: Duration = Duration::from_secs(30);
+
+/// How long the runner may sleep: until the soonest queued job may run (a retry or a delayed job), never
+/// less than the poll interval (work that is ready but waiting for a free slot is looked at again then,
+/// and a finished job wakes the runner too) and never more than [`IDLE_WAIT_MAX`].
+async fn next_wait(shared: &Shared) -> Duration {
+    let floor = shared.cfg.poll;
+    match shared.queue.inner.db.jobs().next_queued_at().await {
+        Ok(Some(at)) => {
+            let ms = at - now_ms();
+            if ms <= 0 {
+                floor
+            } else {
+                Duration::from_millis(ms as u64).clamp(floor, IDLE_WAIT_MAX.max(floor))
+            }
+        }
+        Ok(None) => IDLE_WAIT_MAX.max(floor),
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to read the next queued job");
+            floor
+        }
+    }
+}
+
 async fn dispatch(
     shared: &Arc<Shared>,
     tracker: &TaskTracker,

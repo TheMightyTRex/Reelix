@@ -70,6 +70,7 @@ const QUIET_JOBS: &[&str] = &[
     "housekeeping",
     "backup",
     "prune_finished",
+    "prune_history",
 ];
 /// Changes that arrive together (a refresh sends one event per item) cause one refetch, this long after
 /// the first.

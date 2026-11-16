@@ -12,6 +12,8 @@ use std::time::Duration;
 use reelix_api_types::library::{ImportMode, MediaManagementSettings};
 use reelix_core::MediaKind;
 use reelix_decision::engine::Scored;
+use reelix_import::episode_map::match_by_episode_map;
+use reelix_import::episode_title::{EpisodeTitle, match_episode_title};
 use reelix_import::files::{
     FileKind, FoundFile, PermissionSettings, SampleRules, ScanOptions, TransferMode, TransferOptions,
     detect_sample, disk_space, extension, scan_async, transfer_with,
@@ -91,6 +93,9 @@ pub struct PlannedFile {
     pub extras: Vec<(PathBuf, String)>,
     /// Scene name stored with the library file.
     pub scene_name: Option<String>,
+    /// The episode was found by the title in the name or by the series' aired-order map, not by
+    /// TMDB's number (other numbering: broadcast or TVDB).
+    pub other_numbering: bool,
 }
 
 impl PlannedFile {
@@ -117,6 +122,8 @@ pub struct ImportedItem {
     pub extras: Vec<PathBuf>,
     pub scene_name: Option<String>,
     pub media_info: Option<MediaInfo>,
+    /// See [`PlannedFile::other_numbering`].
+    pub other_numbering: bool,
 }
 
 /// Resolves the configured import mode for a download.
@@ -267,6 +274,7 @@ impl<'a> FileImporter<'a> {
             rejections,
             extras: Vec::new(),
             scene_name: None,
+            other_numbering: false,
         }
     }
 
@@ -293,7 +301,7 @@ impl<'a> FileImporter<'a> {
             self.map_movie(&mut planned, &mt);
         } else if let Some(series_id) = hint.series_id {
             let st = self.library.importer().series_target(series_id).await?;
-            self.map_series(&mut planned, &st, &hint.episode_ids);
+            self.map_series(&mut planned, &st, hint);
         } else {
             self.map_by_title(&mut planned).await?;
         }
@@ -367,8 +375,26 @@ impl<'a> FileImporter<'a> {
         }
     }
 
-    fn map_series(&self, planned: &mut [PlannedFile], st: &SeriesTarget, hinted: &[i64]) {
+    fn map_series(&self, planned: &mut [PlannedFile], st: &SeriesTarget, hint: &Hint) {
         let expected = st.expected();
+        // Episode ids from the grab that the series no longer has (renumbered since) are no help.
+        let hinted: Vec<i64> = hint
+            .episode_ids
+            .iter()
+            .copied()
+            .filter(|id| st.episodes.iter().any(|e| e.id == *id))
+            .collect();
+        let titles: Vec<EpisodeTitle<'_>> = st
+            .episodes
+            .iter()
+            .filter_map(|e| {
+                Some(EpisodeTitle {
+                    id: e.id,
+                    season: e.season_number,
+                    title: e.title.as_deref()?,
+                })
+            })
+            .collect();
         let runtime = st.series.runtime_minutes;
         let non_samples: Vec<usize> = (0..planned.len())
             .filter(|i| {
@@ -380,20 +406,49 @@ impl<'a> FileImporter<'a> {
             })
             .collect();
         let only_one = non_samples.len() == 1;
+        // Numbers read in aired order (TMDB's episode group, as TVDB and broadcast names use).
+        let by_map = |p: &PlannedFile| -> Option<Vec<i64>> {
+            match_by_episode_map(p.parsed.episode()?, st.episode_map.as_ref()?, &expected)
+        };
+        // When a file's numbers fit only the aired order, every file of the download is read in
+        // that order, so a season pack is not split between the two numberings.
+        let aired_order = st.episode_map.is_some()
+            && non_samples.iter().any(|i| {
+                let p = &planned[*i];
+                match_parsed_episodes(&p.parsed, st.series_type, &expected).is_err() && by_map(p).is_some()
+            });
         // Larger files claim episodes first.
         let mut order = non_samples.clone();
         order.sort_by_key(|i| std::cmp::Reverse(planned[*i].size));
         let mut claimed: HashSet<i64> = HashSet::new();
         for i in order {
             let p = &mut planned[i];
-            let ids = match match_parsed_episodes(&p.parsed, st.series_type, &expected) {
-                Ok(m) if !m.episode_ids.is_empty() => m.episode_ids,
-                Err(_) if only_one && !hinted.is_empty() => hinted.to_vec(),
-                Ok(_) => {
+            let release_title = if only_one {
+                hint.release_title.as_deref()
+            } else {
+                None
+            };
+            let by_title = episode_by_title(p, release_title, &titles);
+            let mapped = if aired_order { by_map(p) } else { None };
+            let numbers = match_parsed_episodes(&p.parsed, st.series_type, &expected);
+            // Order: the title, the grab's episodes (one file the numbers cannot place), the
+            // aired-order map, then TMDB's numbers.
+            let ids = match (by_title, mapped, numbers) {
+                (Some(id), _, _) => {
+                    p.other_numbering = true;
+                    vec![id]
+                }
+                (None, _, Err(_)) if only_one && !hinted.is_empty() => hinted.clone(),
+                (None, Some(ids), _) => {
+                    p.other_numbering = true;
+                    ids
+                }
+                (None, None, Ok(m)) if !m.episode_ids.is_empty() => m.episode_ids,
+                (None, None, Ok(_)) => {
                     p.rejections.push("No episodes matched the file name".into());
                     continue;
                 }
-                Err(e) => {
+                (None, None, Err(e)) => {
                     p.rejections.push(format!("Unable to match episodes: {e}"));
                     continue;
                 }
@@ -456,7 +511,7 @@ impl<'a> FileImporter<'a> {
         for (sid, idxs) in by_series {
             let st = self.library.importer().series_target(sid).await?;
             let mut subset: Vec<PlannedFile> = idxs.iter().map(|i| planned[*i].clone()).collect();
-            self.map_series(&mut subset, &st, &[]);
+            self.map_series(&mut subset, &st, &Hint::default());
             for (i, p) in idxs.into_iter().zip(subset) {
                 planned[i] = p;
             }
@@ -662,8 +717,27 @@ impl<'a> FileImporter<'a> {
             extras,
             scene_name: p.scene_name.clone(),
             media_info: p.media_info.clone(),
+            other_numbering: p.other_numbering,
         })
     }
+}
+
+/// The episode a one-episode file or release names by its title. Broadcast or TVDB numbering can
+/// give that episode another number than TMDB's, so the title is trusted over the number.
+fn episode_by_title(
+    p: &PlannedFile,
+    release_title: Option<&str>,
+    titles: &[EpisodeTitle<'_>],
+) -> Option<i64> {
+    let info = p.parsed.episode()?;
+    if info.episodes.len() > 1 || info.full_season || info.season_range.is_some() {
+        return None;
+    }
+    let file = p.path.file_stem().map(|s| s.to_string_lossy());
+    file.as_deref()
+        .into_iter()
+        .chain(release_title)
+        .find_map(|name| match_episode_title(name, info.season, titles))
 }
 
 fn naming_input<'a>(p: &'a PlannedFile, original: Option<&'a str>, ext: &'a str) -> NamingInput<'a> {

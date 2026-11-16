@@ -12,7 +12,7 @@ use crate::error::{MusicError, Result};
 
 const COLS: &str = "a.id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.artist_type, a.country, \
     a.overview, a.genres, a.images, a.links, a.monitored, a.monitor_new_items, a.quality_profile_id, \
-    a.metadata_profile_id, a.root_folder_id, a.path, a.tags, a.last_refreshed, a.created_at, \
+    a.metadata_profile_id, a.root_folder_id, a.path, a.tags, a.last_refreshed, a.created_at, a.custom, \
     (SELECT COUNT(*) FROM albums al WHERE al.artist_id = a.id) AS s_albums, \
     (SELECT COUNT(*) FROM tracks t JOIN albums al ON al.id = t.album_id \
         WHERE al.artist_id = a.id AND al.monitored = 1 AND t.release_id = al.selected_release_id) AS s_tracks, \
@@ -48,6 +48,7 @@ fn map(r: &SqliteRow) -> Result<ArtistDto> {
         },
         added: from_ms(r.try_get("created_at")?),
         last_refreshed: r.try_get::<Option<i64>, _>("last_refreshed")?.map(from_ms),
+        custom: r.try_get("custom")?,
     })
 }
 
@@ -186,6 +187,8 @@ pub struct NewArtist {
     pub path: String,
     pub tags: Vec<i64>,
     pub added_by_request_id: Option<i64>,
+    /// Added with the owner's own details (`POST /customitems`).
+    pub custom: bool,
 }
 
 pub async fn insert(db: &Db, a: &NewArtist) -> Result<i64> {
@@ -194,8 +197,8 @@ pub async fn insert(db: &Db, a: &NewArtist) -> Result<i64> {
     let res = sqlx::query(
         "INSERT INTO artists (musicbrainz_id, name, sort_name, clean_name, disambiguation, artist_type, country,
             overview, genres, images, links, monitored, monitor_new_items, quality_profile_id, metadata_profile_id,
-            root_folder_id, path, tags, added_by_request_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            root_folder_id, path, tags, added_by_request_id, custom, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&f.musicbrainz_id)
     .bind(&f.name)
@@ -216,6 +219,7 @@ pub async fn insert(db: &Db, a: &NewArtist) -> Result<i64> {
     .bind(&a.path)
     .bind(json(&a.tags))
     .bind(a.added_by_request_id)
+    .bind(a.custom)
     .bind(now)
     .bind(now)
     .execute(db.pool())

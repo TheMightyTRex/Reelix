@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-exclude = ["fuzz"]
+exclude = ["fuzz", "vendor/hyper-proxy2"]
 # The web crate targets wasm32 and is built with Trunk; keep it out of plain `cargo build`.
 default-members = [
     "crates/reelix-core",
@@ -131,3 +131,8 @@ strip = true
 
 [profile.release.package.reelix-web]
 opt-level = "z"
+
+# hyper-proxy2 0.1.0, which librespot-core needs, still uses rustls 0.22. vendor/hyper-proxy2 is the same
+# crate moved to rustls 0.23 (14 November 2026); see the note in its Cargo.toml.
+[patch.crates-io]
+hyper-proxy2 = { path = "vendor/hyper-proxy2" }

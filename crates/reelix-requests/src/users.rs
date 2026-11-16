@@ -156,6 +156,12 @@ pub const PERMISSION_INFO: &[(Permissions, &str, &str, &str)] = &[
         "Auto-approve radio",
         "Radio requests are approved automatically",
     ),
+    (
+        Permissions::VIEW_SYSTEM,
+        "VIEW_SYSTEM",
+        "View system",
+        "Read the logs, jobs, scheduled tasks and backup list, without changing anything",
+    ),
 ];
 
 pub fn roles() -> RolesDto {

@@ -8,6 +8,7 @@
 //! `media_server_availability` (6 h).
 
 pub mod availability;
+pub mod book_lists;
 pub mod bridge;
 pub mod health;
 pub mod lists;
@@ -77,6 +78,8 @@ pub struct IntegrationsService {
     server_timeout: Duration,
     /// Music import lists add artists/albums through the music service.
     music: OnceLock<Arc<dyn MusicLibrary>>,
+    /// Book import lists add books through the books service (RFX-88).
+    books: OnceLock<Arc<dyn book_lists::BookLibrary>>,
 }
 
 impl IntegrationsService {
@@ -97,12 +100,23 @@ impl IntegrationsService {
             health: health::HealthWatch::default(),
             server_timeout: Duration::from_secs(120),
             music: OnceLock::new(),
+            books: OnceLock::new(),
         })
     }
 
     /// Connects the music service (build phase). Later calls are ignored.
     pub fn set_music(&self, music: Arc<reelix_music::MusicService>) {
         let _ = self.music.set(music);
+    }
+
+    /// Connects the books service (build phase). Later calls are ignored.
+    pub fn set_books(&self, books: Arc<reelix_books::BooksService>) {
+        let _ = self.books.set(books);
+    }
+
+    /// Connects any [`book_lists::BookLibrary`] (tests). Later calls are ignored.
+    pub fn set_book_library(&self, books: Arc<dyn book_lists::BookLibrary>) {
+        let _ = self.books.set(books);
     }
 
     /// Connects any [`MusicLibrary`] (tests). Later calls are ignored.

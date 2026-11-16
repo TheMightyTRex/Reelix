@@ -65,7 +65,7 @@ pub(crate) fn series_naming(s: &SeriesDto) -> SeriesNaming {
     }
 }
 
-fn blank_series() -> SeriesDto {
+pub(crate) fn blank_series() -> SeriesDto {
     SeriesDto {
         id: 0,
         tmdb_id: None,
@@ -102,6 +102,7 @@ fn blank_series() -> SeriesDto {
         cast: Vec::new(),
         added: chrono::Utc::now(),
         last_refreshed: None,
+        custom: false,
     }
 }
 
@@ -200,6 +201,66 @@ impl LibraryService {
         self.add_series_inner(req, true).await
     }
 
+    /// [`Self::add_series`], but a series the request's ids do not lead to is looked for by its
+    /// other ids before giving up (RFX-79): TMDB's find by the TVDB id (when the first try used
+    /// a TMDB id), then by the IMDb id. Sonarr knows some series only by their TVDB id, or carries
+    /// a TMDB id that no longer resolves, so a migration or a Sonarr client would otherwise leave
+    /// them out. A found entry linked to another TVDB id than the request's is not used, as the
+    /// two ids then name different shows. The first error is returned when nothing is found.
+    pub async fn add_series_by_any_id(
+        &self,
+        req: AddSeriesRequest,
+        imdb_id: Option<&str>,
+    ) -> Result<SeriesDto> {
+        let first = match self.add_series(req.clone()).await {
+            Err(e) if not_found_by_ids(&e) => e,
+            done => return done,
+        };
+        let mut lookups: Vec<(ExternalSource, String)> = Vec::new();
+        if req.tmdb_id.is_some()
+            && let Some(tv) = req.tvdb_id
+        {
+            lookups.push((ExternalSource::Tvdb, tv.to_string()));
+        }
+        if let Some(imdb) = imdb_id.map(str::trim).filter(|i| i.starts_with("tt")) {
+            lookups.push((ExternalSource::Imdb, imdb.to_string()));
+        }
+        let mut tried: Vec<u32> = req.tmdb_id.into_iter().collect();
+        for (source, id) in lookups {
+            let hits = match self.metadata.find(source, &id, MediaKind::Series).await {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::debug!(error = %e, id = %id, "series lookup by external id failed");
+                    continue;
+                }
+            };
+            for h in hits {
+                let Some(t) = h.tmdb_id else { continue };
+                if tried.contains(&t) {
+                    continue;
+                }
+                tried.push(t);
+                if let (Some(want), Some(got)) = (req.tvdb_id, h.tvdb_id)
+                    && want != got
+                {
+                    continue;
+                }
+                let mut r = req.clone();
+                r.tmdb_id = Some(t);
+                match self.add_series(r).await {
+                    Err(e) if not_found_by_ids(&e) => {}
+                    done => {
+                        if done.is_ok() {
+                            tracing::info!(tmdb_id = t, tvdb_id = ?req.tvdb_id, imdb_id = ?imdb_id, "series found by another id");
+                        }
+                        return done;
+                    }
+                }
+            }
+        }
+        Err(first)
+    }
+
     /// [`Self::add_series`]; with `scan` false the caller queues the disk scan itself.
     pub(crate) async fn add_series_inner(&self, req: AddSeriesRequest, scan: bool) -> Result<SeriesDto> {
         self.check_profile(req.quality_profile_id).await?;
@@ -225,7 +286,7 @@ impl LibraryService {
         };
         let meta = series_metadata(self.metadata.as_ref(), ext, req.tvdb_id).await?;
         let Some(tmdb_id) = meta.tmdb_id else {
-            return Err(LibraryError::validation("metadata has no TMDB id"));
+            return Err(LibraryError::validation(NO_TMDB_ID));
         };
         if repo::id_by_tmdb(&self.db, tmdb_id).await?.is_some() {
             return Err(LibraryError::Conflict(format!(
@@ -233,8 +294,10 @@ impl LibraryService {
             )));
         }
         // The TVDB id is checked too: a request may pair a new TMDB id with the TVDB id of a show
-        // already in the library, which would add that show a second time.
-        if let Some(tvdb_id) = meta.tvdb_id.or(meta.external_ids.tvdb)
+        // already in the library, which would add that show a second time. When the metadata has
+        // no TVDB link, the request's TVDB id is kept, so the series can be found by it later.
+        let tvdb = meta.tvdb_id.or(meta.external_ids.tvdb).or(req.tvdb_id);
+        if let Some(tvdb_id) = tvdb
             && repo::id_by_tvdb(&self.db, tvdb_id).await?.is_some()
         {
             return Err(LibraryError::Conflict(format!(
@@ -244,6 +307,7 @@ impl LibraryService {
         let mut s = blank_series();
         apply_series_metadata(&mut s, &meta);
         s.tmdb_id = Some(tmdb_id);
+        s.tvdb_id = tvdb;
         s.quality_profile_id = req.quality_profile_id;
         s.root_folder_id = root.id;
         s.series_type = req.series_type;
@@ -276,6 +340,7 @@ impl LibraryService {
         misc::set_alt_titles(&self.db, MediaKind::Series, id, &alts).await?;
         misc::set_credits(&self.db, MediaKind::Series, id, &cast_of(&meta.credits)).await?;
         self.sync_episodes(id, &meta, true).await?;
+        self.refresh_episode_map(id, tmdb_id).await;
         self.apply_monitor(id, req.monitor, req.seasons.as_deref())
             .await?;
         self.emit("series", "created", id);
@@ -338,6 +403,12 @@ impl LibraryService {
             .await?;
         }
         let existing = repo::episodes(&self.db, series_id, None).await?;
+        // Episodes whose details have not changed are not written again: a refresh of an unchanged
+        // library (every 12 hours) then makes no episode writes at all, instead of a read and a write each.
+        let by_number: HashMap<(u32, u32), &EpisodeDto> = existing
+            .iter()
+            .map(|e| ((e.season_number, e.episode_number), e))
+            .collect();
         let mut seen = std::collections::HashSet::new();
         for e in meta.episodes() {
             let monitored = season_monitor.get(&e.season_number).copied().unwrap_or(false);
@@ -362,6 +433,12 @@ impl LibraryService {
                 episode_file_id: None,
                 episode_file: None,
             };
+            if let Some(old) = by_number.get(&(dto.season_number, dto.episode_number))
+                && same_episode_details(old, &dto)
+            {
+                seen.insert(old.id);
+                continue;
+            }
             let (id, inserted) = repo::upsert_episode(&self.db, &dto).await?;
             seen.insert(id);
             if inserted && !is_new {
@@ -562,6 +639,37 @@ impl LibraryService {
             .collect())
     }
 
+    /// [`Self::episode_files_of`] for many series at once, by series id: a handful of reads in all instead
+    /// of four for each series (an RSS sync loads every monitored series).
+    pub(crate) async fn episode_files_of_many(
+        &self,
+        series: &[SeriesDto],
+    ) -> Result<HashMap<i64, Vec<EpisodeFileDto>>> {
+        let mut out: HashMap<i64, Vec<EpisodeFileDto>> = HashMap::new();
+        if series.is_empty() {
+            return Ok(out);
+        }
+        let profiles = self.profiles().await?;
+        let map = repo::file_episode_map(&self.db, None).await?;
+        let by_id: HashMap<i64, &SeriesDto> = series.iter().map(|s| (s.id, s)).collect();
+        for chunk in series.chunks(500) {
+            let ids: Vec<i64> = chunk.iter().map(|s| s.id).collect();
+            for f in files::list(&self.db, FileTable::Episode, Some(&ids)).await? {
+                let Some(s) = by_id.get(&f.owner_id) else {
+                    continue;
+                };
+                let profile = profiles.profile(s.quality_profile_id);
+                out.entry(s.id).or_default().push(EpisodeFileDto {
+                    series_id: s.id,
+                    season_number: f.season_number.unwrap_or(0),
+                    episode_ids: map.get(&f.id).cloned().unwrap_or_default(),
+                    file: f.to_dto(&s.path, profile, &profiles.format_names),
+                });
+            }
+        }
+        Ok(out)
+    }
+
     /// Deletes an episode file from disk (recycle bin when configured) and the database.
     pub async fn delete_episode_file(&self, file_id: i64) -> Result<()> {
         let f = files::get(&self.db, FileTable::Episode, file_id)
@@ -632,6 +740,14 @@ pub(crate) fn series_hit(m: &SeriesMetadata) -> reelix_metadata::SearchHit {
     }
 }
 
+const NO_TMDB_ID: &str = "metadata has no TMDB id";
+
+/// An add that failed because the ids did not lead to a usable entry, so another id may.
+fn not_found_by_ids(e: &LibraryError) -> bool {
+    matches!(e, LibraryError::Metadata(MetaError::NotFound))
+        || matches!(e, LibraryError::Validation(m) if m == NO_TMDB_ID)
+}
+
 /// A series' metadata by `ext`. When that is a TMDB id the source cannot look up (open data
 /// without a Wikidata link answers `Unsupported`), the TVDB id is tried next.
 ///
@@ -676,4 +792,16 @@ pub(crate) async fn series_metadata(
         }
         (result, _, _) => result,
     }
+}
+
+/// Whether `new` would change nothing [`repo::upsert_episode`] writes over `old` (it never writes
+/// `monitored` or the file of an existing episode).
+fn same_episode_details(old: &EpisodeDto, new: &EpisodeDto) -> bool {
+    old.absolute_number == new.absolute_number
+        && old.title == new.title
+        && old.overview == new.overview
+        && old.air_date == new.air_date
+        && old.runtime_minutes == new.runtime_minutes
+        && old.still == new.still
+        && old.finale == new.finale
 }

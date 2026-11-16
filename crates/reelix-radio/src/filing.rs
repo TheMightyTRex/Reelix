@@ -16,6 +16,7 @@
 //! 5. Remember the filed path on the episode (it is not searched again while the file exists),
 //!    and ask the library sync to scan ([`crate::RadioLibrarySync::request_scan`]); the next
 //!    sync matches the file and the episode becomes In library.
+//! 6. Apply the show's episode limit, if it has one ([`RadioService::prune_show`]).
 
 use std::path::{Path, PathBuf};
 
@@ -352,6 +353,11 @@ impl RadioService {
         tracing::info!(episode_id, path = %dest.display(), "radio episode filed");
         if let Err(e) = self.request_library_scan().await {
             tracing::warn!(error = %e, "radio filing: library scan request failed");
+        }
+        if show.keep_episodes.is_some()
+            && let Err(e) = self.prune_show(show.id).await
+        {
+            tracing::warn!(show_id = show.id, error = %e, "radio filing: episode limit not applied");
         }
         let release_group = d
             .release_title

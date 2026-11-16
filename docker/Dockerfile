@@ -13,6 +13,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ---- Server binary -----------------------------------------------------------
 FROM chef AS builder
 COPY --from=planner /src/recipe.json recipe.json
+# The workspace patches hyper-proxy2 from vendor/, which cargo needs before cooking the dependencies.
+COPY vendor vendor
 RUN cargo chef cook --release --locked --recipe-path recipe.json --package reelix-server
 COPY . .
 RUN cargo build --release --locked --package reelix-server --bin reelix \
@@ -23,6 +25,8 @@ FROM chef AS web
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install --locked trunk
 COPY --from=planner /src/recipe.json recipe.json
+# The workspace patches hyper-proxy2 from vendor/, which cargo needs before cooking the dependencies.
+COPY vendor vendor
 RUN cargo chef cook --release --locked --recipe-path recipe.json \
     --target wasm32-unknown-unknown --package reelix-web
 COPY . .
@@ -34,11 +38,13 @@ RUN cd crates/reelix-web && trunk build --release ${REELIX_WEB_FEATURES:+--featu
 # ---- Runtime -----------------------------------------------------------------
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS runtime
 ARG TARGETARCH
-# util-linux (setpriv) is part of the base image; tzdata makes TZ work.
+# util-linux (setpriv) is part of the base image; tzdata makes TZ work. The upgrade takes in Debian's
+# security fixes released since the pinned base image (such as apt 2.6.2).
 # unrar unpacks downloads that hold only RAR archives. It is in Debian's non-free component
 # (freeware, free to redistribute) and adds about 0.3 MB.
 RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ca-certificates tzdata ffmpeg unrar \
     && rm -rf /var/lib/apt/lists/*
 
@@ -61,8 +67,8 @@ RUN set -eu; \
     esac; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl unzip; \
-    curl -fsSL --retry 3 -o /usr/local/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${ytdlp}"; \
-    curl -fsSL --retry 3 -o /tmp/deno.zip "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${deno}.zip"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /usr/local/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${ytdlp}"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /tmp/deno.zip "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${deno}.zip"; \
     printf '%s  %s\n' "${ytdlp_sha}" /usr/local/bin/yt-dlp "${deno_sha}" /tmp/deno.zip | sha256sum -c -; \
     unzip -q /tmp/deno.zip -d /usr/local/bin; \
     rm /tmp/deno.zip; \
@@ -71,10 +77,10 @@ RUN set -eu; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /reelix /app/reelix
+# --chmod on COPY, not a later RUN chmod, which would store a second copy of the binary in a new layer.
+COPY --from=builder --chmod=0755 /reelix /app/reelix
 COPY --from=web /src/crates/reelix-web/dist /app/web
-COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod 0755 /app/entrypoint.sh /app/reelix
+COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh
 
 # Two glibc malloc arenas instead of one per thread: about a third less memory, no measurable cost.
 ENV REELIX_DATA_DIR=/config \

@@ -134,7 +134,8 @@ impl BooksService {
         let cutoff = Utc::now() - chrono::Duration::hours(12);
         let mut failed = 0;
         for mut a in authors {
-            if !manual && a.last_refreshed.is_some_and(|t| t > cutoff) {
+            // Custom authors keep their typed details; their books come from the scan.
+            if a.custom || (!manual && a.last_refreshed.is_some_and(|t| t > cutoff)) {
                 continue;
             }
             match self.refresh_author(&mut a, manual).await {
@@ -151,7 +152,7 @@ impl BooksService {
         Ok(failed)
     }
 
-    async fn refresh_author(&self, a: &mut AuthorDto, manual: bool) -> Result<usize> {
+    pub(crate) async fn refresh_author(&self, a: &mut AuthorDto, manual: bool) -> Result<usize> {
         let meta = self.metadata.author(&a.openlibrary_id).await?;
         let works = self.metadata.author_works(&a.openlibrary_id).await?;
         apply_author(a, &meta);
@@ -166,6 +167,9 @@ impl BooksService {
     /// Fetches and stores the editions of one book (also refreshes identifiers and series).
     pub(crate) async fn refresh_editions(&self, book_id: i64) -> Result<()> {
         let mut b = self.book_row(book_id).await?;
+        if b.openlibrary_work_id.starts_with("custom:") {
+            return Ok(()); // a book of a custom author: no Open Library work
+        }
         let eds = self.metadata.work_editions(&b.openlibrary_work_id).await?;
         let w = WorkMetadata {
             id: b.openlibrary_work_id.clone(),

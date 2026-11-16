@@ -9,18 +9,10 @@ yanked = "deny"
 unmaintained = "workspace"
 # Each entry has no compatible fix upstream; recheck when librespot or openidconnect update.
 ignore = [
-    # rustls 0.22 and rustls-webpki 0.102 come only from librespot-core 0.8's hyper-proxy2
-    # connector. Reelix never configures a librespot proxy.
-    { id = "RUSTSEC-2026-0346", reason = "rustls 0.22 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0349", reason = "rustls 0.22 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
-    { id = "RUSTSEC-2026-0382", reason = "rustls-webpki 0.102 via librespot's unused proxy connector" },
     # quick-xml 0.38 is pinned by librespot-core 0.8, whose session.rs parses the ProductInfo
     # packet sent by Spotify over the authenticated session (plain Reader, no attributes() or
-    # NsReader), besides hyper-proxy2. Reelix's own quick-xml is a fixed version.
+    # NsReader). librespot-core 0.8.0, the newest release, still asks for quick-xml ^0.38.
+    # Reelix's own quick-xml is a fixed version.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38 via librespot-core: plain Reader on Spotify's ProductInfo packet over the authenticated session" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38 via librespot-core: plain Reader on Spotify's ProductInfo packet over the authenticated session" },
     # No fixed rsa release exists. The attack needs private-key decryption; librespot and
@@ -29,9 +21,10 @@ ignore = [
     # crypto-bigint 0.5 is pinned by elliptic-curve 0.13 (openidconnect's p256/p384), which
     # only verifies token signatures with public keys.
     { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 only handles public values in signature verification" },
-    # libsqlite3-sys 0.30 (bundled SQLite before 3.54) is pinned by sqlx 0.8; the fix needs libsqlite3-sys 0.39.
+    # libsqlite3-sys 0.30 (bundled SQLite before 3.54) is pinned by sqlx 0.8; the fix needs libsqlite3-sys 0.39,
+    # and even sqlx 0.9.0 (the newest, 14 November 2026) allows only libsqlite3-sys below 0.38.
     # Only a database whose -wal file a less trusted party could write is exposed; Reelix opens only its own.
-    { id = "RUSTSEC-2026-0459", reason = "Reelix opens only its own database files; the fix needs sqlx 0.9" },
+    { id = "RUSTSEC-2026-0459", reason = "Reelix opens only its own database files; no sqlx release allows libsqlite3-sys 0.39 yet" },
 ]
 
 [licenses]
@@ -58,12 +51,6 @@ allow = [
     "CDLA-Permissive-2.0",
     "Unlicense",
 ]
-
-# webpki 0.22 (via librespot's hyper-proxy2) ships an ISC-style LICENSE but declares none.
-[[licenses.clarify]]
-crate = "webpki"
-expression = "ISC"
-license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
 # RustyPipe declares the deprecated SPDX id "GPL-3.0", which means GPL-3.0-only.
 [[licenses.clarify]]

@@ -47,6 +47,15 @@ pub struct BooksService {
     pub(crate) queue: OnceLock<JobQueue>,
     /// Override "today" (tests).
     pub(crate) today_override: OnceLock<NaiveDate>,
+    /// Audiobook sources for the current settings (RFX-86).
+    pub(crate) audiobook_sources: std::sync::Mutex<
+        Option<(
+            reelix_api_types::books::AudiobookMetadataSettingsDto,
+            reelix_metadata::AudiobookSources,
+        )>,
+    >,
+    /// Addresses of the audiobook sources (tests).
+    pub(crate) audiobook_template: OnceLock<reelix_metadata::AudiobookSourcesOptions>,
 }
 
 /// Outcome of a disk scan.
@@ -119,6 +128,8 @@ impl BooksService {
             metadata: deps.metadata,
             queue: OnceLock::new(),
             today_override: OnceLock::new(),
+            audiobook_sources: std::sync::Mutex::new(None),
+            audiobook_template: OnceLock::new(),
         }
     }
 

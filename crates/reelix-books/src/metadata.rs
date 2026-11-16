@@ -31,6 +31,7 @@ pub(crate) fn author_from(meta: &AuthorMetadata) -> AuthorDto {
         statistics: AuthorStatisticsDto::default(),
         added: Utc::now(),
         last_refreshed: None,
+        custom: false,
     };
     apply_author(&mut a, meta);
     a

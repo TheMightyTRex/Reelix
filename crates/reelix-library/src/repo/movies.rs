@@ -21,7 +21,12 @@ const COLS: &str = "m.id, m.tmdb_id, m.imdb_id, m.title, m.original_title, m.sor
     m.tagline, m.runtime, m.studio, m.genres, m.certification, m.original_language, m.images, m.ratings, m.in_cinemas, \
     m.digital_release, m.physical_release, m.youtube_trailer, m.homepage, m.monitored, m.minimum_availability, \
     m.quality_profile_id, m.root_folder_id, m.path, m.collection_id, m.added_by_request_id, m.last_refreshed, \
-    m.created_at, c.tmdb_id AS c_tmdb, c.title AS c_title";
+    m.created_at, m.custom, c.tmdb_id AS c_tmdb, c.title AS c_title";
+
+/// The API's TMDB id of a stored one: custom movies hold a negative placeholder, shown as 0.
+fn tmdb_of(stored: i64) -> u32 {
+    u32::try_from(stored).unwrap_or(0)
+}
 
 fn map(r: &SqliteRow) -> Result<MovieDto> {
     let status: MovieStatus = parse_enum(&r.try_get::<String, _>("status")?).unwrap_or(MovieStatus::Tba);
@@ -36,7 +41,7 @@ fn map(r: &SqliteRow) -> Result<MovieDto> {
     };
     Ok(MovieDto {
         id: r.try_get("id")?,
-        tmdb_id: r.try_get::<i64, _>("tmdb_id")? as u32,
+        tmdb_id: tmdb_of(r.try_get("tmdb_id")?),
         imdb_id: r.try_get("imdb_id")?,
         title: r.try_get("title")?,
         original_title: r.try_get("original_title")?,
@@ -73,6 +78,7 @@ fn map(r: &SqliteRow) -> Result<MovieDto> {
         cast: Vec::new(),
         added: from_ms(r.try_get("created_at")?),
         last_refreshed: r.try_get::<Option<i64>, _>("last_refreshed")?.map(from_ms),
+        custom: r.try_get("custom")?,
     })
 }
 
@@ -80,14 +86,14 @@ fn map(r: &SqliteRow) -> Result<MovieDto> {
 /// links…): decoding 10k full rows is most of a list request's cost.
 const LIGHT_COLS: &str = "m.id, m.tmdb_id, m.title, m.original_title, m.sort_title, m.year, m.status, m.runtime, \
     m.genres, m.images, m.ratings, m.in_cinemas, m.digital_release, m.physical_release, m.monitored, \
-    m.minimum_availability, m.quality_profile_id, m.root_folder_id, m.path, m.collection_id, m.created_at";
+    m.minimum_availability, m.quality_profile_id, m.root_folder_id, m.path, m.collection_id, m.created_at, m.custom";
 
 fn map_light(r: &SqliteRow) -> Result<MovieDto> {
     let status: MovieStatus = parse_enum(&r.try_get::<String, _>("status")?).unwrap_or(MovieStatus::Tba);
     let min = parse_enum(&r.try_get::<String, _>("minimum_availability")?).unwrap_or_default();
     Ok(MovieDto {
         id: r.try_get("id")?,
-        tmdb_id: r.try_get::<i64, _>("tmdb_id")? as u32,
+        tmdb_id: tmdb_of(r.try_get("tmdb_id")?),
         imdb_id: None,
         title: r.try_get("title")?,
         original_title: r.try_get("original_title")?,
@@ -131,6 +137,7 @@ fn map_light(r: &SqliteRow) -> Result<MovieDto> {
         cast: Vec::new(),
         added: from_ms(r.try_get("created_at")?),
         last_refreshed: None,
+        custom: r.try_get("custom")?,
     })
 }
 
@@ -266,7 +273,7 @@ pub async fn id_by_tmdb(db: &Db, tmdb_id: u32) -> Result<Option<i64>> {
 
 /// `tmdb_id → movie id` for every movie.
 pub async fn tmdb_index(db: &Db) -> Result<HashMap<u32, i64>> {
-    let rows = sqlx::query("SELECT id, tmdb_id FROM movies")
+    let rows = sqlx::query("SELECT id, tmdb_id FROM movies WHERE tmdb_id > 0")
         .fetch_all(db.pool())
         .await?;
     let mut out = HashMap::new();
@@ -281,16 +288,21 @@ pub async fn insert(db: &Db, m: &MovieDto) -> Result<i64> {
     let now = now_ms();
     let res = sqlx::query(
         "INSERT INTO movies (tmdb_id, title, sort_title, clean_title, quality_profile_id, root_folder_id, path,
-             created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             custom, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(m.tmdb_id as i64)
+    .bind(if m.custom {
+        super::custom_placeholder()
+    } else {
+        m.tmdb_id as i64
+    })
     .bind(&m.title)
     .bind(&m.sort_title)
     .bind(clean_title(&m.title))
     .bind(m.quality_profile_id)
     .bind(m.root_folder_id)
     .bind(&m.path)
+    .bind(m.custom)
     .bind(now)
     .bind(now)
     .execute(db.pool())
@@ -302,6 +314,12 @@ pub async fn insert(db: &Db, m: &MovieDto) -> Result<i64> {
         _ => e.into(),
     })?;
     let id = res.last_insert_rowid();
+    if m.custom {
+        sqlx::query("UPDATE movies SET tmdb_id = -id WHERE id = ?")
+            .bind(id)
+            .execute(db.pool())
+            .await?;
+    }
     save(db, id, m).await?;
     Ok(id)
 }

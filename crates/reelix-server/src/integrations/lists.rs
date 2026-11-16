@@ -1,5 +1,6 @@
 //! Import list sync (`import_list_sync`) and the exclusion / status tables. Music lists
-//! ([`reelix_lists::ListContent::Music`]) are handed to [`super::music_lists`].
+//! ([`reelix_lists::ListContent::Music`]) are handed to [`super::music_lists`], book lists
+//! ([`reelix_lists::ListContent::Books`]) to [`super::book_lists`].
 
 use std::collections::HashSet;
 
@@ -316,6 +317,8 @@ impl IntegrationsService {
             };
             if list.content() == ListContent::Music {
                 self.sync_music_list(&row, list.as_ref(), &mut o).await?;
+            } else if list.content() == ListContent::Books {
+                self.sync_book_list(&row, list.as_ref(), &mut o).await?;
             } else {
                 match list.fetch().await {
                     Err(e) => {
@@ -380,6 +383,34 @@ impl IntegrationsService {
                 };
                 super::music_lists::add_music_items(&self.db, music.as_ref(), &row.name, &opts, items, o)
                     .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetches a book list and adds its books through the books service.
+    async fn sync_book_list(
+        &self,
+        row: &ProviderRow,
+        list: &dyn reelix_lists::ImportList,
+        o: &mut ListSyncOutcome,
+    ) -> sqlx::Result<()> {
+        let opts = super::book_lists::BookListOptions::from_row(row);
+        match list.fetch_books().await {
+            Err(e) => {
+                tracing::warn!(list = %row.name, error = %e, "book import list fetch failed");
+                o.error = Some(e.to_string());
+            }
+            Ok(items) => {
+                o.found = items.len() as u32;
+                if !opts.enabled_auto_add {
+                    return Ok(());
+                }
+                let Some(books) = self.books.get() else {
+                    o.error = Some("books are not available".into());
+                    return Ok(());
+                };
+                super::book_lists::add_book_items(&self.db, books.as_ref(), row, &opts, items, o).await?;
             }
         }
         Ok(())

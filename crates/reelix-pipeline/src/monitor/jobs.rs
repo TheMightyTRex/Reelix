@@ -65,7 +65,14 @@ handler!(PruneFinished, kinds::PRUNE_FINISHED, |svc, _p| {
     Ok(())
 });
 
-/// Scheduled tasks: download monitor (30 s; polls every 2 min when idle) and daily pruning.
+handler!(PruneHistory, kinds::PRUNE_HISTORY, |svc, _p| {
+    let n = svc.prune_history().await?;
+    tracing::info!(removed = n, "removed old history");
+    Ok(())
+});
+
+/// Scheduled tasks: download monitor (30 s; polls every 2 min when idle), daily pruning of
+/// finished downloads and daily history clean-up.
 pub fn tasks() -> Vec<TaskDef> {
     vec![
         TaskDef {
@@ -80,6 +87,12 @@ pub fn tasks() -> Vec<TaskDef> {
             interval: Duration::from_secs(24 * 3600),
             run_on_startup: false,
         },
+        TaskDef {
+            kind: kinds::PRUNE_HISTORY,
+            name: "Clean up history",
+            interval: Duration::from_secs(24 * 3600),
+            run_on_startup: false,
+        },
     ]
 }
 
@@ -89,7 +102,8 @@ pub fn register(mut builder: JobSystemBuilder, svc: &Arc<ActivityService>) -> Jo
         .handler(DownloadMonitor(svc.clone()))
         .handler(ProcessDownload(svc.clone()))
         .handler(ManualImport(svc.clone()))
-        .handler(PruneFinished(svc.clone()));
+        .handler(PruneFinished(svc.clone()))
+        .handler(PruneHistory(svc.clone()));
     for t in tasks() {
         builder = builder.task(t);
     }

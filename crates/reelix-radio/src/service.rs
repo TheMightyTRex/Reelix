@@ -45,6 +45,8 @@ pub struct RadioService {
     pub(crate) secrets: OnceLock<SecretBox>,
     /// Override "now" (tests).
     pub(crate) now_override: RwLock<Option<DateTime<Utc>>>,
+    /// Fetches catch-up audio (RFX-96); attached by the server, unset = no catch-up.
+    pub(crate) catchup: RwLock<Option<Arc<dyn crate::catchup::CatchupFetcher>>>,
 }
 
 impl RadioService {
@@ -59,6 +61,7 @@ impl RadioService {
             data_dir: OnceLock::new(),
             secrets: OnceLock::new(),
             now_override: RwLock::new(None),
+            catchup: RwLock::new(None),
         }
     }
 

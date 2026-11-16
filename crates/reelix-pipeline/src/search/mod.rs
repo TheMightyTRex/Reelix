@@ -634,7 +634,7 @@ impl SearchService {
             // (the indexer's cookies / API key are sent along when fetching it).
             let parsed = url::Url::parse(url.trim())
                 .map_err(|e| SearchError::Validation(format!("invalid download_url: {e}")))?;
-            self.guard()
+            self.indexer_guard()
                 .check(&parsed)
                 .await
                 .map_err(|e| SearchError::Validation(format!("download_url rejected: {e}")))?;
@@ -672,10 +672,21 @@ impl SearchService {
         })
     }
 
-    /// The indexer SSRF guard, honouring the "allow private addresses" setting.
+    /// The indexer SSRF guard, honouring the "allow private addresses" setting. The local DNS
+    /// is asked, as a link handed on is fetched by the download client, not through the proxy.
     pub(crate) fn guard(&self) -> reelix_indexers::AddressGuard {
         reelix_indexers::AddressGuard {
             allow_private: self.providers.allow_private_addresses(),
+            remote_dns: false,
+        }
+    }
+
+    /// [`Self::guard`] for a link the indexer itself fetches: behind the indexer proxy, the
+    /// proxy looks the site up (RFX-75).
+    pub(crate) fn indexer_guard(&self) -> reelix_indexers::AddressGuard {
+        reelix_indexers::AddressGuard {
+            remote_dns: self.providers.indexer_proxy_set(),
+            ..self.guard()
         }
     }
 
@@ -835,12 +846,13 @@ impl SearchService {
                     }
                 }
             }
-            let t = targets[&series_id].clone();
+            // Borrowed, not cloned: a series target holds every episode with its files.
+            let t = &targets[&series_id];
             if ids.len() > 1 {
-                self.auto_season(shared, &t, season, &ids, sum).await?;
+                self.auto_season(shared, t, season, &ids, sum).await?;
             } else {
                 let ep = t.episodes_by_id(&ids);
-                self.auto_episodes(shared, &t, &ep, sum).await?;
+                self.auto_episodes(shared, t, &ep, sum).await?;
             }
         }
         Ok(())

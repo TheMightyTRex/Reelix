@@ -39,6 +39,7 @@ reelix-requests.workspace = true
 reelix-indexers.workspace = true
 url.workspace = true
 reelix-providers.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -53,7 +54,6 @@ utoipa-scalar = { workspace = true, optional = true }
 async-trait.workspace = true
 http-body-util.workspace = true
 reelix-metadata.workspace = true
-reqwest.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 tower.workspace = true

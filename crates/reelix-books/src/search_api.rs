@@ -147,7 +147,22 @@ impl BookSearchApi<'_> {
     /// RSS / unknown-download mapping: ISBN/ASIN first, then author + title (clean-title
     /// compare). The format comes from the parse, else the book's single monitored format.
     pub async fn match_release(&self, parsed: &ParsedBook) -> Result<Option<(i64, BookFormat)>> {
-        let books = self.svc.load_books(BookFilter::default()).await?;
+        let books = self.books_for_matching().await?;
+        self.match_release_in(&books, parsed).await
+    }
+
+    /// Every book, as [`Self::match_release_in`] needs them. An RSS sync loads them once for all its
+    /// releases instead of once for each book release.
+    pub async fn books_for_matching(&self) -> Result<Vec<BookDto>> {
+        self.svc.load_books(BookFilter::default()).await
+    }
+
+    /// [`Self::match_release`] against books already loaded with [`Self::books_for_matching`].
+    pub async fn match_release_in(
+        &self,
+        books: &[BookDto],
+        parsed: &ParsedBook,
+    ) -> Result<Option<(i64, BookFormat)>> {
         if books.is_empty() {
             return Ok(None);
         }
@@ -159,7 +174,7 @@ impl BookSearchApi<'_> {
         .await?;
         let mut book = books.iter().find(|b| ids.contains(&b.id));
         if book.is_none() {
-            book = match_title(parsed, &books);
+            book = match_title(parsed, books);
         }
         let Some(b) = book else { return Ok(None) };
         let from_quality = match parsed.quality.quality.family() {
