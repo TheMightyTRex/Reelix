@@ -1,5 +1,8 @@
 //! Release profiles: terms a release title must / must not contain.
 
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -37,10 +40,34 @@ impl Term {
     }
 
     pub fn is_match(&self, title: &str) -> bool {
+        self.matches(title, &title.to_lowercase())
+    }
+
+    /// [`Term::is_match`] with the title already lowercased once by the caller.
+    fn matches(&self, title: &str, lower: &str) -> bool {
         match self {
-            Term::Text(t) => !t.is_empty() && title.to_lowercase().contains(t.as_str()),
+            Term::Text(t) => !t.is_empty() && lower.contains(t.as_str()),
             Term::Regex(re) => re.is_match(title),
         }
+    }
+
+    /// [`Term::parse`], remembered: every release of every RSS sync and search is checked against the
+    /// same few terms, so each `/regex/` is compiled once instead of once per release. `None` = invalid.
+    fn cached(raw: &str) -> Option<Arc<Term>> {
+        // Terms come from the user's release profiles, so this stays small; the cap only guards against
+        // a profile edited many times in one run.
+        const MAX_TERMS: usize = 1024;
+        static TERMS: LazyLock<Mutex<HashMap<String, Option<Arc<Term>>>>> = LazyLock::new(Default::default);
+        let mut terms = TERMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(t) = terms.get(raw) {
+            return t.clone();
+        }
+        if terms.len() >= MAX_TERMS {
+            terms.clear();
+        }
+        let t = Term::parse(raw).ok().map(Arc::new);
+        terms.insert(raw.to_owned(), t.clone());
+        t
     }
 }
 
@@ -89,8 +116,9 @@ impl ReleaseProfile {
     /// Reasons `title` violates this profile (empty = OK). Invalid terms are skipped.
     pub fn violations(&self, title: &str) -> Vec<String> {
         let mut out = Vec::new();
-        let required: Vec<Term> = self.required.iter().filter_map(|t| Term::parse(t).ok()).collect();
-        if !required.is_empty() && !required.iter().any(|t| t.is_match(title)) {
+        let lower = title.to_lowercase();
+        let required: Vec<Arc<Term>> = self.required.iter().filter_map(|t| Term::cached(t)).collect();
+        if !required.is_empty() && !required.iter().any(|t| t.matches(title, &lower)) {
             out.push(format!(
                 "Does not contain any of the required terms: {}",
                 self.required.join(", ")
@@ -99,9 +127,9 @@ impl ReleaseProfile {
         for (raw, term) in self
             .ignored
             .iter()
-            .filter_map(|t| Some((t, Term::parse(t).ok()?)))
+            .filter_map(|t| Some((t, Term::cached(t)?)))
         {
-            if term.is_match(title) {
+            if term.matches(title, &lower) {
                 out.push(format!("Contains ignored term {raw:?}"));
             }
         }
