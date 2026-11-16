@@ -331,6 +331,9 @@ impl BooksService {
     }
 
     async fn scan_author(&self, a: &AuthorDto) -> Result<ScanSummary> {
+        if a.custom {
+            self.custom_books_from_files(a).await?;
+        }
         let books = self
             .load_books(BookFilter {
                 ids: None,

@@ -72,8 +72,32 @@ handler!(RadioLibrarySyncJob, kinds::RADIO_LIBRARY_SYNC, |svc, _p| {
     Ok(())
 });
 
+handler!(RadioCatchupJob, kinds::RADIO_CATCHUP, |svc, _p| {
+    // Episode limits are applied every hour too, whether or not catch-up runs (RFX-106).
+    let catchup = svc.run_catchup().await;
+    let k = svc.prune_all_shows().await?;
+    if k.episodes > 0 || k.skipped > 0 {
+        tracing::info!(
+            episodes = k.episodes,
+            files = k.files_deleted,
+            skipped = k.skipped,
+            "radio episode limits applied"
+        );
+    }
+    let r = catchup?;
+    if r.tried > 0 {
+        tracing::info!(
+            tried = r.tried,
+            filed = r.filed,
+            failed = r.failed,
+            "radio catch-up finished"
+        );
+    }
+    Ok(())
+});
+
 /// Scheduled tasks: show refresh every 12 h, podcast feeds every hour, the podcast library
-/// every 15 minutes.
+/// every 15 minutes, catch-up and the shows' episode limits every hour.
 pub fn tasks() -> Vec<TaskDef> {
     vec![
         TaskDef {
@@ -94,6 +118,12 @@ pub fn tasks() -> Vec<TaskDef> {
             interval: Duration::from_secs(15 * 60),
             run_on_startup: false,
         },
+        TaskDef {
+            kind: kinds::RADIO_CATCHUP,
+            name: "Fetch radio catch-up",
+            interval: Duration::from_secs(3600),
+            run_on_startup: false,
+        },
     ]
 }
 
@@ -102,7 +132,8 @@ pub fn register(mut builder: JobSystemBuilder, svc: &Arc<RadioService>) -> JobSy
     builder = builder
         .long_running_handler(RefreshRadioShows(svc.clone()))
         .long_running_handler(RadioFeedSync(svc.clone()))
-        .long_running_handler(RadioLibrarySyncJob(svc.clone()));
+        .long_running_handler(RadioLibrarySyncJob(svc.clone()))
+        .long_running_handler(RadioCatchupJob(svc.clone()));
     for t in tasks() {
         builder = builder.task(t);
     }

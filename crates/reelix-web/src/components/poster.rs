@@ -16,9 +16,28 @@ pub fn tmdb_image(path: Option<&str>, size: &str) -> Option<String> {
         None
     } else if path.starts_with("http://") || path.starts_with("https://") {
         Some(path.to_string())
+    } else if path.starts_with("/api/") {
+        // A picture Reelix serves itself (an item added with its own details).
+        Some(local_image(crate::api::base_path(), path))
     } else {
         let slash = if path.starts_with('/') { "" } else { "/" };
         Some(format!("https://image.tmdb.org/t/p/{size}{slash}{path}"))
+    }
+}
+
+/// A Reelix-served image path under the UI's URL base.
+fn local_image(base: &str, path: &str) -> String {
+    format!("{base}{path}")
+}
+
+/// An image address as given by the API, with a picture Reelix serves itself (`/api/v1/…`, an
+/// item added with its own details) put under the UI's URL base. Other addresses, and ones
+/// already under the base, are kept as they are.
+fn under_base(base: &str, url: String) -> String {
+    if url.starts_with("/api/v1/") {
+        local_image(base, &url)
+    } else {
+        url
     }
 }
 
@@ -40,6 +59,8 @@ pub fn Poster(
     #[prop(optional, into)] class: Option<String>,
 ) -> impl IntoView {
     let failed = RwSignal::new(false);
+    // Book and music pages pass the API's address as it is.
+    let url = url.map(|u| under_base(crate::api::base_path(), u));
     let class = format!("poster {}", class.unwrap_or_default());
     let letters = initials(&title);
     let alt = format!("Poster for {title}");
@@ -226,6 +247,31 @@ mod tests {
         );
         assert_eq!(tmdb_image(Some("  "), POSTER_SM), None);
         assert_eq!(tmdb_image(None, POSTER_SM), None);
+        assert_eq!(
+            local_image("/reelix", "/api/v1/customitems/movie/1/image?v=ab"),
+            "/reelix/api/v1/customitems/movie/1/image?v=ab"
+        );
+        assert_eq!(
+            under_base("/reelix", "/api/v1/customitems/author/2/image?v=cd".into()),
+            "/reelix/api/v1/customitems/author/2/image?v=cd"
+        );
+        // Already under the base (film and series pages), or another site's address: unchanged.
+        assert_eq!(
+            under_base("/reelix", "/reelix/api/v1/customitems/movie/1/image?v=ab".into()),
+            "/reelix/api/v1/customitems/movie/1/image?v=ab"
+        );
+        assert_eq!(
+            under_base("/api", "/api/api/v1/customitems/movie/1/image".into()),
+            "/api/api/v1/customitems/movie/1/image"
+        );
+        assert_eq!(
+            under_base("/reelix", "https://covers.openlibrary.org/a/id/1-L.jpg".into()),
+            "https://covers.openlibrary.org/a/id/1-L.jpg"
+        );
+        assert_eq!(
+            under_base("", "/api/v1/customitems/artist/3/image".into()),
+            "/api/v1/customitems/artist/3/image"
+        );
         assert_eq!(initials("the matrix reloaded"), "TM");
     }
 }

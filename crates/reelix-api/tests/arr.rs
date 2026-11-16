@@ -168,8 +168,19 @@ impl MetadataSource for FakeMeta {
     }
 }
 
+/// A health source whose findings a test sets.
+#[derive(Default)]
+struct FakeHealth(Mutex<Vec<reelix_api_types::HealthCheck>>);
+
+impl reelix_api::HealthSource for FakeHealth {
+    fn checks(&self) -> Vec<reelix_api_types::HealthCheck> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 struct TestApp {
     router: Router,
+    health: Arc<FakeHealth>,
     key: String,
     admin_key: String,
     viewer_key: String,
@@ -246,11 +257,16 @@ async fn app() -> TestApp {
     let key = key_for(&db, "homepage", Permissions::ROLE_MANAGER).await;
     let viewer_key = key_for(&db, "viewer", Permissions::ROLE_USER).await;
     let admin_key = key_for(&db, "recyclarr", Permissions::ADMIN).await;
+    let health = Arc::new(FakeHealth::default());
     let state = AppState::new(db, events, system.queue(), SecretBox::from_key([3u8; 32]), config)
         .with_extension(library)
-        .with_extension(providers);
+        .with_extension(providers)
+        .with_extension(Arc::new(reelix_api::HealthSources(vec![
+            health.clone() as Arc<dyn reelix_api::HealthSource>
+        ])));
     TestApp {
         router: reelix_api::router(state),
+        health,
         key,
         admin_key,
         viewer_key,
@@ -322,6 +338,64 @@ async fn status_and_auth_per_app() {
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "needs Manage library");
+}
+
+#[tokio::test]
+async fn health_lists_native_problems_in_arr_shape() {
+    use reelix_api_types::{HealthCheck, HealthLevel};
+    let app = app().await;
+    // Healthy: the database and data folder checks pass and *arr lists only problems.
+    for prefix in [
+        "/radarr/api/v3",
+        "/sonarr/api/v3",
+        "/readarr/api/v1",
+        "/lidarr/api/v1",
+    ] {
+        let (s, v) = call(&app, Method::GET, &format!("{prefix}/health"), None).await;
+        assert_eq!(s, StatusCode::OK, "{prefix}: {v}");
+        assert_eq!(v, json!([]), "{prefix}");
+    }
+    *app.health.0.lock().unwrap() = vec![
+        HealthCheck {
+            source: "indexers".into(),
+            level: HealthLevel::Warning,
+            message: "Indexer Example is failing".into(),
+        },
+        HealthCheck {
+            source: "downloadclients".into(),
+            level: HealthLevel::Ok,
+            message: "All download clients are reachable".into(),
+        },
+        HealthCheck {
+            source: "disk".into(),
+            level: HealthLevel::Error,
+            message: "Root folder /movies is missing".into(),
+        },
+    ];
+    for prefix in ["/radarr/api/v3", "/sonarr/api/v3"] {
+        let (s, v) = call(&app, Method::GET, &format!("{prefix}/health"), None).await;
+        assert_eq!(s, StatusCode::OK, "{prefix}: {v}");
+        assert_eq!(
+            v,
+            json!([
+                {"id": 1, "source": "indexers", "type": "warning",
+                 "message": "Indexer Example is failing", "wikiUrl": ""},
+                {"id": 2, "source": "disk", "type": "error",
+                 "message": "Root folder /movies is missing", "wikiUrl": ""},
+            ]),
+            "{prefix}"
+        );
+    }
+    // Messages name indexers and paths, so the Manage library right is still needed.
+    let (s, _) = call_as(
+        &app,
+        &app.viewer_key.clone(),
+        Method::GET,
+        "/sonarr/api/v3/health",
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -659,5 +733,91 @@ async fn recyclarr_style_profile_format_and_definition_sync() {
             .unwrap()
             .iter()
             .any(|d| d["quality"]["name"] == "Bluray-1080p Remux")
+    );
+}
+
+/// RFX-76: Bazarr's SignalR client negotiates, completes the handshake and stays connected
+/// (no events yet), instead of meeting a 405.
+#[tokio::test]
+async fn signalr_hub_answers_bazarr() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let app = app().await;
+    for prefix in ["/radarr", "/sonarr"] {
+        let negotiate = format!("{prefix}/signalr/messages/negotiate");
+        let (s, v) = call_as(
+            &app,
+            "",
+            Method::POST,
+            &format!("{negotiate}?access_token={}", app.key),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{prefix}: {v}");
+        assert_eq!(v["availableTransports"][0]["transport"], "WebSockets");
+        assert!(v["connectionId"].as_str().is_some_and(|c| !c.is_empty()));
+        let (s, _) = call_as(&app, "", Method::POST, &negotiate, None).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        let (s, _) = call_as(
+            &app,
+            "",
+            Method::POST,
+            &format!("{negotiate}?access_token=wrong"),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED);
+        let (s, _) = call_as(&app, &app.viewer_key, Method::POST, &negotiate, None).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "the *arr routes need Manage library");
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = app.router.clone();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    async fn upgrade(addr: std::net::SocketAddr, query: &str) -> (String, tokio::net::TcpStream) {
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let req = format!(
+            "GET /sonarr/signalr/messages{query} HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\n\
+             Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            s.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+        }
+        (String::from_utf8(head).unwrap(), s)
+    }
+
+    let (head, _) = upgrade(addr, "").await;
+    assert!(head.starts_with("HTTP/1.1 401"), "{head}");
+    let (head, mut ws) = upgrade(addr, &format!("?access_token={}&id=abc", app.key)).await;
+    assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+
+    // A client text frame must be masked; a zero mask leaves the payload as it is.
+    let handshake = "{\"protocol\":\"json\",\"version\":1}\u{1e}";
+    let mut frame = vec![0x81, 0x80 | handshake.len() as u8, 0, 0, 0, 0];
+    frame.extend_from_slice(handshake.as_bytes());
+    ws.write_all(&frame).await.unwrap();
+
+    let mut h = [0u8; 2];
+    tokio::time::timeout(std::time::Duration::from_secs(5), ws.read_exact(&mut h))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(h[0], 0x81, "a final text frame");
+    let mut payload = vec![0u8; usize::from(h[1] & 0x7f)];
+    ws.read_exact(&mut payload).await.unwrap();
+    assert_eq!(payload, b"{}\x1e", "the handshake succeeds");
+
+    // The connection stays open: nothing more arrives straight away (no events yet).
+    let mut more = [0u8; 1];
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(300), ws.read(&mut more))
+            .await
+            .is_err()
     );
 }

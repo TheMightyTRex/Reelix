@@ -154,6 +154,7 @@ fn hit(base: &str, d: &Value) -> Option<ShowHit> {
         feed_url: None,
         episode_count: None,
         show_id: None,
+        broadcaster: None,
     })
 }
 
@@ -255,6 +256,10 @@ fn show_data(base: &str, id: &str, data: &Value) -> Result<ShowData, ProviderErr
 impl RadioProvider for ArchiveProvider {
     fn id(&self) -> &'static str {
         ID
+    }
+
+    fn episodes_arrive(&self) -> &'static str {
+        "Recordings kept by the Internet Archive"
     }
 
     fn name(&self) -> &'static str {

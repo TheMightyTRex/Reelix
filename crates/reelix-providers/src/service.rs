@@ -213,7 +213,10 @@ fn definitions_source_ok(url: &url::Url) -> bool {
 /// link-local addresses are refused when connecting (so DNS rebinding can't get round it), and
 /// redirects to such literals are not followed. For URLs that come from users.
 pub fn public_http_client() -> reqwest::Result<reqwest::Client> {
-    let guard = AddressGuard { allow_private: false };
+    let guard = AddressGuard {
+        allow_private: false,
+        remote_dns: false,
+    };
     guard
         .secure(reqwest::Client::builder())
         .user_agent(concat!("Reelix/", env!("CARGO_PKG_VERSION")))
@@ -285,7 +288,8 @@ impl ProviderService {
                 return;
             }
         };
-        let count = loaded.store.list().len();
+        // Downloaded and custom definitions only; the built-in ones are always there.
+        let count = loaded.store.list().len() - loaded.builtin;
         *write(&self.definitions) = Arc::new(loaded.store);
         let mut cache = write(&self.cache);
         cache.definition_failed = loaded.failed;
@@ -534,8 +538,10 @@ impl ProviderService {
         if !matches!(row.kind, ProviderKind::Notification | ProviderKind::ImportList) {
             return Ok(());
         }
+        // Notifications and import lists do not use the indexer proxy, so the local DNS decides.
         let guard = AddressGuard {
             allow_private: read(&self.cache).indexer_settings.allow_private_addresses,
+            remote_dns: false,
         };
         if guard.allow_private {
             return Ok(());
@@ -1199,6 +1205,15 @@ impl ProviderService {
         read(&self.cache).indexer_settings.allow_private_addresses
     }
 
+    /// Whether indexer traffic goes through a proxy, which then looks the sites up (RFX-75).
+    pub fn indexer_proxy_set(&self) -> bool {
+        read(&self.cache)
+            .indexer_settings
+            .proxy
+            .as_ref()
+            .is_some_and(|p| !p.host.trim().is_empty())
+    }
+
     pub async fn set_indexer_settings(&self, mut s: IndexerSettingsDto) -> Result<IndexerSettingsDto> {
         if s.rss_interval_minutes != 0 && !(10..=120).contains(&s.rss_interval_minutes) {
             return Err(validation(
@@ -1274,8 +1289,10 @@ impl ProviderService {
             (None, None) => Err(reelix_metadata::MetaError::NotConfigured("TMDB")),
         }
         .map(|auth| {
+            let (language, fallback_languages) = reelix_metadata::split_languages(&m.language);
             let mut o = TmdbOptions {
-                language: m.language.clone(),
+                language,
+                fallback_languages,
                 region: blank(&m.region),
                 ..Default::default()
             };
@@ -1286,7 +1303,7 @@ impl ProviderService {
         });
         let tvdb = Ok(blank(&m.tvdb_api_key).map(|key| {
             let mut o = TvdbOptions {
-                language: m.language.clone(),
+                language: reelix_metadata::split_languages(&m.language).0,
                 ..Default::default()
             };
             if let Some(u) = &self.opts.tvdb_base_url {
@@ -1338,18 +1355,31 @@ impl ProviderService {
         ] {
             *v = v.take().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
         }
-        m.language = m.language.trim().to_owned();
-        if m.language.is_empty() {
-            m.language = "en-US".into();
+        // One language, or several in order of preference (`cy-GB, en-GB`), fork issue #13.
+        let given: Vec<&str> = m
+            .language
+            .split(',')
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        if given.len() > reelix_metadata::MAX_LANGUAGES {
+            return Err(validation(format!(
+                "at most {} languages, in order of preference",
+                reelix_metadata::MAX_LANGUAGES
+            )));
         }
-        if m.language.len() > 16
-            || !m
-                .language
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            return Err(validation("language must look like `en-US`"));
+        if given.iter().any(|l| {
+            l.len() > 16
+                || !l
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        }) {
+            return Err(validation(
+                "language must look like `en-US`, or a list in order of preference such as `cy-GB, en-GB`",
+            ));
         }
+        let (first, rest) = reelix_metadata::split_languages(&m.language);
+        m.language = std::iter::once(first).chain(rest).collect::<Vec<_>>().join(", ");
         if let Some(r) = &m.region
             && (r.len() != 2 || !r.chars().all(|c| c.is_ascii_alphabetic()))
         {

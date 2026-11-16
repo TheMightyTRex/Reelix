@@ -27,6 +27,11 @@ pub const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "m4v", "avi", "mov", "wmv", "mpg", "mpeg", "m2ts", "mts", "ts", "webm", "flv", "ogm",
     "ogv", "divx", "xvid", "vob", "3gp", "asf", "rmvb", "f4v", "strm",
 ];
+/// Disc image extensions (lowercase, without dot): a Blu-ray or DVD kept as one file. They
+/// are not [`VIDEO_EXTENSIONS`]: only a film folder's library scan counts them (with the
+/// BR-DISK quality and no media details, which ffprobe cannot read from an image); imports
+/// from downloads and series scans never take one.
+pub const DISC_IMAGE_EXTENSIONS: &[&str] = &["iso", "img"];
 /// Subtitle sidecar extensions.
 pub const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "sub", "idx", "sup", "vtt", "smi"];
 /// Metadata sidecar extensions.
@@ -113,6 +118,11 @@ pub async fn dangerous_files(source: &Path) -> Vec<PathBuf> {
         .filter(|f| is_dangerous(&f.path))
         .map(|f| f.relative)
         .collect()
+}
+
+/// True for a disc image ([`DISC_IMAGE_EXTENSIONS`]).
+pub fn is_disc_image(path: &Path) -> bool {
+    extension(path).is_some_and(|e| DISC_IMAGE_EXTENSIONS.contains(&e.as_str()))
 }
 
 pub fn classify(path: &Path) -> FileKind {

@@ -1202,6 +1202,68 @@ async fn book_and_music_discover_rows() {
 }
 
 #[tokio::test]
+async fn book_subjects_are_listed_for_books_and_audiobooks() {
+    let app = app().await;
+    let alice = login(&app, "alice").await;
+
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/genres/book",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let books = r.body.as_array().unwrap();
+    assert!(books.len() > 30, "{} subjects", books.len());
+    let humour = books.iter().find(|s| s["id"] == "subject-humor").unwrap();
+    assert_eq!(humour["name"], "Humour");
+    assert_eq!(humour["group"], "fiction");
+    assert_eq!(humour["featured"], false);
+    assert_eq!(humour["audiobooks"], true);
+    let history = books.iter().find(|s| s["id"] == "subject-history").unwrap();
+    assert_eq!(history["group"], "non_fiction");
+    assert!(books.iter().any(|s| s["id"] == "subject-cooking"));
+
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/genres/audiobook",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let audio = r.body.as_array().unwrap();
+    assert!(audio.len() < books.len());
+    assert!(audio.iter().all(|s| s["audiobooks"] == true));
+    assert!(!audio.iter().any(|s| s["id"] == "subject-cooking"));
+
+    // A listed subject that is not a default row is still a Discover row.
+    app.lib.state().content_rows.insert(
+        (
+            reelix_api_types::requests::ContentRequestKind::Book,
+            "subject-humor".into(),
+        ),
+        vec![fakes::book("OL45883W", "Good Omens", "Terry Pratchett")],
+    );
+    let r = call(
+        &app,
+        Method::GET,
+        "/api/v1/discover/content/book/subject-humor",
+        Some(&alice),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["results"][0]["title"], "Good Omens");
+
+    let r = call(&app, Method::GET, "/api/v1/discover/genres/book", None, None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn radio_discover_and_requests_for_requesters() {
     let app = app().await;
     {

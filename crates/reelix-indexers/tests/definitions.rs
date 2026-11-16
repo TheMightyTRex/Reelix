@@ -473,3 +473,77 @@ async fn cloudflare_challenge_solved_via_flaresolverr() {
         "reuses clearance cookie"
     );
 }
+
+/// RFX-82: the built-in Knaben definition searches Knaben's API v2 by GET and maps its categories.
+#[tokio::test]
+async fn builtin_knaben_definition() {
+    let mut store = DefinitionStore::default();
+    for yaml in reelix_indexers::definition::BUILTIN {
+        store.add_yaml(yaml).unwrap();
+    }
+    let def = store.get("knaben").expect("knaben is built in");
+    assert_eq!(def.links, ["https://api.knaben.org/"]);
+    let mut c = ctx(12, "Knaben");
+    c.definitions = Some(std::sync::Arc::new(store));
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/search"))
+        .and(query_param("q", "Open Movie"))
+        .and(query_param("s", "100"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(fixture("knaben_search.json"), "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/browse"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(fixture("knaben_search.json"), "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let idx = build("definition:knaben", &json!({"base_url": server.uri()}), &c).unwrap();
+    let q = SearchQuery {
+        term: Some("Open Movie".into()),
+        categories: vec![2000],
+        ..SearchQuery::movie()
+    };
+    let r = idx.search(&q).await.unwrap();
+    assert_eq!(r.len(), 2, "{r:#?}");
+    let a = &r[0];
+    assert_eq!(a.title, "Open.Movie.2026.1080p");
+    assert!(
+        a.magnet_url
+            .as_deref()
+            .unwrap()
+            .starts_with("magnet:?xt=urn:btih:9EE38ECC")
+    );
+    assert_eq!(a.categories, [2040], "Knaben's Movies HD");
+    assert_eq!(
+        (a.size, a.seeders, a.peers, a.grabs),
+        (Some(928_699_593), Some(41), Some(44), Some(10))
+    );
+    assert_eq!(a.publish_date.unwrap().to_rfc3339(), "2026-03-09T03:00:44+00:00");
+    let b = &r[1];
+    assert!(b.magnet_url.is_none());
+    assert_eq!(
+        b.download_url.as_deref(),
+        Some("https://api.knaben.invalid/live/dl/other/?path=abc")
+    );
+    assert_eq!(b.categories, [3010], "Knaben's MP3");
+
+    // An empty search (RSS) browses the newest instead.
+    assert_eq!(idx.search(&SearchQuery::movie()).await.unwrap().len(), 2);
+
+    // Prowlarr stores the site address; it is taken as the API's.
+    let moved = build(
+        "definition:knaben",
+        &json!({"base_url": "https://knaben.org/"}),
+        &c,
+    )
+    .unwrap();
+    assert!(moved.owns_url(&url::Url::parse("https://api.knaben.org/v2/search").unwrap()));
+}

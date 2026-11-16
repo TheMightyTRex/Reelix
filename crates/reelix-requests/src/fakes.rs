@@ -146,6 +146,7 @@ pub fn radio_show(provider: &str, external_id: &str, title: &str) -> RadioShowHi
         feed_url: None,
         episode_count: None,
         show_id: None,
+        broadcaster: None,
     }
 }
 

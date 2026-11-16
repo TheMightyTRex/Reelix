@@ -1,0 +1,143 @@
+# Knaben Database (https://knaben.org), a public meta-search over many torrent sites.
+# Written for Reelix (RFX-82), so a move from Prowlarr, where Knaben is a built-in indexer, keeps it.
+# Uses Knaben's public API v2 (https://knaben.org/api/v2/), which asks clients to use GET (so its
+# edge servers can cache) and not to overload it: one request per search, 100 results, and at least
+# two seconds between requests. Category ids follow Knaben's own list.
+id: knaben
+name: Knaben
+description: Knaben Database, a public meta-search over many torrent sites (API v2)
+language: en-US
+type: public
+links:
+  - https://api.knaben.org/
+# Prowlarr stores the site address, not the API address; either is taken as the API.
+legacylinks:
+  - https://knaben.org/
+  - https://knaben.eu/
+requestDelay: 2
+caps:
+  categorymappings:
+    - { id: 1000000, cat: "Audio", desc: "Audio" }
+    - { id: 1001000, cat: "Audio/MP3", desc: "MP3" }
+    - { id: 1002000, cat: "Audio/Lossless", desc: "Lossless" }
+    - { id: 1003000, cat: "Audio/Audiobook", desc: "Audiobook" }
+    - { id: 1004000, cat: "Audio/Video", desc: "Audio video" }
+    - { id: 1005000, cat: "Audio/Other", desc: "Radio" }
+    - { id: 1006000, cat: "Audio/Other", desc: "Audio other" }
+    - { id: 2000000, cat: "TV", desc: "TV" }
+    - { id: 2001000, cat: "TV/HD", desc: "TV HD" }
+    - { id: 2002000, cat: "TV/SD", desc: "TV SD" }
+    - { id: 2003000, cat: "TV/UHD", desc: "TV UHD" }
+    - { id: 2004000, cat: "TV/Documentary", desc: "Documentary" }
+    - { id: 2005000, cat: "TV/Foreign", desc: "TV foreign" }
+    - { id: 2006000, cat: "TV/Sport", desc: "Sport" }
+    - { id: 2007000, cat: "TV/Other", desc: "Cartoon" }
+    - { id: 2008000, cat: "TV/Other", desc: "TV other" }
+    - { id: 3000000, cat: "Movies", desc: "Movies" }
+    - { id: 3001000, cat: "Movies/HD", desc: "Movies HD" }
+    - { id: 3002000, cat: "Movies/SD", desc: "Movies SD" }
+    - { id: 3003000, cat: "Movies/UHD", desc: "Movies UHD" }
+    - { id: 3004000, cat: "Movies/DVD", desc: "Movies DVD" }
+    - { id: 3005000, cat: "Movies/Foreign", desc: "Movies foreign" }
+    - { id: 3006000, cat: "Movies/Foreign", desc: "Movies Bollywood" }
+    - { id: 3007000, cat: "Movies/3D", desc: "Movies 3D" }
+    - { id: 3008000, cat: "Movies/Other", desc: "Movies other" }
+    - { id: 4000000, cat: "PC", desc: "PC" }
+    - { id: 4001000, cat: "PC/Games", desc: "Games" }
+    - { id: 4002000, cat: "PC/0day", desc: "Software" }
+    - { id: 4003000, cat: "PC/Mac", desc: "Mac" }
+    - { id: 4004000, cat: "PC/ISO", desc: "Unix" }
+    - { id: 5000000, cat: "XXX", desc: "XXX" }
+    - { id: 5001000, cat: "XXX/x264", desc: "XXX video" }
+    - { id: 5002000, cat: "XXX/ImageSet", desc: "XXX image set" }
+    - { id: 5003000, cat: "XXX/Other", desc: "XXX games" }
+    - { id: 5004000, cat: "XXX/Other", desc: "XXX hentai" }
+    - { id: 5005000, cat: "XXX/Other", desc: "XXX other" }
+    - { id: 6000000, cat: "TV/Anime", desc: "Anime" }
+    - { id: 6001000, cat: "TV/Anime", desc: "Anime subbed" }
+    - { id: 6002000, cat: "TV/Anime", desc: "Anime dubbed" }
+    - { id: 6003000, cat: "TV/Anime", desc: "Anime dual audio" }
+    - { id: 6004000, cat: "TV/Anime", desc: "Anime raw" }
+    - { id: 6005000, cat: "Audio/Video", desc: "Music video" }
+    - { id: 6006000, cat: "Books/Other", desc: "Literature" }
+    - { id: 6007000, cat: "Audio/Other", desc: "Music" }
+    - { id: 6008000, cat: "TV/Anime", desc: "Anime non-English translated" }
+    - { id: 7000000, cat: "Console", desc: "Console" }
+    - { id: 7001000, cat: "Console/PS4", desc: "PS4" }
+    - { id: 7002000, cat: "Console/PS3", desc: "PS3" }
+    - { id: 7003000, cat: "Console/PS3", desc: "PS2" }
+    - { id: 7004000, cat: "Console/PS3", desc: "PS1" }
+    - { id: 7005000, cat: "Console/PS Vita", desc: "PS Vita" }
+    - { id: 7006000, cat: "Console/PSP", desc: "PSP" }
+    - { id: 7007000, cat: "Console/XBox 360", desc: "Xbox 360" }
+    - { id: 7008000, cat: "Console/XBox", desc: "Xbox" }
+    - { id: 7009000, cat: "Console/NDS", desc: "Switch" }
+    - { id: 7010000, cat: "Console/NDS", desc: "NDS" }
+    - { id: 7011000, cat: "Console/Wii", desc: "Wii" }
+    - { id: 7012000, cat: "Console/WiiU", desc: "WiiU" }
+    - { id: 7013000, cat: "Console/3DS", desc: "3DS" }
+    - { id: 7014000, cat: "Console/Wii", desc: "GameCube" }
+    - { id: 7015000, cat: "Console/Other", desc: "Console other" }
+    - { id: 8000000, cat: "PC/Mobile-Other", desc: "Mobile" }
+    - { id: 8001000, cat: "PC/Mobile-Android", desc: "Android" }
+    - { id: 8002000, cat: "PC/Mobile-iOS", desc: "iOS" }
+    - { id: 8003000, cat: "PC/Mobile-Other", desc: "Mobile other" }
+    - { id: 9000000, cat: "Books", desc: "Books" }
+    - { id: 9001000, cat: "Books/EBook", desc: "Ebooks" }
+    - { id: 9002000, cat: "Books/Comics", desc: "Comics" }
+    - { id: 9003000, cat: "Books/Mags", desc: "Magazines" }
+    - { id: 9004000, cat: "Books/Technical", desc: "Technical" }
+    - { id: 9005000, cat: "Books/Other", desc: "Books other" }
+    - { id: 10000000, cat: "Other", desc: "Other" }
+    - { id: 10001000, cat: "Other/Misc", desc: "Other misc" }
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+    music-search: [q]
+    book-search: [q]
+settings:
+  - { name: info_api, type: info, label: About, default: "No account needed. Knaben is a public meta-search; please keep the number of searches reasonable." }
+search:
+  paths:
+    - path: "{{ if .Keywords }}v2/search{{ else }}v2/browse{{ end }}"
+      response:
+        type: json
+  inputs:
+    q: "{{ .Keywords }}"
+    c: '{{ join .Categories "," }}'
+    s: 100
+  rows:
+    selector: hits
+  fields:
+    category:
+      selector: "categoryId[0]"
+    title:
+      selector: title
+    details:
+      selector: details
+      optional: true
+    magnet:
+      selector: magnetUrl
+      optional: true
+    download:
+      selector: link
+      optional: true
+    infohash:
+      selector: hash
+      optional: true
+    size:
+      selector: bytes
+    seeders:
+      selector: seeders
+    leechers:
+      selector: peers
+    grabs:
+      selector: grabs
+      optional: true
+    date:
+      selector: date
+    downloadvolumefactor:
+      text: 0
+    uploadvolumefactor:
+      text: 1

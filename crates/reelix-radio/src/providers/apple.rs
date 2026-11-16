@@ -192,6 +192,7 @@ fn hit(r: &Value) -> Option<ShowHit> {
         feed_url: Some(feed),
         episode_count: u32_at(r, "trackCount"),
         show_id: None,
+        broadcaster: None,
     })
 }
 
@@ -230,6 +231,7 @@ fn chart_hit(
         feed_url: None,
         episode_count: None,
         show_id: None,
+        broadcaster: None,
     }
 }
 
@@ -346,7 +348,10 @@ impl RadioProvider for AppleProvider {
         let genre = list
             .strip_prefix("genre-")
             .and_then(|g| g.parse::<u32>().ok())
-            .filter(|g| GENRES.iter().any(|(id, _)| id == g))
+            .filter(|g| {
+                GENRES.iter().any(|(id, _)| id == g)
+                    || crate::genres::GENRES.iter().any(|s| s.apple == Some(*g))
+            })
             .ok_or_else(|| ProviderError::NotFound(format!("Apple Podcasts has no Discover list {list}")))?;
         let url = format!(
             "{}/{cc}/rss/toppodcasts/limit={CHART_LIMIT}/genre={genre}/json",

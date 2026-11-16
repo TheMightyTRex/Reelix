@@ -122,7 +122,7 @@ pub(crate) fn movie_naming(m: &MovieDto) -> MovieNaming {
         title: m.title.clone(),
         original_title: m.original_title.clone(),
         year: year_u16(m.year),
-        tmdb_id: Some(m.tmdb_id),
+        tmdb_id: (m.tmdb_id != 0).then_some(m.tmdb_id),
         imdb_id: m.imdb_id.clone(),
         collection: m.collection.as_ref().map(|c| c.title.clone()),
         certification: m.certification.clone(),
@@ -148,7 +148,7 @@ pub(crate) fn hit_to_lookup(h: &SearchHit, library_id: Option<i64>) -> LookupRes
     }
 }
 
-fn blank_movie() -> MovieDto {
+pub(crate) fn blank_movie() -> MovieDto {
     MovieDto {
         id: 0,
         tmdb_id: 0,
@@ -188,6 +188,7 @@ fn blank_movie() -> MovieDto {
         cast: Vec::new(),
         added: chrono::Utc::now(),
         last_refreshed: None,
+        custom: false,
     }
 }
 

@@ -200,7 +200,7 @@ fn commit(stage: &Path, base: &Path, rels: &[String], extra: Option<&str>) -> Re
 }
 
 impl BooksService {
-    async fn fetch_cover(&self, url: Option<&str>) -> Option<Vec<u8>> {
+    pub(crate) async fn fetch_cover(&self, url: Option<&str>) -> Option<Vec<u8>> {
         let url = url.filter(|u| u.starts_with("http://") || u.starts_with("https://"))?;
         let res = self
             .http
@@ -217,7 +217,12 @@ impl BooksService {
         tags::image_mime(&bytes).map(|_| bytes.to_vec())
     }
 
-    async fn book_tags(&self, a: &AuthorDto, b: &BookDto, narrator: Option<String>) -> Result<BookTags> {
+    pub(crate) async fn book_tags(
+        &self,
+        a: &AuthorDto,
+        b: &BookDto,
+        narrator: Option<String>,
+    ) -> Result<BookTags> {
         let preferred = editions::list(&self.db, b.id)
             .await?
             .into_iter()
@@ -375,7 +380,13 @@ impl BookImportApi<'_> {
         let config = svc.naming_config().await?;
         let mut naming = BookNaming::new(&a, &b);
         naming.quality = Some(quality.quality);
-        naming.narrator.clone_from(&parsed.narrator);
+        // The release name's narrator first, then the recording's (RFX-86).
+        let narrator = match parsed.narrator.clone() {
+            Some(n) => Some(n),
+            None if format == BookFormat::Audiobook => svc.stored_narrators(b.id).await,
+            None => None,
+        };
+        naming.narrator.clone_from(&narrator);
         let sources: Vec<&Path> = unit.files.iter().map(|(p, _)| p.as_path()).collect();
         let (relative, parts) = destination(&settings.naming, &naming, format, &sources, &config);
         let rels: Vec<String> = if parts.is_empty() {
@@ -409,7 +420,7 @@ impl BookImportApi<'_> {
             None
         };
         let mut tags = if writes {
-            Some(svc.book_tags(&a, &b, parsed.narrator.clone()).await?)
+            Some(svc.book_tags(&a, &b, narrator.clone()).await?)
         } else {
             None
         };
@@ -506,7 +517,11 @@ impl BookImportApi<'_> {
             .await
             .map_err(|e| BooksError::Internal(e.to_string()))?;
         row.quality = quality;
-        row.narrator = parsed.narrator.clone().or(row.narrator);
+        row.narrator = parsed
+            .narrator
+            .clone()
+            .or(row.narrator)
+            .or_else(|| narrator.clone());
         row.bitrate_kbps = parsed.bitrate_kbps.or(row.bitrate_kbps);
         row.release_group.clone_from(&parsed.release_group);
         row.scene_name = d.release_title.clone();

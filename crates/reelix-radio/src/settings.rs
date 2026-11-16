@@ -119,6 +119,28 @@ impl RadioService {
             }
         }
         s.enabled_providers = providers;
+        // Catch-up only for sources that have catch-up pages (RFX-96).
+        let mut catchup: Vec<String> = Vec::new();
+        for p in s
+            .catchup_providers
+            .iter()
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+        {
+            let Some(provider) = self.providers.get(p) else {
+                return Err(RadioError::Validation(format!("unknown radio source {p}")));
+            };
+            if !provider.has_catchup() {
+                return Err(RadioError::Validation(format!(
+                    "{} has no catch-up to fetch",
+                    provider.name()
+                )));
+            }
+            if !catchup.iter().any(|x| x == p) {
+                catchup.push(p.to_owned());
+            }
+        }
+        s.catchup_providers = catchup;
         if s.max_lookups_per_refresh == 0 {
             s.max_lookups_per_refresh = RadioSettingsDto::default().max_lookups_per_refresh;
         }

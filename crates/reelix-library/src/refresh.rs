@@ -12,12 +12,16 @@ use crate::repo::{movies, series};
 use crate::series::apply_series_metadata;
 
 impl LibraryService {
-    /// Refreshes one movie from TMDB. A movie removed from TMDB is marked `deleted`.
+    /// Refreshes one movie from TMDB. A movie removed from TMDB is marked `deleted`. A custom
+    /// movie (typed details, no TMDB match) is left as it is.
     pub async fn refresh_movie(&self, id: i64) -> Result<()> {
         let profiles = self.profiles().await?;
         let mut m = movies::get(&self.db, id, &profiles)
             .await?
             .ok_or_else(|| LibraryError::not_found("movie", id))?;
+        if m.custom {
+            return Ok(());
+        }
         let meta = match self.metadata.movie(m.tmdb_id).await {
             Ok(meta) => meta,
             Err(MetaError::NotFound) => {
@@ -81,9 +85,13 @@ impl LibraryService {
         Ok(())
     }
 
-    /// Refreshes one series: metadata, seasons and episodes (added/updated/removed).
+    /// Refreshes one series: metadata, seasons and episodes (added/updated/removed). A custom
+    /// series keeps its typed details; its episodes come from its files at each scan.
     pub async fn refresh_series(&self, id: i64) -> Result<()> {
         let mut s = self.series_row(id).await?;
+        if s.custom {
+            return Ok(());
+        }
         let tmdb = s.tmdb_id.unwrap_or_default();
         let meta = match crate::series::series_metadata(
             self.metadata.as_ref(),
@@ -114,8 +122,28 @@ impl LibraryService {
         misc::set_alt_titles(&self.db, MediaKind::Series, id, &alts).await?;
         misc::set_credits(&self.db, MediaKind::Series, id, &cast_of(&meta.credits)).await?;
         self.sync_episodes(id, &meta, false).await?;
+        self.refresh_episode_map(id, tmdb).await;
         self.emit("series", "updated", id);
         Ok(())
+    }
+
+    /// Keeps the series' episodes in aired order (TMDB's episode group) mapped to TMDB's
+    /// numbers, for files named with TVDB or broadcast numbers. The map is removed when the
+    /// series has no such group or it numbers every episode as TMDB does. A failure is logged
+    /// and the old map kept: it never fails the refresh.
+    pub(crate) async fn refresh_episode_map(&self, id: i64, tmdb_id: u32) {
+        let map = match self.metadata.episode_order(tmdb_id).await {
+            Ok(group) => group.and_then(|g| {
+                reelix_import::episode_map::EpisodeOrderMap::new(g.id.clone(), g.name.clone(), g.numbering())
+            }),
+            Err(e) => {
+                tracing::warn!(id, tmdb_id, error = %e, "episode groups could not be read; the old episode map is kept");
+                return;
+            }
+        };
+        if let Err(e) = series::set_episode_map(&self.db, id, map.as_ref()).await {
+            tracing::warn!(id, error = %e, "the episode map could not be saved");
+        }
     }
 
     /// Refreshes movies (`None` = all), then rescans per the media-management setting.

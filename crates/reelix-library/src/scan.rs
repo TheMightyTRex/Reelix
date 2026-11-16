@@ -8,7 +8,10 @@ use futures::stream::{self, StreamExt};
 use reelix_api_types::library::{LibrarySearchKind, SearchRequest};
 
 use reelix_decision::{FormatInput, QualityProfile, matching_formats, score_formats};
-use reelix_import::files::{FileKind, FoundFile, SampleRules, ScanOptions, detect_sample, scan_async};
+use reelix_import::episode_map::match_by_episode_map;
+use reelix_import::files::{
+    FileKind, FoundFile, SampleRules, ScanOptions, detect_extra, detect_sample, is_disc_image, scan_async,
+};
 use reelix_import::matching::{ExpectedEpisode, match_parsed_episodes};
 use reelix_import::mediainfo::{MediaInfo, ProbeConfig, probe};
 use reelix_parser::{ParsedRelease, Quality, QualityModel, parse_path};
@@ -67,6 +70,20 @@ pub(crate) fn score(
     (ids, s)
 }
 
+/// Parses a film file's name; a disc image is BR-DISK unless its name says DVD.
+fn parse_film(source: &str, disc_image: bool) -> ParsedRelease {
+    let mut parsed = parse_path(source);
+    if disc_image
+        && !matches!(
+            parsed.quality.quality,
+            Quality::BrDisk | Quality::Dvd | Quality::DvdR
+        )
+    {
+        parsed.quality.quality = Quality::BrDisk;
+    }
+    parsed
+}
+
 /// Quality from the name, refined by the probed resolution when the name has none.
 fn quality_of(parsed: &ParsedRelease, info: Option<&MediaInfo>) -> QualityModel {
     let mut q = parsed.quality;
@@ -107,7 +124,32 @@ impl LibraryService {
         }
     }
 
-    /// Scans a movie folder; keeps the largest non-sample video as the movie file.
+    /// A film folder's videos and disc images (`.iso`, `.img`), extras left out.
+    async fn films_in(&self, folder: &Path) -> Vec<FoundFile> {
+        if !folder.is_dir() {
+            return Vec::new();
+        }
+        let opts = ScanOptions {
+            include_non_video: true,
+            ..ScanOptions::default()
+        };
+        match scan_async(folder.to_path_buf(), opts).await {
+            Ok(v) => v
+                .into_iter()
+                .filter(|f| match f.kind {
+                    FileKind::Video => f.extra.is_none(),
+                    _ => is_disc_image(&f.path) && detect_extra(&f.path, Some(folder)).is_none(),
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!(folder = %folder.display(), error = %e, "scan failed");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Scans a movie folder; keeps the largest non-sample video or disc image as the movie
+    /// file. A disc image gets the BR-DISK quality and no media details.
     pub async fn scan_movie(&self, id: i64) -> Result<ScanReport> {
         let cache = self.profiles().await?;
         let Some(m) = movies::get(&self.db, id, &cache).await? else {
@@ -117,7 +159,7 @@ impl LibraryService {
         let mut report = ScanReport::default();
         let existing = files::list(&self.db, FileTable::Movie, Some(&[id])).await?;
         let candidate = self
-            .videos_in(&folder)
+            .films_in(&folder)
             .await
             .into_iter()
             .filter(|f| !named_sample(f))
@@ -141,18 +183,24 @@ impl LibraryService {
         if let Some(f) = candidate {
             let rel = f.relative.to_string_lossy().into_owned();
             let prev = existing.iter().find(|e| e.relative_path == rel);
-            if prev.is_some_and(|p| p.size == f.size && p.media_info.is_some()) {
+            let disc = is_disc_image(&f.path);
+            // A disc image is never probed, so it has no media details to wait for.
+            if prev.is_some_and(|p| p.size == f.size && (p.media_info.is_some() || disc)) {
                 // Unchanged: only rescore (profile / formats may have changed).
                 let p = prev.unwrap();
-                let parsed = parse_path(p.scene_name.as_deref().unwrap_or(&f.path.to_string_lossy()));
+                let parsed = parse_film(p.scene_name.as_deref().unwrap_or(&f.path.to_string_lossy()), disc);
                 let (ids, s) = score(&parsed, p.size, cache.profile(m.quality_profile_id), &cache);
                 files::set_scores(&self.db, FileTable::Movie, p.id, &ids, s).await?;
             } else {
-                let info = self.prober().await?.probe(&f.path).await;
+                let info = if disc {
+                    None
+                } else {
+                    self.prober().await?.probe(&f.path).await
+                };
                 let source = prev
                     .and_then(|p| p.scene_name.clone())
                     .unwrap_or_else(|| f.path.to_string_lossy().into_owned());
-                let parsed = parse_path(&source);
+                let parsed = parse_film(&source, disc);
                 let row = self.file_row(
                     id,
                     None,
@@ -222,6 +270,16 @@ impl LibraryService {
         let s = self.series_row(id).await?;
         let folder = PathBuf::from(&s.path);
         let mut report = ScanReport::default();
+        let videos = self.videos_in(&folder).await;
+        if s.custom {
+            // No episode list from a source: the files make it.
+            let paths: Vec<PathBuf> = videos
+                .iter()
+                .filter(|f| !named_sample(f))
+                .map(|f| f.path.clone())
+                .collect();
+            self.custom_episodes_from_files(&s, &paths).await?;
+        }
         let eps = repo::episodes(&self.db, id, None).await?;
         let expected: Vec<ExpectedEpisode> = eps
             .iter()
@@ -236,6 +294,7 @@ impl LibraryService {
                 scene_absolute: e.scene_absolute_number,
             })
             .collect();
+        let episode_map = repo::episode_map(&self.db, id).await?;
         let existing = files::list(&self.db, FileTable::Episode, Some(&[id])).await?;
         let by_rel: HashMap<&str, &FileRow> =
             existing.iter().map(|f| (f.relative_path.as_str(), f)).collect();
@@ -243,7 +302,7 @@ impl LibraryService {
         let mut seen_files = HashSet::new();
         let mut linked: HashMap<i64, i64> = HashMap::new();
 
-        for f in self.videos_in(&folder).await {
+        for f in videos {
             if named_sample(&f) {
                 continue;
             }
@@ -253,16 +312,25 @@ impl LibraryService {
                 .and_then(|p| p.scene_name.clone())
                 .unwrap_or_else(|| f.path.to_string_lossy().into_owned());
             let parsed = parse_path(&source);
+            // Numbers TMDB's own cannot place are read in aired order (TVDB and broadcast),
+            // when the series has that map: libraries named by Sonarr use TVDB's numbers.
             let matched = match match_parsed_episodes(&parsed, series_type(s.series_type), &expected) {
-                Ok(m) if !m.episode_ids.is_empty() => m,
-                _ => {
-                    report.unmatched.push(rel);
-                    continue;
-                }
+                Ok(m) if !m.episode_ids.is_empty() => m.episode_ids,
+                _ => match parsed
+                    .episode()
+                    .zip(episode_map.as_ref())
+                    .and_then(|(info, map)| match_by_episode_map(info, map, &expected))
+                {
+                    Some(ids) => ids,
+                    None => {
+                        report.unmatched.push(rel);
+                        continue;
+                    }
+                },
             };
             let season = eps
                 .iter()
-                .find(|e| e.id == matched.episode_ids[0])
+                .find(|e| e.id == matched[0])
                 .map_or(0, |e| e.season_number);
             let fid = if prev.is_some_and(|p| p.size == f.size && p.media_info.is_some()) {
                 let p = prev.unwrap();
@@ -292,7 +360,7 @@ impl LibraryService {
                 fid
             };
             seen_files.insert(fid);
-            for e in matched.episode_ids {
+            for e in matched {
                 linked.insert(e, fid);
             }
         }
