@@ -40,6 +40,12 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 - **Books: authors whose works link a series by key now load.** Open Library has started to send some works' series as `{"series": {"key": "/series/OL…L"}, "position": "12"}` instead of text, and Reelix failed the whole author with "invalid type: map, expected a string" (Agatha Christie, Isaac Asimov, Douglas Adams and others). Both forms are read now; the linked form is skipped until Reelix reads series records.
 - **Migration: a profile name used by another kind no longer fails.** Quality profile names are unique across films and series, music and books, so migrating Lidarr after Radarr failed on Lidarr's "Any" ("a quality profile named Any already exists") and skipped the artists using it. Such a profile is now created as "Any (Lidarr)", and the preview says so. When Reelix already has a profile of the same name and kind, the preview now says that Reelix's own is used and the app's changes to it aren't copied.
 
+### Changed
+- **Less work on small servers.** An RSS sync reads every monitored series' episodes and files in a few queries instead of about five per series, and the book library once instead of once for each book release. Release profile terms are compiled once instead of for every release checked. A series refresh no longer rewrites episodes whose details did not change. The job runner sleeps until the next queued job is due (at most 30 seconds; a new or finished job wakes it at once) instead of reading the jobs table every second. The download monitor reads a client's tracked downloads once per poll instead of once per item. Nothing visible changes.
+
+### Security
+- **One TLS stack.** librespot's proxy connector (`hyper-proxy2`) pulled in rustls 0.22 and rustls-webpki 0.102, which have known advisories (RUSTSEC-2026-0346, -0349 and the webpki ones). A copy of `hyper-proxy2` moved to hyper-rustls 0.27 is now patched in (`vendor/hyper-proxy2`), so only rustls 0.23 is built, and the deny.toml exceptions for them are gone.
+
 ## [0.8.7] - 2026-11-09
 
 ### Fixed
