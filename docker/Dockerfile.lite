@@ -26,6 +26,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 ARG REELIX_FEATURES
 COPY --from=planner /src/recipe.json recipe.json
+# The workspace patches hyper-proxy2 from vendor/, which cargo needs before cooking the dependencies.
+COPY vendor vendor
 RUN cargo chef cook --release --locked --recipe-path recipe.json --package reelix-server \
     --no-default-features ${REELIX_FEATURES:+--features "$REELIX_FEATURES"}
 COPY . .
@@ -38,6 +40,8 @@ FROM chef AS web
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install --locked trunk
 COPY --from=planner /src/recipe.json recipe.json
+# The workspace patches hyper-proxy2 from vendor/, which cargo needs before cooking the dependencies.
+COPY vendor vendor
 RUN cargo chef cook --release --locked --recipe-path recipe.json \
     --target wasm32-unknown-unknown --package reelix-web
 COPY . .
