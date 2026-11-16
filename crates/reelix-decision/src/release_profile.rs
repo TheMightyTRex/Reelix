@@ -124,11 +124,7 @@ impl ReleaseProfile {
                 self.required.join(", ")
             ));
         }
-        for (raw, term) in self
-            .ignored
-            .iter()
-            .filter_map(|t| Some((t, Term::cached(t)?)))
-        {
+        for (raw, term) in self.ignored.iter().filter_map(|t| Some((t, Term::cached(t)?))) {
             if term.matches(title, &lower) {
                 out.push(format!("Contains ignored term {raw:?}"));
             }
