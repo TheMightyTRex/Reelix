@@ -12,6 +12,7 @@ use std::time::Duration;
 use reelix_api_types::library::{ImportMode, MediaManagementSettings};
 use reelix_core::MediaKind;
 use reelix_decision::engine::Scored;
+use reelix_import::episode_map::match_by_episode_map;
 use reelix_import::episode_title::{EpisodeTitle, match_episode_title};
 use reelix_import::files::{
     FileKind, FoundFile, PermissionSettings, SampleRules, ScanOptions, TransferMode, TransferOptions,
@@ -92,8 +93,9 @@ pub struct PlannedFile {
     pub extras: Vec<(PathBuf, String)>,
     /// Scene name stored with the library file.
     pub scene_name: Option<String>,
-    /// The episode was found by the title in the name, not by its number (other numbering).
-    pub matched_by_title: bool,
+    /// The episode was found by the title in the name or by the series' aired-order map, not by
+    /// TMDB's number (other numbering: broadcast or TVDB).
+    pub other_numbering: bool,
 }
 
 impl PlannedFile {
@@ -120,8 +122,8 @@ pub struct ImportedItem {
     pub extras: Vec<PathBuf>,
     pub scene_name: Option<String>,
     pub media_info: Option<MediaInfo>,
-    /// See [`PlannedFile::matched_by_title`].
-    pub matched_by_title: bool,
+    /// See [`PlannedFile::other_numbering`].
+    pub other_numbering: bool,
 }
 
 /// Resolves the configured import mode for a download.
@@ -272,7 +274,7 @@ impl<'a> FileImporter<'a> {
             rejections,
             extras: Vec::new(),
             scene_name: None,
-            matched_by_title: false,
+            other_numbering: false,
         }
     }
 
@@ -404,6 +406,17 @@ impl<'a> FileImporter<'a> {
             })
             .collect();
         let only_one = non_samples.len() == 1;
+        // Numbers read in aired order (TMDB's episode group, as TVDB and broadcast names use).
+        let by_map = |p: &PlannedFile| -> Option<Vec<i64>> {
+            match_by_episode_map(p.parsed.episode()?, st.episode_map.as_ref()?, &expected)
+        };
+        // When a file's numbers fit only the aired order, every file of the download is read in
+        // that order, so a season pack is not split between the two numberings.
+        let aired_order = st.episode_map.is_some()
+            && non_samples.iter().any(|i| {
+                let p = &planned[*i];
+                match_parsed_episodes(&p.parsed, st.series_type, &expected).is_err() && by_map(p).is_some()
+            });
         // Larger files claim episodes first.
         let mut order = non_samples.clone();
         order.sort_by_key(|i| std::cmp::Reverse(planned[*i].size));
@@ -416,16 +429,26 @@ impl<'a> FileImporter<'a> {
                 None
             };
             let by_title = episode_by_title(p, release_title, &titles);
-            p.matched_by_title = by_title.is_some();
-            let ids = match match_parsed_episodes(&p.parsed, st.series_type, &expected) {
-                _ if by_title.is_some() => by_title.into_iter().collect(),
-                Ok(m) if !m.episode_ids.is_empty() => m.episode_ids,
-                Err(_) if only_one && !hinted.is_empty() => hinted.clone(),
-                Ok(_) => {
+            let mapped = if aired_order { by_map(p) } else { None };
+            let numbers = match_parsed_episodes(&p.parsed, st.series_type, &expected);
+            // Order: the title, the grab's episodes (one file the numbers cannot place), the
+            // aired-order map, then TMDB's numbers.
+            let ids = match (by_title, mapped, numbers) {
+                (Some(id), _, _) => {
+                    p.other_numbering = true;
+                    vec![id]
+                }
+                (None, _, Err(_)) if only_one && !hinted.is_empty() => hinted.clone(),
+                (None, Some(ids), _) => {
+                    p.other_numbering = true;
+                    ids
+                }
+                (None, None, Ok(m)) if !m.episode_ids.is_empty() => m.episode_ids,
+                (None, None, Ok(_)) => {
                     p.rejections.push("No episodes matched the file name".into());
                     continue;
                 }
-                Err(e) => {
+                (None, None, Err(e)) => {
                     p.rejections.push(format!("Unable to match episodes: {e}"));
                     continue;
                 }
@@ -694,7 +717,7 @@ impl<'a> FileImporter<'a> {
             extras,
             scene_name: p.scene_name.clone(),
             media_info: p.media_info.clone(),
-            matched_by_title: p.matched_by_title,
+            other_numbering: p.other_numbering,
         })
     }
 }
