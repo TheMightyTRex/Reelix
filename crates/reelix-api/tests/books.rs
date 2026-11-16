@@ -475,6 +475,54 @@ async fn books_routes_flow_and_permissions() {
     .await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(saved["naming"]["ebook_file"], "{Author Name} - {Book Title}");
+    assert_eq!(saved["audiobook_metadata"]["audible"], true);
+    assert_eq!(saved["audiobook_metadata"]["librofm"], false);
+
+    // Audiobook sources (RFX-86): the region is checked; with every source deactivated a
+    // lookup says so instead of asking anyone.
+    let mut sources = saved.clone();
+    sources["audiobook_metadata"]["region"] = json!("xx");
+    let (s, err) = call(
+        &app,
+        Method::PUT,
+        "/api/v1/settings/books",
+        &admin,
+        Some(sources.clone()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{err}");
+    sources["audiobook_metadata"] =
+        json!({"audible": false, "audnexus": false, "librofm": false, "region": " UK "});
+    let (s, stored) = call(&app, Method::PUT, "/api/v1/settings/books", &admin, Some(sources)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(stored["audiobook_metadata"]["region"], "uk");
+    let (s, _) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/books/{hid}/audiobook"),
+        &plain,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, err) = call(
+        &app,
+        Method::GET,
+        &format!("/api/v1/books/{hid}/audiobook"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{err}");
+    let (s, _) = call(
+        &app,
+        Method::POST,
+        "/api/v1/books/999999/audiobook/refresh",
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
 
     // Deletes.
     let (s, _) = call(
@@ -544,8 +592,11 @@ async fn openapi_documents_book_routes() {
         "/api/v1/bookrootfolders",
         "/api/v1/bookimport/scan",
         "/api/v1/settings/books",
+        "/api/v1/books/{id}/audiobook",
+        "/api/v1/books/{id}/audiobook/refresh",
     ] {
         assert!(doc["paths"][p].is_object(), "{p} missing");
     }
     assert!(doc["components"]["schemas"]["AuthorDto"].is_object());
+    assert!(doc["components"]["schemas"]["AudiobookDetailsDto"].is_object());
 }

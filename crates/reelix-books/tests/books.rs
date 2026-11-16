@@ -909,3 +909,117 @@ async fn library_import_and_root_folders() {
         Err(BooksError::Validation(_))
     ));
 }
+
+/// RFX-86: Audible gives the recording, Audnexus fills the narrator Audible left out, the
+/// answer is stored and reused, the book gets its ASIN, and a failed refresh keeps it.
+#[tokio::test]
+async fn audiobook_details_from_audible_and_audnexus() {
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let env = env().await;
+    let audible = MockServer::start().await;
+    let nexus = MockServer::start().await;
+    env.svc
+        .set_audiobook_sources_options(reelix_metadata::AudiobookSourcesOptions {
+            audible_url: Some(audible.uri()),
+            audnexus_url: nexus.uri(),
+            retry: reelix_metadata::http::RetryPolicy {
+                max_retries: 0,
+                ..Default::default()
+            },
+            per_second: 100,
+            ..Default::default()
+        });
+    let a = env
+        .svc
+        .add_author(add_req(&env, "OL1A", AuthorMonitor::All))
+        .await
+        .unwrap();
+    let books = books_of(&env, a.id).await;
+    let empire = by_title(&books, "The Final Empire");
+    assert!(empire.monitored_audiobook);
+    assert!(empire.asin.is_none());
+
+    Mock::given(method("GET"))
+        .and(path("/1.0/catalog/products"))
+        .and(query_param("title", "The Final Empire"))
+        .and(query_param("author", "Brandon Sanderson"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"products": [
+            {"asin": "B002UZMLXM", "title": "The Final Empire", "format_type": "abridged",
+             "authors": [{"name": "Brandon Sanderson"}], "narrators": [{"name": "Somebody Else"}]},
+            {"asin": "B002UZJGYY", "title": "The Final Empire: Mistborn, Book 1", "format_type": "unabridged",
+             "authors": [{"name": "Brandon Sanderson"}], "runtime_length_min": 1490,
+             "release_date": "2008-08-15", "language": "english", "publisher_name": "Recorded Books",
+             "series": [{"title": "Mistborn", "sequence": "1"}]},
+            {"asin": "B000000001", "title": "Elantris", "authors": [{"name": "Brandon Sanderson"}]}
+        ]})))
+        .expect(1)
+        .mount(&audible)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/books/B002UZJGYY"))
+        .and(query_param("region", "us"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "asin": "B002UZJGYY", "title": "The Final Empire: Mistborn, Book 1",
+            "authors": [{"name": "Brandon Sanderson"}], "narrators": [{"name": "Michael Kramer"}],
+            "runtimeLengthMin": 1490
+        })))
+        .expect(1)
+        .mount(&nexus)
+        .await;
+
+    let d = env.svc.audiobook_details(empire.id, false).await.unwrap();
+    assert!(d.found);
+    assert_eq!(
+        d.asin.as_deref(),
+        Some("B002UZJGYY"),
+        "the unabridged recording wins"
+    );
+    assert_eq!(d.narrators, vec!["Michael Kramer".to_string()]);
+    assert_eq!(d.runtime_minutes, Some(1490));
+    assert_eq!(d.abridged, Some(false));
+    assert_eq!(d.recording_date.as_deref(), Some("2008-08-15"));
+    assert_eq!(d.sources, vec!["audible".to_string(), "audnexus".to_string()]);
+    assert_eq!(d.series[0].title, "Mistborn");
+    let b = env.svc.get_book(empire.id).await.unwrap();
+    assert_eq!(b.asin.as_deref(), Some("B002UZJGYY"));
+
+    // Stored: asked again, nobody is called (the mocks expect one call each).
+    let again = env.svc.audiobook_details(empire.id, false).await.unwrap();
+    assert_eq!(again.narrators, d.narrators);
+    audible.verify().await;
+    nexus.verify().await;
+
+    // A forced refresh that fails keeps the stored details.
+    audible.reset().await;
+    nexus.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&audible)
+        .await;
+    let kept = env.svc.audiobook_details(empire.id, true).await.unwrap();
+    assert_eq!(kept.asin.as_deref(), Some("B002UZJGYY"));
+    assert_eq!(kept.narrators, d.narrators);
+
+    // A book no source knows is stored as not found; with nothing stored a failure is an error.
+    let well = by_title(&books, "The Well of Ascension");
+    assert!(env.svc.audiobook_details(well.id, false).await.is_err());
+    audible.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/1.0/catalog/products"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"products": []})))
+        .mount(&audible)
+        .await;
+    let none = env.svc.audiobook_details(well.id, false).await.unwrap();
+    assert!(!none.found);
+    assert!(none.narrators.is_empty());
+
+    // The refresh job looks up only monitored audiobooks that are missing or stale.
+    let n = env.svc.refresh_audiobooks_of(&[a.id]).await.unwrap();
+    let monitored = books
+        .iter()
+        .filter(|b| b.monitored_audiobook && b.id != empire.id && b.id != well.id)
+        .count();
+    assert_eq!(n, monitored);
+}
