@@ -149,16 +149,16 @@ fn check(source: &str, level: HealthLevel, message: String) -> HealthCheck {
     }
 }
 
-/// Scheduled tasks (admin).
+/// Scheduled tasks (admin or View system).
 #[utoipa::path(get, path = "/api/v1/system/tasks", tag = "system",
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Scheduled tasks", body = Vec<TaskDto>),
         (status = 401, description = "Not authenticated", body = ApiErrorBody),
-        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 403, description = "Needs Admin or View system", body = ApiErrorBody),
     ))]
 pub async fn tasks(State(state): State<AppState>, user: CurrentUser) -> ApiResult<ApiJson<Vec<TaskDto>>> {
-    user.require(Permissions::ADMIN)?;
+    user.require(Permissions::VIEW_SYSTEM)?;
     let db = state.db();
     let pace = state.jobs().pace();
     let mut out = Vec::new();
@@ -254,21 +254,21 @@ pub struct JobsQuery {
     pub limit: Option<i64>,
 }
 
-/// Recent jobs, newest first (admin).
+/// Recent jobs, newest first (admin or View system).
 #[utoipa::path(get, path = "/api/v1/system/jobs", tag = "system",
     params(JobsQuery),
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Recent jobs", body = Vec<JobDto>),
         (status = 401, description = "Not authenticated", body = ApiErrorBody),
-        (status = 403, description = "Admin only", body = ApiErrorBody),
+        (status = 403, description = "Needs Admin or View system", body = ApiErrorBody),
     ))]
 pub async fn jobs(
     State(state): State<AppState>,
     user: CurrentUser,
     ApiQuery(q): ApiQuery<JobsQuery>,
 ) -> ApiResult<ApiJson<Vec<JobDto>>> {
-    user.require(Permissions::ADMIN)?;
+    user.require(Permissions::VIEW_SYSTEM)?;
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
     let jobs = state.db().jobs().recent(limit).await?;
     Ok(ApiJson(
