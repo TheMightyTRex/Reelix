@@ -130,6 +130,30 @@ fn show(id: u32, tvdb: u32, title: &str) -> SeriesMetadata {
 struct FakeMeta {
     movies: Mutex<HashMap<u32, MovieMetadata>>,
     series: Mutex<HashMap<u32, SeriesMetadata>>,
+    /// TMDB's find by external id, keyed `tvdb:{id}` or `imdb:{id}`.
+    finds: Mutex<HashMap<String, Vec<SearchHit>>>,
+}
+
+fn series_hit(tmdb: u32, tvdb: Option<u32>, title: &str) -> SearchHit {
+    SearchHit {
+        kind: reelix_core::MediaKind::Series,
+        tmdb_id: Some(tmdb),
+        tvdb_id: tvdb,
+        imdb_id: None,
+        title: title.into(),
+        original_title: None,
+        year: Some(2020),
+        release_date: None,
+        overview: None,
+        poster: None,
+        backdrop: None,
+        genre_ids: vec![],
+        original_language: None,
+        vote_average: 0.0,
+        vote_count: 0,
+        popularity: 0.0,
+        adult: false,
+    }
 }
 
 #[async_trait]
@@ -167,11 +191,15 @@ impl MetadataSource for FakeMeta {
     }
     async fn find(
         &self,
-        _s: ExternalSource,
-        _id: &str,
+        s: ExternalSource,
+        id: &str,
         _k: reelix_core::MediaKind,
     ) -> Result<Vec<SearchHit>, MetaError> {
-        Ok(vec![])
+        let key = match s {
+            ExternalSource::Tvdb => format!("tvdb:{id}"),
+            ExternalSource::Imdb => format!("imdb:{id}"),
+        };
+        Ok(self.finds.lock().unwrap().get(&key).cloned().unwrap_or_default())
     }
 }
 
@@ -179,6 +207,7 @@ impl MetadataSource for FakeMeta {
 
 struct Env {
     svc: Arc<MigrateService>,
+    meta: Arc<FakeMeta>,
     db: Db,
     providers: Arc<ProviderService>,
     library: Arc<LibraryService>,
@@ -230,11 +259,12 @@ async fn env() -> Env {
         library: Some(library.clone()),
         books: None,
         music: None,
-        metadata: meta,
+        metadata: meta.clone(),
         metadata_ready: Arc::new(|| true),
     };
     Env {
         svc: Arc::new(MigrateService::new(targets, reqwest::Client::new())),
+        meta,
         db,
         providers,
         library,
@@ -685,6 +715,93 @@ async fn sonarr_after_radarr_shares_the_download_client() {
         monitored.contains(&(1, true)) && monitored.contains(&(2, false)),
         "{monitored:?}"
     );
+}
+
+/// RFX-79: series TMDB cannot find by the ids Sonarr gave first are found by their other ids.
+#[tokio::test]
+async fn sonarr_series_found_by_tvdb_or_imdb_id() {
+    let env = env().await;
+    {
+        let mut series = env.meta.series.lock().unwrap();
+        // TMDB has no TVDB link for these two, so a lookup by TVDB id alone finds nothing.
+        for (id, title) in [(7001, "Mystery"), (7002, "Stale")] {
+            let mut m = show(id, 0, title);
+            m.tvdb_id = None;
+            series.insert(id, m);
+        }
+        let mut m = show(7003, 0, "Other");
+        m.tvdb_id = None;
+        series.insert(7003, m);
+        let mut finds = env.meta.finds.lock().unwrap();
+        finds.insert("imdb:tt5001".into(), vec![series_hit(7001, None, "Mystery")]);
+        finds.insert("tvdb:5002".into(), vec![series_hit(7002, Some(5002), "Stale")]);
+        // Linked to another TVDB id: a different show, so it is not used.
+        finds.insert("imdb:tt5003".into(), vec![series_hit(7003, Some(6666), "Other")]);
+    }
+    let s = MockServer::start().await;
+    let v = "/api/v3";
+    mock(
+        &s,
+        v,
+        "/system/status",
+        json!({"appName": "Sonarr", "version": "4.0.1"}),
+    )
+    .await;
+    mock(&s, v, "/tag", json!([])).await;
+    mock(&s, v, "/rootfolder", json!([{"id": 1, "path": "/old/tv"}])).await;
+    mock(&s, v, "/qualityprofile", profile()).await;
+    mock(&s, v, "/indexer", json!([])).await;
+    mock(&s, v, "/downloadclient", json!([])).await;
+    mock(&s, v, "/remotepathmapping", json!([])).await;
+    let one = |id: u32, title: &str, tvdb: u32, tmdb: u32, imdb: Option<&str>| {
+        json!({"id": id, "title": title, "tvdbId": tvdb, "tmdbId": tmdb, "imdbId": imdb,
+               "path": format!("/old/tv/{title}"), "rootFolderPath": "/old/tv", "monitored": false,
+               "seasonFolder": true, "seriesType": "standard", "qualityProfileId": 4, "tags": [],
+               "seasons": []})
+    };
+    mock(
+        &s,
+        v,
+        "/series",
+        json!([
+            one(1, "Mystery", 5001, 0, Some("tt5001")),
+            one(2, "Stale", 5002, 9999, None),
+            one(3, "Other", 5003, 0, Some("tt5003")),
+        ]),
+    )
+    .await;
+    env.svc
+        .start(MigrateRunRequest {
+            connection: connection(&env, SourceKind::Sonarr, &s),
+            categories: vec![],
+            search_missing: false,
+        })
+        .unwrap();
+    let run = wait(&env.svc).await;
+    assert_eq!(run.state, MigrateState::Finished, "{run:#?}");
+    // Only an IMDb id leads to TMDB's entry.
+    assert_eq!(
+        find(&run.items, "series:1").action,
+        MigrateAction::Create,
+        "{run:#?}"
+    );
+    let mystery = env.library.series_by_tmdb(7001).await.unwrap().unwrap();
+    assert_eq!(mystery.tvdb_id, Some(5001), "the TVDB id from Sonarr is kept");
+    // Sonarr's TMDB id no longer resolves; TMDB's find by TVDB id does.
+    assert_eq!(
+        find(&run.items, "series:2").action,
+        MigrateAction::Create,
+        "{run:#?}"
+    );
+    assert!(env.library.series_by_tmdb(7002).await.unwrap().is_some());
+    // The IMDb match names another TVDB id, so the series stays out.
+    let other = find(&run.items, "series:3");
+    assert_eq!(other.action, MigrateAction::Failed, "{run:#?}");
+    assert!(
+        other.detail.as_deref().unwrap_or_default().contains("not found"),
+        "{other:?}"
+    );
+    assert!(env.library.series_by_tmdb(7003).await.unwrap().is_none());
 }
 
 #[tokio::test]

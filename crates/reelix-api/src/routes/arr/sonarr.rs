@@ -318,6 +318,8 @@ struct SeasonBody {
 struct AddBody {
     tvdb_id: Option<u32>,
     tmdb_id: Option<u32>,
+    /// Used only to find a series that the TMDB and TVDB ids do not lead to.
+    imdb_id: Option<String>,
     quality_profile_id: i64,
     root_folder_path: Option<String>,
     path: Option<String>,
@@ -398,26 +400,29 @@ async fn add_series(
         _ => (SeriesMonitor::All, None),
     };
     let s = library(&state)?
-        .add_series(AddSeriesRequest {
-            tmdb_id: b.tmdb_id.filter(|t| *t > 0),
-            tvdb_id: b.tvdb_id.filter(|t| *t > 0),
-            quality_profile_id: b.quality_profile_id,
-            root_folder_id: root,
-            monitor,
-            seasons,
-            series_type: parse_series_type(b.series_type.as_deref()).unwrap_or_default(),
-            season_folder: b.season_folder,
-            monitor_new_items: if b.monitor_new_items.as_deref() == Some("none") {
-                NewItemMonitor::None
-            } else {
-                NewItemMonitor::All
+        .add_series_by_any_id(
+            AddSeriesRequest {
+                tmdb_id: b.tmdb_id.filter(|t| *t > 0),
+                tvdb_id: b.tvdb_id.filter(|t| *t > 0),
+                quality_profile_id: b.quality_profile_id,
+                root_folder_id: root,
+                monitor,
+                seasons,
+                series_type: parse_series_type(b.series_type.as_deref()).unwrap_or_default(),
+                season_folder: b.season_folder,
+                monitor_new_items: if b.monitor_new_items.as_deref() == Some("none") {
+                    NewItemMonitor::None
+                } else {
+                    NewItemMonitor::All
+                },
+                tags: b.tags,
+                search_on_add: b.add_options.search_for_missing_episodes,
+                search_cutoff_unmet: b.add_options.search_for_cutoff_unmet_episodes,
+                path,
+                added_by_request_id: None,
             },
-            tags: b.tags,
-            search_on_add: b.add_options.search_for_missing_episodes,
-            search_cutoff_unmet: b.add_options.search_for_cutoff_unmet_episodes,
-            path,
-            added_by_request_id: None,
-        })
+            b.imdb_id.as_deref(),
+        )
         .await?;
     created(series_json(&s))
 }
