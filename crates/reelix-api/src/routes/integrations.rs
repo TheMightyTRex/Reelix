@@ -226,7 +226,8 @@ fn bulk_ids(body: &Bytes) -> ApiResult<BulkIdsRequest> {
     }
 }
 
-/// Which import-list implementations yield movies/series (`video`) or artists/albums (`music`).
+/// Which import-list implementations yield movies/series (`video`), artists/albums (`music`) or
+/// books (`books`).
 #[utoipa::path(get, path = "/api/v1/importlists/kinds", tag = "integrations",
     security(("session" = []), ("api_key" = [])),
     responses(

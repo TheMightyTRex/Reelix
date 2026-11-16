@@ -274,6 +274,7 @@ impl Modules {
         search.set_radio(radio.clone());
         activity.set_radio(radio.clone());
         integrations.set_music(music.clone());
+        integrations.set_books(books.clone());
         // maintenance: backups, logs, update checks, server settings
         let maintenance =
             crate::maintenance::MaintenanceService::new(deps.db.clone(), deps.http.clone(), &deps.config)
