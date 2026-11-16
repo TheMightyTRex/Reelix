@@ -846,12 +846,13 @@ impl SearchService {
                     }
                 }
             }
-            let t = targets[&series_id].clone();
+            // Borrowed, not cloned: a series target holds every episode with its files.
+            let t = &targets[&series_id];
             if ids.len() > 1 {
-                self.auto_season(shared, &t, season, &ids, sum).await?;
+                self.auto_season(shared, t, season, &ids, sum).await?;
             } else {
                 let ep = t.episodes_by_id(&ids);
-                self.auto_episodes(shared, &t, &ep, sum).await?;
+                self.auto_episodes(shared, t, &ep, sum).await?;
             }
         }
         Ok(())

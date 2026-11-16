@@ -11,7 +11,7 @@ use reelix_api_types::library::{EpisodeDto, EpisodeFileDto, MovieDto, SeriesDto}
 
 use crate::LibraryService;
 use crate::error::Result;
-use crate::repo::{movies, series as repo};
+use crate::repo::{movies, placeholders, series as repo};
 
 /// Read-only library access for searching.
 pub struct SearchApi<'a> {
@@ -48,6 +48,36 @@ impl SearchApi<'_> {
         Ok(eps)
     }
 
+    /// [`Self::episodes_of`] (whole series) for many series at once, by series id. The same episodes and
+    /// files, read in a few queries instead of about five for each series.
+    pub async fn episodes_of_many(&self, series: &[SeriesDto]) -> Result<HashMap<i64, Vec<EpisodeDto>>> {
+        let mut out: HashMap<i64, Vec<EpisodeDto>> = series.iter().map(|s| (s.id, Vec::new())).collect();
+        for chunk in series.chunks(500) {
+            let ids: Vec<i64> = chunk.iter().map(|s| s.id).collect();
+            let sql = format!("series_id IN ({})", placeholders(ids.len()));
+            for e in repo::episodes_where(&self.svc.db, &sql, &ids).await? {
+                if let Some(eps) = out.get_mut(&e.series_id) {
+                    eps.push(e);
+                }
+            }
+        }
+        if out.values().flatten().any(|e| e.episode_file_id.is_some()) {
+            let mut files = self.svc.episode_files_of_many(series).await?;
+            for (series_id, eps) in &mut out {
+                let files: HashMap<i64, EpisodeFileDto> = files
+                    .remove(series_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|f| (f.file.id, f))
+                    .collect();
+                for e in eps.iter_mut() {
+                    e.episode_file = e.episode_file_id.and_then(|id| files.get(&id).cloned());
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Episodes by id (any series), with files attached.
     pub async fn episodes_by_ids(&self, ids: &[i64]) -> Result<Vec<EpisodeDto>> {
         if ids.is_empty() {
@@ -58,21 +88,15 @@ impl SearchApi<'_> {
         series_ids.sort_unstable();
         series_ids.dedup();
         let all = repo::load(&self.svc.db, Some(&series_ids), self.svc.today()).await?;
-        for s in &all {
-            let mut mine: Vec<EpisodeDto> = Vec::new();
-            let mut rest = Vec::new();
-            for e in eps.drain(..) {
-                if e.series_id == s.id {
-                    mine.push(e);
-                } else {
-                    rest.push(e);
-                }
-            }
-            self.attach_files(s, &mut mine).await?;
-            rest.extend(mine);
-            eps = rest;
-        }
+        // Sorted once, each series' episodes are one run of the list: no regrouping per series.
         eps.sort_by_key(|e| (e.series_id, e.season_number, e.episode_number));
+        for s in &all {
+            let from = eps.partition_point(|e| e.series_id < s.id);
+            let to = eps.partition_point(|e| e.series_id <= s.id);
+            if from < to {
+                self.attach_files(s, &mut eps[from..to]).await?;
+            }
+        }
         Ok(eps)
     }
 
