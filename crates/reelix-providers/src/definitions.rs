@@ -36,6 +36,8 @@ pub(crate) struct Loaded {
     pub upstream_count: usize,
     pub custom_count: usize,
     pub overridden: usize,
+    /// Built-in definitions added (those no downloaded or custom file replaced).
+    pub builtin: usize,
     pub failed: Vec<DefinitionLoadErrorDto>,
 }
 
@@ -165,6 +167,17 @@ pub(crate) fn load(root: &Path) -> Loaded {
     for (path, source, yaml) in winners {
         if let Err(e) = out.store.add_yaml(&yaml) {
             fail(&mut out, &path, source, e.to_string());
+        }
+    }
+    // Built-in definitions last, so a downloaded or custom one with the same id wins.
+    for yaml in reelix_indexers::definition::BUILTIN {
+        match reelix_indexers::definition::parse(yaml) {
+            Ok(def) if ids.contains(&def.id) => {}
+            Ok(_) => match out.store.add_yaml(yaml) {
+                Ok(()) => out.builtin += 1,
+                Err(e) => tracing::error!(error = %e, "built-in indexer definition failed to load"),
+            },
+            Err(e) => tracing::error!(error = %e, "built-in indexer definition failed to parse"),
         }
     }
     out

@@ -87,6 +87,9 @@ pub struct Definition {
     #[serde(default)]
     pub protocol: Option<String>,
     pub links: Vec<String>,
+    /// Old addresses of the site; a base URL set to one of them is replaced by `links[0]`.
+    #[serde(default)]
+    pub legacylinks: Vec<String>,
     #[serde(default)]
     pub caps: CapsDef,
     #[serde(default)]
