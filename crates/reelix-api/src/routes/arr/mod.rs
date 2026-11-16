@@ -11,6 +11,7 @@
 
 mod content;
 mod radarr;
+mod signalr;
 mod sonarr;
 
 use std::sync::Arc;
@@ -135,6 +136,9 @@ pub fn routes() -> axum::Router<AppState> {
                 .merge(sonarr::routes())
                 .layer(Extension(App::Sonarr)),
         )
+        // Bazarr's live updates (RFX-76): a hub that answers, but sends no events yet.
+        .nest("/radarr/signalr", signalr::routes())
+        .nest("/sonarr/signalr", signalr::routes())
         .nest(
             "/readarr/api/v1",
             common()
