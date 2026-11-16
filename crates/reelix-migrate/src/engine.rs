@@ -1293,7 +1293,7 @@ impl<'a> Engine<'a> {
                 path: Some(self.rewrite(&s.path)).filter(|p| p != "/"),
                 added_by_request_id: None,
             };
-            match lib.add_series(req).await {
+            match lib.add_series_by_any_id(req, s.imdb_id.as_deref()).await {
                 Ok(_) => self.push(key, c, &name, MigrateAction::Create, None),
                 Err(e) if conflict(&e.to_string()) => self.push(key, c, &name, MigrateAction::Existing, None),
                 Err(e) => self.push(key, c, &name, MigrateAction::Failed, Some(err(e))),
