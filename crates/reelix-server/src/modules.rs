@@ -72,7 +72,7 @@ impl Modules {
                 std::sync::Arc::new(reelix_metadata::OpenData::new(
                     deps.http.clone(),
                     reelix_metadata::OpenDataOptions {
-                        language: providers.metadata_config().language,
+                        language: providers.metadata_config().primary_language(),
                         ..Default::default()
                     },
                 ));

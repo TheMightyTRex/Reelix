@@ -624,3 +624,56 @@ async fn client_side_rate_limit_applies() {
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 3);
 }
+
+/// Fork issue #13: with fallback languages, the title, tagline and description come from the
+/// first language in the list that has them.
+#[tokio::test]
+async fn movie_details_fall_back_through_the_language_list() {
+    let server = MockServer::start().await;
+    let mut body = fixture("movie_603.json");
+    body["overview"] = "".into();
+    body["translations"] = serde_json::json!({"translations": [
+        {"iso_639_1": "en", "iso_3166_1": "US", "data": {"title": "The Matrix", "overview": "US text", "tagline": "US tagline"}},
+        {"iso_639_1": "en", "iso_3166_1": "GB", "data": {"title": "The Matrix (UK)", "overview": "UK text", "tagline": ""}},
+        {"iso_639_1": "cy", "iso_3166_1": "GB", "data": {"title": "", "overview": "Testun Cymraeg", "tagline": ""}}
+    ]});
+    Mock::given(method("GET"))
+        .and(path("/movie/603"))
+        .and(query_param("language", "cy-GB"))
+        .and(query_param(
+            "append_to_response",
+            format!("{MOVIE_APPEND},translations"),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let tmdb = Tmdb::new(
+        reqwest::Client::new(),
+        TmdbAuth::ApiKey("k3y".into()),
+        TmdbOptions {
+            language: "cy-GB".into(),
+            fallback_languages: vec!["en-GB".into(), "en".into()],
+            ..opts(&server)
+        },
+    );
+    let m = tmdb.movie_details(603).await.unwrap();
+    assert_eq!(m.overview.as_deref(), Some("Testun Cymraeg"), "Welsh first");
+    assert_eq!(m.title, "The Matrix (UK)", "no Welsh title, so the British one");
+    assert_eq!(m.tagline.as_deref(), Some("US tagline"), "then any English");
+}
+
+#[test]
+fn language_lists_split_in_order() {
+    use reelix_metadata::split_languages;
+    assert_eq!(split_languages("en-US"), ("en-US".into(), vec![]));
+    assert_eq!(
+        split_languages(" cy-GB, en-GB ,cy-gb,, "),
+        ("cy-GB".into(), vec!["en-GB".to_string()])
+    );
+    assert_eq!(split_languages(" , "), ("en-US".into(), vec![]));
+    assert_eq!(
+        split_languages("a,b,c,d,e,f,g").1.len(),
+        reelix_metadata::MAX_LANGUAGES - 1
+    );
+}
