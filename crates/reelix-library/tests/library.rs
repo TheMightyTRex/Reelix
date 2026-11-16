@@ -1414,7 +1414,10 @@ async fn a_refresh_keeps_unchanged_episodes_and_writes_changed_ones() {
         7400,
         show(
             7400,
-            vec![season(1, vec![episode(1, 1, "2020-01-01"), episode(1, 2, "2020-01-08")])],
+            vec![season(
+                1,
+                vec![episode(1, 1, "2020-01-01"), episode(1, 2, "2020-01-08")],
+            )],
         ),
     );
     let added = e.svc.add_series(add_series_req(&e, 7400, 8400)).await.unwrap();
@@ -1459,8 +1462,14 @@ async fn episodes_of_many_matches_one_series_at_a_time() {
     }
     // Files in the first series only, one of them a double episode.
     let root = Path::new(&all[0].path);
-    write(&root.join("Season 01/The.Show.S01E01.720p.HDTV.x264-GRP.mkv"), 400);
-    write(&root.join("Season 02/The.Show.S02E01E02.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv"), 900);
+    write(
+        &root.join("Season 01/The.Show.S01E01.720p.HDTV.x264-GRP.mkv"),
+        400,
+    );
+    write(
+        &root.join("Season 02/The.Show.S02E01E02.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv"),
+        900,
+    );
     e.svc.scan_series(all[0].id).await.unwrap();
     let all: Vec<_> = {
         let mut v = Vec::new();
@@ -1474,8 +1483,19 @@ async fn episodes_of_many_matches_one_series_at_a_time() {
     assert_eq!(many.len(), 2);
     for s in &all {
         let one = api.episodes_of(s, None).await.unwrap();
-        assert_eq!(format!("{one:?}"), format!("{:?}", many[&s.id]), "series {}", s.id);
+        assert_eq!(
+            format!("{one:?}"),
+            format!("{:?}", many[&s.id]),
+            "series {}",
+            s.id
+        );
     }
-    assert_eq!(many[&all[0].id].iter().filter(|x| x.episode_file.is_some()).count(), 3);
+    assert_eq!(
+        many[&all[0].id]
+            .iter()
+            .filter(|x| x.episode_file.is_some())
+            .count(),
+        3
+    );
     assert!(many[&all[1].id].iter().all(|x| x.episode_file.is_none()));
 }

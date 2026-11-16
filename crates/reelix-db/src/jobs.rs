@@ -200,9 +200,11 @@ impl JobRepo<'_> {
     /// When the soonest queued job may run (`run_after`), or `None` when nothing is queued. The runner
     /// sleeps until then instead of looking for work every second.
     pub async fn next_queued_at(&self) -> Result<Option<i64>> {
-        Ok(sqlx::query_scalar("SELECT MIN(run_after) FROM jobs WHERE status = 'queued'")
-            .fetch_one(self.db.pool())
-            .await?)
+        Ok(
+            sqlx::query_scalar("SELECT MIN(run_after) FROM jobs WHERE status = 'queued'")
+                .fetch_one(self.db.pool())
+                .await?,
+        )
     }
 
     /// Whether any queued/running job of `kind` exists.

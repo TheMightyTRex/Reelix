@@ -88,8 +88,10 @@ impl SearchService {
             .collect();
         // Every monitored series' episodes in a few reads, not about five reads per series.
         let mut all_eps = api.episodes_of_many(&series).await?;
-        let expected: HashMap<i64, Vec<ExpectedEpisode>> =
-            all_eps.iter().map(|(id, eps)| (*id, expected_episodes(eps))).collect();
+        let expected: HashMap<i64, Vec<ExpectedEpisode>> = all_eps
+            .iter()
+            .map(|(id, eps)| (*id, expected_episodes(eps)))
+            .collect();
         let index = MediaIndex::new(movies, series, expected);
 
         // Group releases by media.
