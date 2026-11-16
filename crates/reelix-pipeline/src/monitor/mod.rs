@@ -402,8 +402,9 @@ impl ActivityService {
             if h.client.protocol() == Protocol::Soulseek {
                 continue;
             }
-            let mut adoptable_items = items.iter().filter(|i| adoptable(i, now_secs)).peekable();
-            if adoptable_items.peek().is_none() {
+            let adoptable_items: Vec<&DownloadItem> =
+                items.iter().filter(|i| adoptable(i, now_secs)).collect();
+            if adoptable_items.is_empty() {
                 continue;
             }
             let known = tracked::download_ids_of(&self.db, h.id).await?;
