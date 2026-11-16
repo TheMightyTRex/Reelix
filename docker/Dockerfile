@@ -73,10 +73,10 @@ RUN set -eu; \
     apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /reelix /app/reelix
+# --chmod on COPY, not a later RUN chmod, which would store a second copy of the binary in a new layer.
+COPY --from=builder --chmod=0755 /reelix /app/reelix
 COPY --from=web /src/crates/reelix-web/dist /app/web
-COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod 0755 /app/entrypoint.sh /app/reelix
+COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh
 
 # Two glibc malloc arenas instead of one per thread: about a third less memory, no measurable cost.
 ENV REELIX_DATA_DIR=/config \
