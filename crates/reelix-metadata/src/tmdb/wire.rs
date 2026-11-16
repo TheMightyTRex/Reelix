@@ -368,6 +368,64 @@ pub(crate) fn page_of(p: WPage<WHit>, default: Option<MediaKind>, img: &Img) -> 
     }
 }
 
+/// `append_to_response=translations`: the title and description in each language TMDB has.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct WTranslations {
+    pub translations: Vec<WTranslation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct WTranslation {
+    pub iso_639_1: String,
+    pub iso_3166_1: String,
+    pub data: WTranslationData,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct WTranslationData {
+    /// Films.
+    pub title: Option<String>,
+    /// Series.
+    pub name: Option<String>,
+    pub overview: Option<String>,
+    pub tagline: Option<String>,
+}
+
+impl WTranslations {
+    /// The first non-empty value `field` gives, trying `languages` in order. For each language
+    /// (`cy-GB` or `cy`) the translation for that country comes first, then any in that language.
+    pub fn pick(
+        &self,
+        languages: &[&str],
+        field: impl Fn(&WTranslationData) -> Option<&String>,
+    ) -> Option<String> {
+        for lang in languages {
+            let mut parts = lang.split(['-', '_']);
+            let code = parts.next().unwrap_or_default();
+            let country = parts.next().unwrap_or_default();
+            let same = |t: &&WTranslation| t.iso_639_1.eq_ignore_ascii_case(code);
+            let exact = self
+                .translations
+                .iter()
+                .filter(same)
+                .filter(|t| !country.is_empty() && t.iso_3166_1.eq_ignore_ascii_case(country));
+            let any = self.translations.iter().filter(same);
+            if let Some(v) = exact
+                .chain(any)
+                .filter_map(|t| field(&t.data))
+                .map(|v| v.trim())
+                .find(|v| !v.is_empty())
+            {
+                return Some(v.to_owned());
+            }
+        }
+        None
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct WMovie {
@@ -398,6 +456,7 @@ pub(crate) struct WMovie {
     pub images: Option<WImages>,
     pub videos: Option<WResults<WVideo>>,
     pub keywords: Option<WKeywords>,
+    pub translations: Option<WTranslations>,
     pub recommendations: Option<WPage<WHit>>,
     pub similar: Option<WPage<WHit>>,
 }
@@ -465,6 +524,21 @@ fn release_dates(raw: Vec<WCountryReleases>, region: &str) -> (ReleaseDates, Opt
 }
 
 impl WMovie {
+    /// Takes the title, tagline and description from the first of `languages` that has them,
+    /// when the translations were asked for (fork issue #13).
+    pub fn apply_translations(&mut self, languages: &[&str]) {
+        let Some(t) = self.translations.take() else { return };
+        if let Some(title) = t.pick(languages, |d| d.title.as_ref()) {
+            self.title = title;
+        }
+        if let Some(o) = t.pick(languages, |d| d.overview.as_ref()) {
+            self.overview = Some(o);
+        }
+        if let Some(tag) = t.pick(languages, |d| d.tagline.as_ref()) {
+            self.tagline = Some(tag);
+        }
+    }
+
     pub fn into_model(self, img: &Img, region: &str) -> MovieMetadata {
         let release_date = parse_date(self.release_date.as_deref());
         let (dates, certification) =
@@ -673,6 +747,7 @@ pub(crate) struct WTv {
     pub images: Option<WImages>,
     pub videos: Option<WResults<WVideo>>,
     pub keywords: Option<WKeywords>,
+    pub translations: Option<WTranslations>,
     pub content_ratings: Option<WResults<WContentRating>>,
     pub recommendations: Option<WPage<WHit>>,
     pub similar: Option<WPage<WHit>>,
@@ -688,6 +763,18 @@ fn series_status(s: Option<&str>) -> SeriesStatus {
 }
 
 impl WTv {
+    /// Takes the series name and description from the first of `languages` that has them, when
+    /// the translations were asked for (fork issue #13).
+    pub fn apply_translations(&mut self, languages: &[&str]) {
+        let Some(t) = self.translations.take() else { return };
+        if let Some(name) = t.pick(languages, |d| d.name.as_ref()) {
+            self.name = name;
+        }
+        if let Some(o) = t.pick(languages, |d| d.overview.as_ref()) {
+            self.overview = Some(o);
+        }
+    }
+
     /// `seasons` are the full seasons (with episodes); summaries from the details call fill gaps.
     pub fn into_model(self, img: &Img, region: &str, mut seasons: Vec<SeasonMetadata>) -> SeriesMetadata {
         // Keep summary-only seasons (e.g. not yet returned) so season counts stay right.

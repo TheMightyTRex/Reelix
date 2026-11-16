@@ -36,7 +36,9 @@ pub use music::*;
 pub use musicbrainz::{MusicBrainz, MusicBrainzOptions};
 pub use open::{OpenData, OpenDataOptions};
 pub use openlibrary::{OpenLibrary, OpenLibraryOptions};
-pub use tmdb::{ExternalSource, FindResults, Tmdb, TmdbAuth, TmdbOptions, image_url};
+pub use tmdb::{
+    ExternalSource, FindResults, MAX_LANGUAGES, Tmdb, TmdbAuth, TmdbOptions, image_url, split_languages,
+};
 pub use tvdb::{Tvdb, TvdbOptions, TvdbOrdering};
 pub use xem::{SceneName, SceneNumber, Xem, XemMapping, XemMappings, XemOptions};
 
@@ -93,7 +95,8 @@ pub struct MetadataConfig {
     /// TMDB v4 read access token (bearer auth); preferred over the API key.
     pub tmdb_read_token: Option<String>,
     pub tvdb_api_key: Option<String>,
-    /// BCP-47-ish language, e.g. `en-US`.
+    /// BCP-47-ish language, e.g. `en-US`, or several in order of preference, e.g.
+    /// `cy-GB, en-GB` ([`split_languages`]).
     pub language: String,
     /// ISO 3166-1 region for release dates/certifications, e.g. `US`.
     pub region: Option<String>,
@@ -126,15 +129,15 @@ impl MetadataConfig {
             (None, Some(k)) => TmdbAuth::ApiKey(k),
             (None, None) => return Err(MetaError::NotConfigured("TMDB")),
         };
-        Ok(Tmdb::new(
-            http,
-            auth,
+        Ok(Tmdb::new(http, auth, {
+            let (language, fallback_languages) = split_languages(&self.language);
             TmdbOptions {
-                language: self.language.clone(),
+                language,
+                fallback_languages,
                 region: self.region.clone(),
                 ..Default::default()
-            },
-        ))
+            }
+        }))
     }
 
     /// Builds the TVDB client, or [`MetaError::NotConfigured`] without an API key.
@@ -145,10 +148,15 @@ impl MetadataConfig {
             key,
             None,
             TvdbOptions {
-                language: self.language.clone(),
+                language: self.primary_language(),
                 ..Default::default()
             },
         ))
+    }
+
+    /// The first of the metadata languages, for sources that take one language.
+    pub fn primary_language(&self) -> String {
+        split_languages(&self.language).0
     }
 
     /// TheXEM needs no credentials.
