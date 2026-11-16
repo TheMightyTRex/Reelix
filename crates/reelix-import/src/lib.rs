@@ -6,10 +6,12 @@
 //!   (hardlink / copy / move), recycle bin, permissions and free space.
 //! - [`matching`]: match parsed releases to expected movies and episodes.
 //! - [`episode_title`]: find an episode by the title in a release name (other numbering).
+//! - [`episode_map`]: another numbering of a series (TMDB's episode groups) mapped to TMDB's.
 //! - [`content`]: finished downloads handed to the books and music importers.
 //! - [`unpack`]: RAR archives in finished downloads, unpacked with `unrar`.
 
 pub mod content;
+pub mod episode_map;
 pub mod episode_title;
 pub mod error;
 pub mod files;

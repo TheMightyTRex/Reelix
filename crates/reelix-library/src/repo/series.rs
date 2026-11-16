@@ -8,6 +8,7 @@ use reelix_api_types::library::{
 };
 use reelix_core::MediaKind;
 use reelix_db::{Db, from_ms, now_ms};
+use reelix_import::episode_map::{EpisodeOrderEntry, EpisodeOrderMap};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
@@ -712,4 +713,51 @@ pub async fn file_episode_map(db: &Db, series_id: Option<i64>) -> Result<BTreeMa
             .push(r.try_get("id")?);
     }
     Ok(out)
+}
+
+/// The series' episodes in aired order mapped to TMDB's numbers, when one is kept.
+pub async fn episode_map(db: &Db, series_id: i64) -> Result<Option<EpisodeOrderMap>> {
+    let row = sqlx::query("SELECT group_id, group_name, entries FROM series_episode_map WHERE series_id = ?")
+        .bind(series_id)
+        .fetch_optional(db.pool())
+        .await?;
+    let Some(r) = row else {
+        return Ok(None);
+    };
+    let entries: Vec<EpisodeOrderEntry> = from_json(r.try_get("entries")?);
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(EpisodeOrderMap {
+        group_id: r.try_get("group_id")?,
+        group_name: r.try_get("group_name")?,
+        entries,
+    }))
+}
+
+/// Keeps (`Some`) or removes (`None`) the series' episode map.
+pub async fn set_episode_map(db: &Db, series_id: i64, map: Option<&EpisodeOrderMap>) -> Result<()> {
+    match map {
+        Some(m) => {
+            sqlx::query(
+                "INSERT INTO series_episode_map (series_id, group_id, group_name, entries, refreshed_at) \
+                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(series_id) DO UPDATE SET group_id = excluded.group_id, \
+                 group_name = excluded.group_name, entries = excluded.entries, refreshed_at = excluded.refreshed_at",
+            )
+            .bind(series_id)
+            .bind(&m.group_id)
+            .bind(&m.group_name)
+            .bind(json(&m.entries))
+            .bind(now_ms())
+            .execute(db.pool())
+            .await?;
+        }
+        None => {
+            sqlx::query("DELETE FROM series_episode_map WHERE series_id = ?")
+                .bind(series_id)
+                .execute(db.pool())
+                .await?;
+        }
+    }
+    Ok(())
 }
