@@ -318,7 +318,9 @@ mod tests {
     fn settings_need_a_csv_path_or_an_address() {
         let ctx = BuildContext::new(reqwest::Client::new());
         let ok = |v| BookExport::from_settings(&v, &ctx).is_ok();
-        assert!(ok(serde_json::json!({"path": "/data/export.csv"})));
+        // A full path on every system (Windows needs a drive letter).
+        let full = std::env::temp_dir().join("export.csv");
+        assert!(ok(serde_json::json!({"path": full.to_str().unwrap()})));
         assert!(!ok(serde_json::json!({"path": "relative.csv"})));
         assert!(!ok(serde_json::json!({"path": "/etc/passwd"})));
         assert!(ok(serde_json::json!({"url": "https://example.com/x.csv"})));
