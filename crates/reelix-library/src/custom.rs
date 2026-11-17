@@ -6,12 +6,13 @@
 
 use std::path::Path;
 
+use chrono::{DateTime, NaiveDate, Utc};
 use reelix_api_types::custom::{CustomDetails, CustomDetailsChange};
 use reelix_api_types::library::{
     EpisodeDto, ImagesDto, MovieDto, MovieStatus, SeasonDto, SeriesDto, SeriesStatus,
 };
 use reelix_core::MediaKind;
-use reelix_metadata::{MetaError, SeriesExternalId};
+use reelix_metadata::{ExternalSource, MetaError, SeriesExternalId};
 use reelix_parser::{EpisodeInfo, ReleaseKind, parse_path};
 
 use crate::LibraryService;
@@ -52,6 +53,45 @@ pub fn folder_owner<'a>(
 /// The `Conflict` for a folder that belongs to another item.
 pub fn folder_taken(path: &str, what: &str, id: i64, title: &str) -> LibraryError {
     LibraryError::Conflict(format!("{path} already belongs to {title} ({what} {id})"))
+}
+
+/// A film or series as another app (Radarr, Sonarr) records it, for one no metadata source knows
+/// (fork issue #2). It is added as a custom item that keeps the app's details and outside ids, and
+/// a later refresh matches it once a source knows one of those ids.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceRecord {
+    pub details: CustomDetails,
+    /// A poster address the web app may load (TMDB's or TVDB's image hosts), or `None`.
+    pub poster: Option<String>,
+    pub imdb_id: Option<String>,
+    /// Series only.
+    pub tvdb_id: Option<u32>,
+    pub monitored: bool,
+}
+
+/// One episode of a series as another app records it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceEpisode {
+    pub season_number: u32,
+    pub episode_number: u32,
+    pub title: Option<String>,
+    pub overview: Option<String>,
+    pub air_date: Option<NaiveDate>,
+    pub air_date_utc: Option<DateTime<Utc>>,
+    pub monitored: bool,
+}
+
+/// Image hosts the web app's content security policy allows, so a poster from another app shows.
+const POSTER_HOSTS: [&str; 2] = ["https://image.tmdb.org/", "https://artworks.thetvdb.com/"];
+
+/// `address` when it is on one of the [`POSTER_HOSTS`], else `None`: another app's own copy
+/// (`/MediaCover/…`) needs its key and would not load.
+pub fn usable_poster(address: &str) -> Option<String> {
+    let a = address.trim();
+    POSTER_HOSTS
+        .iter()
+        .any(|h| a.starts_with(h) && a.len() > h.len())
+        .then(|| a.to_owned())
 }
 
 /// Sort title of a typed title (the same rule as TMDB titles).
@@ -162,6 +202,212 @@ impl LibraryService {
         tracing::info!(id, title = %s.title, "custom series added");
         self.queue_scan(&[], &[id]).await?;
         self.get_series(id).await
+    }
+
+    /// Adds a film no metadata source knows with another app's details (fork issue #2): a custom
+    /// film, as [`Self::add_custom_movie`], that also keeps the app's poster and IMDb id. The
+    /// folder must exist. A refresh matches it once TMDB or open data knows the IMDb id.
+    pub async fn add_movie_from_source(
+        &self,
+        r: &SourceRecord,
+        root_folder_id: i64,
+        path: &str,
+        quality_profile_id: Option<i64>,
+    ) -> Result<MovieDto> {
+        let m = self
+            .add_custom_movie(&r.details, root_folder_id, path, quality_profile_id, r.monitored)
+            .await?;
+        let mut m = self.custom_movie(m.id).await?;
+        m.imdb_id = r.imdb_id.clone().filter(|i| i.starts_with("tt"));
+        m.images = ImagesDto {
+            poster: r.poster.clone(),
+            ..m.images
+        };
+        movies::save(&self.db, m.id, &m).await?;
+        self.emit("movie", "updated", m.id);
+        self.get_movie(m.id).await
+    }
+
+    /// Adds a series no metadata source knows with another app's details (fork issue #2): a
+    /// custom series, as [`Self::add_custom_series`], that also keeps the app's poster, TVDB and
+    /// IMDb ids, seasons and episodes with their titles and air dates. Files are linked to the
+    /// episodes by the scan. A refresh matches it once a source knows the TVDB id.
+    pub async fn add_series_from_source(
+        &self,
+        r: &SourceRecord,
+        root_folder_id: i64,
+        path: &str,
+        quality_profile_id: Option<i64>,
+        episodes: &[SourceEpisode],
+    ) -> Result<SeriesDto> {
+        let s = self
+            .add_custom_series(&r.details, root_folder_id, path, quality_profile_id, r.monitored)
+            .await?;
+        let mut s = self.custom_series(s.id).await?;
+        s.imdb_id = r.imdb_id.clone().filter(|i| i.starts_with("tt"));
+        s.tvdb_id = r.tvdb_id.filter(|t| *t > 0);
+        s.images = ImagesDto {
+            poster: r.poster.clone(),
+            ..s.images
+        };
+        series_repo::save(&self.db, s.id, &s).await?;
+        self.custom_episodes_from_source(&s, episodes).await?;
+        self.emit("series", "updated", s.id);
+        self.get_series(s.id).await
+    }
+
+    /// Seasons and episodes of a custom series from another app's record of them. Episodes the
+    /// series has already (from a scan) get the titles and air dates; their monitoring stays.
+    async fn custom_episodes_from_source(&self, s: &SeriesDto, episodes: &[SourceEpisode]) -> Result<()> {
+        let seasons: std::collections::BTreeSet<u32> = episodes.iter().map(|e| e.season_number).collect();
+        for n in seasons {
+            let air_date = episodes
+                .iter()
+                .filter(|e| e.season_number == n)
+                .filter_map(|e| e.air_date)
+                .min();
+            series_repo::upsert_season(
+                &self.db,
+                s.id,
+                &SeasonDto {
+                    season_number: n,
+                    monitored: s.monitored && n > 0,
+                    title: None,
+                    overview: None,
+                    poster: None,
+                    air_date,
+                    statistics: Default::default(),
+                },
+            )
+            .await?;
+        }
+        for e in episodes {
+            let (id, new) = series_repo::upsert_episode(
+                &self.db,
+                &EpisodeDto {
+                    id: 0,
+                    series_id: s.id,
+                    season_number: e.season_number,
+                    episode_number: e.episode_number,
+                    absolute_number: None,
+                    scene_season_number: None,
+                    scene_episode_number: None,
+                    scene_absolute_number: None,
+                    title: e.title.clone(),
+                    overview: e.overview.clone(),
+                    air_date: e.air_date,
+                    air_date_utc: e.air_date_utc,
+                    runtime_minutes: None,
+                    still: None,
+                    finale: None,
+                    monitored: s.monitored && e.monitored && e.season_number > 0,
+                    has_file: false,
+                    episode_file_id: None,
+                    episode_file: None,
+                },
+            )
+            .await?;
+            self.emit("episode", if new { "created" } else { "updated" }, id);
+        }
+        Ok(())
+    }
+
+    /// For a custom film added from another app with its IMDb id: the TMDB id a metadata source
+    /// now has for it, if any. Errors from the source count as no match, and it is tried again next time.
+    async fn source_match_for_movie(&self, m: &MovieDto) -> Option<u32> {
+        let imdb = m.imdb_id.as_deref().filter(|i| i.starts_with("tt"))?;
+        match self
+            .metadata
+            .find(ExternalSource::Imdb, imdb, MediaKind::Movie)
+            .await
+        {
+            Ok(hits) => hits.into_iter().find_map(|h| h.tmdb_id).filter(|t| *t > 0),
+            Err(e) => {
+                tracing::debug!(id = m.id, imdb, error = %e, "custom film: no match by IMDb id yet");
+                None
+            }
+        }
+    }
+
+    /// Points a custom film added from another app at its TMDB entry once a source knows its
+    /// IMDb id (fork issue #2), so the refresh that called it carries on as for any film and the
+    /// source's details replace the app's. `false` leaves the film as it is: a film added by hand
+    /// has no IMDb id, and a TMDB id another film has is not taken.
+    pub(crate) async fn adopt_source_match_movie(&self, m: &mut MovieDto) -> Result<bool> {
+        let Some(tmdb_id) = self.source_match_for_movie(m).await else {
+            return Ok(false);
+        };
+        if let Some(other) = movies::id_by_tmdb(&self.db, tmdb_id).await?
+            && other != m.id
+        {
+            tracing::info!(
+                id = m.id,
+                tmdb_id,
+                other,
+                "custom film: its TMDB entry is another film's"
+            );
+            return Ok(false);
+        }
+        sqlx::query("UPDATE movies SET tmdb_id = ?, custom = 0 WHERE id = ?")
+            .bind(i64::from(tmdb_id))
+            .bind(m.id)
+            .execute(self.db.pool())
+            .await?;
+        tracing::info!(id = m.id, tmdb_id, "custom film from another app matched");
+        m.tmdb_id = tmdb_id;
+        m.custom = false;
+        self.queue_scan(&[m.id], &[]).await?;
+        Ok(true)
+    }
+
+    /// Points a custom series added from another app at its TMDB entry once a source knows its
+    /// TVDB id (fork issue #2), so the refresh that called it carries on as for any series.
+    /// `false` leaves the series as it is: a series added by hand has no TVDB id.
+    pub(crate) async fn adopt_source_match_series(&self, s: &mut SeriesDto) -> Result<bool> {
+        let Some(tvdb) = s.tvdb_id.filter(|t| *t > 0) else {
+            return Ok(false);
+        };
+        let meta = match crate::series::series_metadata(
+            self.metadata.as_ref(),
+            SeriesExternalId::Tvdb(tvdb),
+            Some(tvdb),
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::debug!(id = s.id, tvdb, error = %e, "custom series: no match by TVDB id yet");
+                return Ok(false);
+            }
+        };
+        let Some(tmdb) = meta.tmdb_id.filter(|t| *t > 0) else {
+            return Ok(false);
+        };
+        if let Some(other) = series_repo::id_by_tmdb(&self.db, tmdb).await?
+            && other != s.id
+        {
+            tracing::info!(
+                id = s.id,
+                tmdb_id = tmdb,
+                other,
+                "custom series: its TMDB entry is another series'"
+            );
+            return Ok(false);
+        }
+        sqlx::query("UPDATE series SET tmdb_id = ?, custom = 0 WHERE id = ?")
+            .bind(i64::from(tmdb))
+            .bind(s.id)
+            .execute(self.db.pool())
+            .await?;
+        tracing::info!(
+            id = s.id,
+            tmdb_id = tmdb,
+            "custom series from another app matched"
+        );
+        s.tmdb_id = Some(tmdb);
+        s.custom = false;
+        self.queue_scan(&[], &[s.id]).await?;
+        Ok(true)
     }
 
     async fn custom_movie(&self, id: i64) -> Result<MovieDto> {

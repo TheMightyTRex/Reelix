@@ -123,7 +123,7 @@ pub fn SetupPage() -> impl IntoView {
         move || (touched.get() && password.get() != confirm.get()).then_some("Passwords don't match.");
     let token_err = move || {
         (touched.get() && token_required() && setup_token.with(|t| t.trim().is_empty()))
-            .then_some("Copy the setup token from the server log.")
+            .then_some("Copy the setup token from the server log or the setup-token file in the data folder.")
     };
 
     let create_account = move |e: ev::SubmitEvent| {
@@ -248,7 +248,7 @@ pub fn SetupPage() -> impl IntoView {
                                 aria-describedby="setup-token-hint"
                                 prop:value=move || setup_token.get()
                                 on:input=move |e| setup_token.set(event_target_value(&e)) />
-                            <p id="setup-token-hint" class="field-hint">{move || token_err().unwrap_or("Printed in the server log when Reelix starts without any users.")}</p>
+                            <p id="setup-token-hint" class="field-hint">{move || token_err().unwrap_or("Printed in the server log when Reelix starts without any users, and saved in the file setup-token in its data folder (/config/setup-token in Docker).")}</p>
                         </div>
                     </Show>
                     <div class="field" class:invalid=move || username_err().is_some()>

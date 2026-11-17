@@ -136,9 +136,10 @@ pub fn routes() -> axum::Router<AppState> {
                 .merge(sonarr::routes())
                 .layer(Extension(App::Sonarr)),
         )
-        // Bazarr's live updates (RFX-76): a hub that answers, but sends no events yet.
-        .nest("/radarr/signalr", signalr::routes())
-        .nest("/sonarr/signalr", signalr::routes())
+        // Bazarr's live updates (RFX-76): film events on Radarr's hub, series and episode
+        // events on Sonarr's.
+        .nest("/radarr/signalr", signalr::routes(signalr::Hub::Radarr))
+        .nest("/sonarr/signalr", signalr::routes(signalr::Hub::Sonarr))
         .nest(
             "/readarr/api/v1",
             common()

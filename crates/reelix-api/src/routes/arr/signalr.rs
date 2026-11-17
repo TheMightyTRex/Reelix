@@ -1,15 +1,17 @@
-//! Radarr's and Sonarr's SignalR hub (`/radarr/signalr/messages`, `/sonarr/signalr/messages`),
-//! first step (RFX-76).
+//! Radarr's and Sonarr's SignalR hub (`/radarr/signalr/messages`, `/sonarr/signalr/messages`)
+//! (RFX-76, fork issue #6).
 //!
 //! Bazarr connects to this hub for live updates. Its client (`signalrcore`) first posts to
 //! `…/signalr/messages/negotiate?access_token=<key>` and treats any answer but 200 as a fatal
-//! error, so a 405 there filled Bazarr's log. It has no other way to fall back: it learns about
-//! new films and episodes from its scheduled sync whenever the hub sends nothing.
+//! error, so a 405 there filled Bazarr's log.
 //!
-//! So this hub negotiates, completes the JSON hub protocol handshake and keeps the connection
-//! alive with pings, but sends no events yet. Bazarr then reports the feed as connected and
-//! carries on with its scheduled sync, quietly. The movie, series, episode and file events of
-//! the full feed are still to come.
+//! The hub negotiates, completes the JSON hub protocol handshake, keeps the connection alive
+//! with pings, and sends the library's changes as Radarr and Sonarr do: a `receiveMessage`
+//! invocation whose argument is `{name, body: {action, resource}}`. Radarr's hub sends `movie`
+//! messages; Sonarr's sends `series` and `episode` messages. A new or replaced file is sent as
+//! its film or episode, `updated`, as Bazarr reads the file from there. A deleted item carries
+//! only its `id`, as its record is gone. Changes are gathered for [`FLUSH_EVERY`] and each item
+//! is sent once, so a library scan does not send the same film many times.
 //!
 //! Only API keys are accepted (the `X-Api-Key` header, `?apikey=` or SignalR's
 //! `?access_token=`), never a session cookie, so other sites cannot open the socket in a
@@ -19,12 +21,14 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use std::collections::BTreeMap;
+
 use axum::extract::{FromRequestParts, Query, Request, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use reelix_api_types::API_KEY_HEADER;
-use reelix_core::{Permissions, User};
+use reelix_core::{DomainEvent, Permissions, User};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -40,12 +44,146 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 const REVALIDATE_EVERY: Duration = Duration::from_secs(60);
 /// The longest a client may take to send its handshake.
 const HANDSHAKE_WITHIN: Duration = Duration::from_secs(15);
+/// How long library changes are gathered before they are sent, each item once.
+const FLUSH_EVERY: Duration = Duration::from_secs(2);
+/// Most items sent in one go. In a bigger burst (a whole library refresh) only additions and
+/// deletions are sent, and updates are left to the client's scheduled sync, as they would make
+/// the client read every item at once.
+const MAX_BATCH: usize = 500;
+
+/// Which app's hub: Radarr's sends film changes, Sonarr's series and episode changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Hub {
+    Radarr,
+    Sonarr,
+}
 
 /// `/signalr/messages` and its negotiate route, nested under `/radarr` and `/sonarr`.
-pub(super) fn routes() -> Router<AppState> {
+pub(super) fn routes(which: Hub) -> Router<AppState> {
     Router::new()
-        .route("/messages", get(hub))
+        .route(
+            "/messages",
+            get(move |state: State<AppState>, req: Request| hub(state, req, which)),
+        )
         .route("/messages/negotiate", post(negotiate))
+}
+
+/// What a library change asks this hub to send, before the record is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Item {
+    Movie(i64),
+    Series(i64),
+    Episode(i64),
+    /// A film's new file: sent as its film.
+    MovieFile(i64),
+    /// An episode file: sent as its episodes.
+    EpisodeFile(i64),
+}
+
+/// The item and action (`created`, `updated` or `deleted`) `event` asks `which` to send, if any.
+fn wanted(which: Hub, event: &DomainEvent) -> Option<(Item, &'static str)> {
+    let DomainEvent::EntityChanged {
+        entity, action, id, ..
+    } = event
+    else {
+        return None;
+    };
+    let action = match action.as_str() {
+        "created" => "created",
+        "updated" => "updated",
+        "deleted" => "deleted",
+        _ => return None,
+    };
+    let id = *id;
+    let item = match (which, entity.as_str()) {
+        (Hub::Radarr, "movie") => Item::Movie(id),
+        (Hub::Sonarr, "series") => Item::Series(id),
+        (Hub::Sonarr, "episode") => Item::Episode(id),
+        // A deleted file's film or episode is no longer known from the file.
+        (Hub::Radarr, "movie_file") if action != "deleted" => Item::MovieFile(id),
+        (Hub::Sonarr, "episode_file") if action != "deleted" => Item::EpisodeFile(id),
+        _ => return None,
+    };
+    let action = if matches!(item, Item::MovieFile(_) | Item::EpisodeFile(_)) {
+        "updated"
+    } else {
+        action
+    };
+    Some((item, action))
+}
+
+/// Adds a change to the gathered ones: a later action replaces an earlier one, except that a
+/// creation stays a creation until it is deleted.
+fn gather(pending: &mut BTreeMap<Item, &'static str>, item: Item, action: &'static str) {
+    let next = match (pending.get(&item).copied(), action) {
+        (Some("created"), "updated") => "created",
+        _ => action,
+    };
+    pending.insert(item, next);
+}
+
+/// A `receiveMessage` invocation, as Radarr and Sonarr send it.
+fn message(name: &str, action: &str, resource: Value) -> Value {
+    json!({
+        "type": 1,
+        "target": "receiveMessage",
+        "arguments": [{"name": name, "body": {"action": action, "resource": resource}}],
+    })
+}
+
+/// The messages for one gathered change; an item that has gone since is left out, as its
+/// deletion is sent on its own.
+async fn messages_for(state: &AppState, item: Item, action: &str) -> Vec<Value> {
+    let Ok(lib) = super::library(state) else {
+        return Vec::new();
+    };
+    let gone = |name: &str, id: i64| vec![message(name, "deleted", json!({"id": id}))];
+    match item {
+        Item::Movie(id) if action == "deleted" => gone("movie", id),
+        Item::Series(id) if action == "deleted" => gone("series", id),
+        Item::Episode(id) if action == "deleted" => gone("episode", id),
+        Item::Movie(id) => match lib.get_movie(id).await {
+            Ok(m) => vec![message("movie", action, super::radarr::movie_json(&m))],
+            Err(_) => Vec::new(),
+        },
+        Item::Series(id) => match lib.get_series(id).await {
+            Ok(s) => vec![message("series", action, super::sonarr::series_json(&s))],
+            Err(_) => Vec::new(),
+        },
+        Item::Episode(id) => episode_messages(&lib, &[id], action).await,
+        Item::MovieFile(file) => match lib.movie_of_file(file).await.ok().flatten() {
+            Some(id) => match lib.get_movie(id).await {
+                Ok(m) => vec![message("movie", "updated", super::radarr::movie_json(&m))],
+                Err(_) => Vec::new(),
+            },
+            None => Vec::new(),
+        },
+        Item::EpisodeFile(file) => {
+            let ids = lib.episodes_of_file(file).await.unwrap_or_default();
+            episode_messages(&lib, &ids, "updated").await
+        }
+    }
+}
+
+/// Messages for episodes by id, each with its series, as Sonarr sends them.
+async fn episode_messages(lib: &reelix_library::LibraryService, ids: &[i64], action: &str) -> Vec<Value> {
+    let Some(&first) = ids.first() else {
+        return Vec::new();
+    };
+    let Some(series_id) = lib.series_of_episode(first).await.ok().flatten() else {
+        return Vec::new();
+    };
+    let (Ok(s), Ok(episodes)) = (
+        lib.get_series(series_id).await,
+        lib.episodes(series_id, None).await,
+    ) else {
+        return Vec::new();
+    };
+    episodes
+        .iter()
+        .filter(|e| ids.contains(&e.id))
+        .map(|e| message("episode", action, super::sonarr::episode_json(e, Some(&s))))
+        .collect()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -92,7 +230,7 @@ async fn negotiate(
 }
 
 /// `GET …/signalr/messages`: the hub's WebSocket.
-async fn hub(State(state): State<AppState>, req: Request) -> Response {
+async fn hub(State(state): State<AppState>, req: Request, which: Hub) -> Response {
     let (mut parts, _) = req.into_parts();
     let q = Query::<KeyQuery>::try_from_uri(&parts.uri)
         .map(|q| q.0)
@@ -108,7 +246,7 @@ async fn hub(State(state): State<AppState>, req: Request) -> Response {
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
-    upgrade.on_upgrade(move |socket| serve(socket, state, key, user))
+    upgrade.on_upgrade(move |socket| serve(socket, state, key, user, which))
 }
 
 /// One hub message: the JSON followed by the record separator.
@@ -135,8 +273,10 @@ fn closes(text: &str) -> bool {
         .any(|m| m.get("type").and_then(Value::as_i64) == Some(7))
 }
 
-async fn serve(mut socket: WebSocket, state: AppState, key: String, user: User) {
-    tracing::debug!(user = %user.username, "SignalR hub connected (no live events yet)");
+async fn serve(mut socket: WebSocket, state: AppState, key: String, user: User, which: Hub) {
+    tracing::debug!(user = %user.username, hub = ?which, "SignalR hub connected");
+    // Subscribed before the handshake, so no change made meanwhile is missed.
+    let mut changes = state.events().subscribe();
     let first = tokio::time::timeout(HANDSHAKE_WITHIN, socket.recv()).await;
     let text = match first {
         Ok(Some(Ok(Message::Text(t)))) => t.as_str().to_owned(),
@@ -157,6 +297,9 @@ async fn serve(mut socket: WebSocket, state: AppState, key: String, user: User) 
     ping.reset();
     let mut revalidate = tokio::time::interval(REVALIDATE_EVERY);
     revalidate.reset();
+    let mut flush = tokio::time::interval(FLUSH_EVERY);
+    flush.reset();
+    let mut pending: BTreeMap<Item, &'static str> = BTreeMap::new();
     loop {
         tokio::select! {
             msg = socket.recv() => match msg {
@@ -165,6 +308,39 @@ async fn serve(mut socket: WebSocket, state: AppState, key: String, user: User) 
                 // Pings and anything else the client sends need no answer.
                 Some(Ok(_)) => {}
             },
+            change = changes.recv() => match change {
+                Ok(event) => {
+                    if let Some((item, action)) = wanted(which, &event) {
+                        gather(&mut pending, item, action);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!(missed = n, "SignalR hub fell behind the library's changes");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            _ = flush.tick(), if !pending.is_empty() => {
+                let mut batch = std::mem::take(&mut pending);
+                if batch.len() > MAX_BATCH {
+                    tracing::debug!(changes = batch.len(), "SignalR hub: many changes at once; updates left to the client's sync");
+                    batch.retain(|_, action| *action != "updated");
+                }
+                let mut sent = true;
+                for (item, action) in batch {
+                    for m in messages_for(&state, item, action).await {
+                        if socket.send(record(&m)).await.is_err() {
+                            sent = false;
+                            break;
+                        }
+                    }
+                    if !sent {
+                        break;
+                    }
+                }
+                if !sent {
+                    break;
+                }
+            }
             _ = ping.tick() => {
                 if socket.send(record(&json!({"type": 6}))).await.is_err() {
                     break;
@@ -196,6 +372,65 @@ mod tests {
         );
         assert!(handshake_reply("{\"protocol\":\"messagepack\",\"version\":1}\u{1e}").is_err());
         assert!(handshake_reply("{\"type\":6}\u{1e}").is_err());
+    }
+
+    fn changed(entity: &str, action: &str, id: i64) -> DomainEvent {
+        DomainEvent::EntityChanged {
+            entity: entity.into(),
+            action: action.into(),
+            id,
+            user_id: None,
+        }
+    }
+
+    #[test]
+    fn each_hub_sends_its_own_apps_changes() {
+        let r = |e, a, id| wanted(Hub::Radarr, &changed(e, a, id));
+        let s = |e, a, id| wanted(Hub::Sonarr, &changed(e, a, id));
+        assert_eq!(r("movie", "created", 1), Some((Item::Movie(1), "created")));
+        assert_eq!(r("movie", "deleted", 1), Some((Item::Movie(1), "deleted")));
+        assert_eq!(
+            r("movie_file", "created", 7),
+            Some((Item::MovieFile(7), "updated"))
+        );
+        assert_eq!(r("movie_file", "deleted", 7), None);
+        assert_eq!(r("series", "updated", 2), None);
+        assert_eq!(s("series", "updated", 2), Some((Item::Series(2), "updated")));
+        assert_eq!(s("episode", "created", 3), Some((Item::Episode(3), "created")));
+        assert_eq!(
+            s("episode_file", "created", 9),
+            Some((Item::EpisodeFile(9), "updated"))
+        );
+        assert_eq!(s("movie", "updated", 1), None);
+        assert_eq!(s("queue", "updated", 1), None);
+        assert_eq!(r("movie", "grabbed", 1), None);
+        assert_eq!(
+            wanted(Hub::Radarr, &DomainEvent::TaskUpdated { kind: "x".into() }),
+            None
+        );
+    }
+
+    #[test]
+    fn gathered_changes_send_each_item_once() {
+        let mut p = BTreeMap::new();
+        gather(&mut p, Item::Movie(1), "created");
+        gather(&mut p, Item::Movie(1), "updated");
+        gather(&mut p, Item::Movie(2), "updated");
+        gather(&mut p, Item::Movie(2), "updated");
+        assert_eq!(p.len(), 2);
+        assert_eq!(p[&Item::Movie(1)], "created", "still new to the client");
+        gather(&mut p, Item::Movie(1), "deleted");
+        assert_eq!(p[&Item::Movie(1)], "deleted");
+    }
+
+    #[test]
+    fn messages_have_the_apps_shape() {
+        let m = message("movie", "updated", json!({"id": 5, "title": "Heat"}));
+        assert_eq!(m["type"], 1);
+        assert_eq!(m["target"], "receiveMessage");
+        assert_eq!(m["arguments"][0]["name"], "movie");
+        assert_eq!(m["arguments"][0]["body"]["action"], "updated");
+        assert_eq!(m["arguments"][0]["body"]["resource"]["id"], 5);
     }
 
     #[test]

@@ -25,15 +25,19 @@ use reelix_parser::QualityFamily;
 use reelix_requests::repo::{NewRequest, RequestFilter, RequestRepo, UserAdminRepo, UserEdit};
 use serde_json::{Map, Value, json};
 
-use crate::source::{Provider, Snapshot};
+use crate::source::{self, Provider, Snapshot, Source};
 use crate::{Targets, quality};
+use reelix_api_types::custom::CustomDetails;
+use reelix_library::custom::{SourceEpisode, SourceRecord, usable_poster};
+use reelix_library::{LibraryError, LibraryService, MetaError};
 
 /// Page size used when listing what Reelix already has.
 const PAGE: u32 = 500;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Mode {
-    Plan,
+    /// Plans only `categories` (all when empty), as the run with the same categories would.
+    Plan { categories: Vec<MigrateCategory> },
     Run {
         categories: Vec<MigrateCategory>,
         search_missing: bool,
@@ -47,6 +51,8 @@ pub(crate) struct Engine<'a> {
     t: &'a Targets,
     snap: &'a Snapshot,
     conn: &'a MigrateConnection,
+    /// The app being read, for what the snapshot leaves out (a series' episodes).
+    source: &'a Source,
     mode: Mode,
     progress: Progress<'a>,
     pub items: Vec<MigrateItem>,
@@ -86,6 +92,49 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// An add that failed only because no metadata source knows the film or series, so it can still
+/// be added with the old app's own details (fork issue #2).
+fn unknown_to_metadata(e: &LibraryError) -> bool {
+    matches!(
+        e,
+        LibraryError::Metadata(MetaError::NotFound | MetaError::Unsupported(_))
+    ) || matches!(e, LibraryError::Validation(m) if m.contains("has no TMDB id"))
+}
+
+/// The poster among another app's pictures that the web app can load.
+fn source_poster(images: &[source::Image]) -> Option<String> {
+    images
+        .iter()
+        .filter(|i| i.cover_type.eq_ignore_ascii_case("poster"))
+        .find_map(|i| i.remote_url.as_deref().and_then(usable_poster))
+}
+
+/// Sonarr's episode in the library's shape; an episode without numbers is left out.
+fn source_episode(e: &source::Episode) -> SourceEpisode {
+    let text = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
+    SourceEpisode {
+        season_number: e.season_number,
+        episode_number: e.episode_number,
+        title: text(&e.title),
+        overview: text(&e.overview),
+        air_date: e
+            .air_date
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d.trim(), "%Y-%m-%d").ok()),
+        air_date_utc: e
+            .air_date_utc
+            .as_deref()
+            .and_then(|d| chrono::DateTime::parse_from_rfc3339(d.trim()).ok())
+            .map(|d| d.with_timezone(&chrono::Utc)),
+        monitored: e.monitored,
+    }
+}
+
 fn conflict(e: &str) -> bool {
     let e = e.to_ascii_lowercase();
     e.contains("already") || e.contains("conflict") || e.contains("exists")
@@ -96,6 +145,7 @@ impl<'a> Engine<'a> {
         t: &'a Targets,
         snap: &'a Snapshot,
         conn: &'a MigrateConnection,
+        source: &'a Source,
         mode: Mode,
         progress: Progress<'a>,
     ) -> Self {
@@ -103,6 +153,7 @@ impl<'a> Engine<'a> {
             t,
             snap,
             conn,
+            source,
             mode,
             progress,
             items: Vec::new(),
@@ -137,11 +188,12 @@ impl<'a> Engine<'a> {
         matches!(self.mode, Mode::Run { .. })
     }
 
-    /// Whether items of `c` are created (always true for a plan).
+    /// Whether items of `c` are created (or, in a plan, would be).
     fn creates(&self, c: MigrateCategory) -> bool {
         match &self.mode {
-            Mode::Plan => true,
-            Mode::Run { categories, .. } => categories.is_empty() || categories.contains(&c),
+            Mode::Plan { categories } | Mode::Run { categories, .. } => {
+                categories.is_empty() || categories.contains(&c)
+            }
         }
     }
 
@@ -1126,7 +1178,8 @@ impl<'a> Engine<'a> {
                 .await
                 .map_err(err)?;
             let n = p.items.len();
-            have.extend(p.items.into_iter().map(|m| m.tmdb_id));
+            // Films added with their own details show TMDB id 0, which is no one film's.
+            have.extend(p.items.into_iter().map(|m| m.tmdb_id).filter(|t| *t > 0));
             if n < PAGE as usize || u64::from(page) * u64::from(PAGE) >= p.total {
                 break;
             }
@@ -1148,11 +1201,7 @@ impl<'a> Engine<'a> {
             if !self.creates(c) {
                 continue;
             }
-            if m.tmdb_id == 0 {
-                self.skip(key, c, &name, "it has no TMDB id");
-                continue;
-            }
-            if no_tmdb {
+            if no_tmdb && m.tmdb_id > 0 {
                 self.skip(key, c, &name, "TMDB isn't configured");
                 continue;
             }
@@ -1164,6 +1213,11 @@ impl<'a> Engine<'a> {
                 self.skip(key, c, &name, "its quality profile wasn't migrated");
                 continue;
             };
+            if m.tmdb_id == 0 {
+                self.movie_from_source(&lib, m, key, &name, root, profile, "it has no TMDB id")
+                    .await;
+                continue;
+            }
             if !self.running() {
                 self.push(key, c, &name, MigrateAction::Create, None);
                 continue;
@@ -1190,10 +1244,128 @@ impl<'a> Engine<'a> {
             match lib.add_movie(req).await {
                 Ok(_) => self.push(key, c, &name, MigrateAction::Create, None),
                 Err(e) if conflict(&e.to_string()) => self.push(key, c, &name, MigrateAction::Existing, None),
+                Err(e) if unknown_to_metadata(&e) => {
+                    let why = "no metadata source has it";
+                    self.movie_from_source(&lib, m, key, &name, root, profile, why)
+                        .await;
+                }
                 Err(e) => self.push(key, c, &name, MigrateAction::Failed, Some(err(e))),
             }
         }
         Ok(())
+    }
+
+    /// Why an item is added with the old app's own details, for the plan and the result.
+    fn source_details_note(&self, why: &str) -> String {
+        format!(
+            "{why}, so it is added with {}'s own details; it is matched once a metadata source has it",
+            self.snap.kind.label()
+        )
+    }
+
+    /// The result of adding a film or series with the old app's own details: a folder that does
+    /// not exist (nothing was ever downloaded) is a skip, as a custom item needs its folder.
+    fn push_from_source<T>(
+        &mut self,
+        res: Result<T, LibraryError>,
+        key: String,
+        c: MigrateCategory,
+        name: &str,
+        detail: String,
+    ) {
+        match res {
+            Ok(_) => self.push(key, c, name, MigrateAction::Create, Some(detail)),
+            Err(e) if conflict(&e.to_string()) => self.push(key, c, name, MigrateAction::Existing, None),
+            Err(LibraryError::Validation(m)) if m.ends_with("is not a folder") => self.skip(
+                key,
+                c,
+                name,
+                format!("no metadata source has it, and its own details need its folder: {m}"),
+            ),
+            Err(e) => self.push(key, c, name, MigrateAction::Failed, Some(err(e))),
+        }
+    }
+
+    /// Adds (or plans) a film no metadata source knows with the old app's own details: title,
+    /// year, overview, poster and IMDb id (fork issue #2).
+    #[allow(clippy::too_many_arguments)]
+    async fn movie_from_source(
+        &mut self,
+        lib: &LibraryService,
+        m: &source::Movie,
+        key: String,
+        name: &str,
+        root: i64,
+        profile: i64,
+        why: &str,
+    ) {
+        let c = MigrateCategory::Movie;
+        let detail = self.source_details_note(why);
+        if !self.running() {
+            self.push(key, c, name, MigrateAction::Create, Some(detail));
+            return;
+        }
+        let record = SourceRecord {
+            details: CustomDetails {
+                title: m.title.trim().to_owned(),
+                year: (m.year > 0).then_some(m.year),
+                overview: m.overview.clone().filter(|o| !o.trim().is_empty()),
+            },
+            poster: source_poster(&m.images),
+            imdb_id: m.imdb_id.clone(),
+            tvdb_id: None,
+            monitored: m.monitored,
+        };
+        let path = self.rewrite(&m.path);
+        let res = lib
+            .add_movie_from_source(&record, root, &path, Some(profile))
+            .await;
+        self.push_from_source(res, key, c, name, detail);
+    }
+
+    /// Adds (or plans) a series no metadata source knows with the old app's own details: title,
+    /// year, overview, poster, TVDB and IMDb ids, and Sonarr's seasons and episodes with their
+    /// air dates (fork issue #2). Without Sonarr's episodes the scan still makes them from files.
+    #[allow(clippy::too_many_arguments)]
+    async fn series_from_source(
+        &mut self,
+        lib: &LibraryService,
+        s: &source::Series,
+        key: String,
+        name: &str,
+        root: i64,
+        profile: i64,
+        why: &str,
+    ) {
+        let c = MigrateCategory::Series;
+        let detail = self.source_details_note(why);
+        if !self.running() {
+            self.push(key, c, name, MigrateAction::Create, Some(detail));
+            return;
+        }
+        let episodes: Vec<SourceEpisode> = match self.source.episodes(s.id).await {
+            Ok(e) => e.iter().map(source_episode).collect(),
+            Err(e) => {
+                tracing::warn!(series = %s.title, error = %e, "could not read the series' episodes; they come from its files");
+                Vec::new()
+            }
+        };
+        let record = SourceRecord {
+            details: CustomDetails {
+                title: s.title.trim().to_owned(),
+                year: (s.year > 0).then_some(s.year),
+                overview: s.overview.clone().filter(|o| !o.trim().is_empty()),
+            },
+            poster: source_poster(&s.images),
+            imdb_id: s.imdb_id.clone(),
+            tvdb_id: (s.tvdb_id > 0).then_some(s.tvdb_id),
+            monitored: s.monitored,
+        };
+        let path = self.rewrite(&s.path);
+        let res = lib
+            .add_series_from_source(&record, root, &path, Some(profile), &episodes)
+            .await;
+        self.push_from_source(res, key, c, name, detail);
     }
 
     async fn series(&mut self) -> Result<(), String> {
@@ -1240,11 +1412,8 @@ impl<'a> Engine<'a> {
             if !self.creates(c) {
                 continue;
             }
-            if s.tmdb_id == 0 && s.tvdb_id == 0 {
-                self.skip(key, c, &name, "it has no TMDB or TVDB id");
-                continue;
-            }
-            if no_tmdb {
+            let no_ids = s.tmdb_id == 0 && s.tvdb_id == 0;
+            if no_tmdb && !no_ids {
                 self.skip(key, c, &name, "TMDB isn't configured");
                 continue;
             }
@@ -1256,6 +1425,11 @@ impl<'a> Engine<'a> {
                 self.skip(key, c, &name, "its quality profile wasn't migrated");
                 continue;
             };
+            if no_ids {
+                self.series_from_source(&lib, s, key, &name, root, profile, "it has no TMDB or TVDB id")
+                    .await;
+                continue;
+            }
             if !self.running() {
                 self.push(key, c, &name, MigrateAction::Create, None);
                 continue;
@@ -1296,6 +1470,11 @@ impl<'a> Engine<'a> {
             match lib.add_series_by_any_id(req, s.imdb_id.as_deref()).await {
                 Ok(_) => self.push(key, c, &name, MigrateAction::Create, None),
                 Err(e) if conflict(&e.to_string()) => self.push(key, c, &name, MigrateAction::Existing, None),
+                Err(e) if unknown_to_metadata(&e) => {
+                    let why = "no metadata source has it";
+                    self.series_from_source(&lib, s, key, &name, root, profile, why)
+                        .await;
+                }
                 Err(e) => self.push(key, c, &name, MigrateAction::Failed, Some(err(e))),
             }
         }
