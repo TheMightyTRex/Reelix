@@ -431,7 +431,7 @@ async fn radarr_preview_run_and_rerun() {
     let mut conn = connection(&env, SourceKind::Radarr, &server);
 
     // Preview: nothing changes, and every decision is explained.
-    let plan = env.svc.preview(&conn).await.unwrap();
+    let plan = env.svc.preview(&conn, &[]).await.unwrap();
     assert_eq!(plan.version, "5.2.6.8376");
     let items = &plan.items;
     assert_eq!(find(items, "tag:1").action, MigrateAction::Create);
@@ -554,6 +554,45 @@ async fn radarr_preview_run_and_rerun() {
         assert_eq!(find(&again.items, key).action, MigrateAction::Existing, "{key}");
     }
     assert_eq!(env.providers.list(ProviderKind::Indexer).await.unwrap().len(), 1);
+}
+
+/// The preview takes the run's categories, so it neither lists nor asks for the hidden secrets of
+/// things the run leaves out (fork issue #10: "1 hidden keys still needed" for a download client
+/// in a move without download clients).
+#[tokio::test]
+async fn preview_plans_only_the_runs_categories() {
+    let env = env().await;
+    let server = radarr(&env).await;
+    let conn = connection(&env, SourceKind::Radarr, &server);
+
+    let all = env.svc.preview(&conn, &[]).await.unwrap();
+    assert!(all.items.iter().any(|i| i.key == "download_client:2"));
+
+    let cats = [
+        MigrateCategory::Tag,
+        MigrateCategory::RootFolder,
+        MigrateCategory::QualityProfile,
+        MigrateCategory::Movie,
+    ];
+    let plan = env.svc.preview(&conn, &cats).await.unwrap();
+    let items = &plan.items;
+    assert!(items.iter().all(|i| cats.contains(&i.category)), "{items:#?}");
+    assert!(
+        items.iter().all(|i| i.missing_secrets.is_empty()),
+        "no hidden secret is asked for: {items:#?}"
+    );
+    assert_eq!(find(items, "tag:1").action, MigrateAction::Create);
+    assert_eq!(find(items, "movie:1").action, MigrateAction::Create);
+
+    // Only indexers: the indexer's hidden key is still asked for, the download client's is not.
+    let plan = env.svc.preview(&conn, &[MigrateCategory::Indexer]).await.unwrap();
+    assert_eq!(find(&plan.items, "indexer:5").missing_secrets, vec!["apiKey"]);
+    assert!(
+        plan.items.iter().all(|i| i.category == MigrateCategory::Indexer),
+        "{:#?}",
+        plan.items
+    );
+    assert!(env.providers.tags().is_empty(), "a preview changes nothing");
 }
 
 #[tokio::test]
@@ -862,7 +901,7 @@ async fn jellyseerr_users_and_requests() {
         path_rewrites: vec![],
         secrets: Default::default(),
     };
-    let plan = env.svc.preview(&conn).await.unwrap();
+    let plan = env.svc.preview(&conn, &[]).await.unwrap();
     assert_eq!(
         find(&plan.items, "request:10").action,
         MigrateAction::Create,
@@ -987,7 +1026,7 @@ async fn prowlarr_knaben_is_kept() {
     .await;
     let plan = env
         .svc
-        .preview(&connection(&env, SourceKind::Prowlarr, &s))
+        .preview(&connection(&env, SourceKind::Prowlarr, &s), &[])
         .await
         .unwrap();
     let knaben = find(&plan.items, "indexer:9");

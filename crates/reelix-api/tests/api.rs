@@ -290,6 +290,57 @@ fn reconfigure(app: &mut TestApp, f: impl FnOnce(AppState) -> AppState) {
     app.router = reelix_api::router(app.state.clone());
 }
 
+/// The set-up token is also in a file only Reelix's user can read, so an installer need not read
+/// the log (fork issue #11), and the file goes once the admin account exists.
+#[tokio::test]
+async fn setup_token_is_saved_to_an_owner_only_file_until_setup() {
+    let mut app = app().await;
+    let file = app._dir.path().join(reelix_api::SETUP_TOKEN_FILE);
+    // A file from an earlier start is replaced, whatever its permissions.
+    std::fs::write(&file, "old-token\n").unwrap();
+    // A fresh state, as at start-up: the token is set before the state is cloned.
+    let fresh = AppState::new(
+        app.state.db().clone(),
+        app.state.events().clone(),
+        app.state.jobs().clone(),
+        app.state.secrets().clone(),
+        app.state.config().clone(),
+    );
+    app.state = reelix_api::require_setup_token(fresh).await.unwrap();
+    app.router = reelix_api::router(app.state.clone());
+
+    let saved = std::fs::read_to_string(&file).unwrap();
+    let token = saved.trim();
+    assert_ne!(token, "old-token");
+    assert!(token.len() >= 32, "{token}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    // The file's token is the one a set-up from another computer needs.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/setup",
+        Req {
+            body: Some(json!({"username": "admin", "password": ADMIN_PW, "setup_token": token})),
+            peer: Some("192.0.2.1:5000"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(!file.exists(), "removed once the admin exists");
+
+    // At the next start an admin exists: no token, and a file left behind is removed.
+    std::fs::write(&file, "left-over\n").unwrap();
+    reelix_api::require_setup_token(app.state.clone()).await.unwrap();
+    assert!(!file.exists());
+}
+
 #[tokio::test]
 async fn setup_requires_the_token_unless_local() {
     let mut app = app().await;
