@@ -10,7 +10,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use reelix_api_types::ApiErrorBody;
 use reelix_api_types::migrate::{
-    MigrateConnection, MigratePlan, MigrateRunDto, MigrateRunRequest, PendingMigrationSource, SourceKind,
+    MigrateConnection, MigratePlan, MigratePreviewRequest, MigrateRunDto, MigrateRunRequest,
+    PendingMigrationSource, SourceKind,
 };
 use reelix_core::Permissions;
 use reelix_migrate::{MigrateError, MigrateService, pending};
@@ -40,6 +41,7 @@ pub fn routes() -> Router<AppState> {
         MigratePlan,
         MigrateRunDto,
         MigrateRunRequest,
+        MigratePreviewRequest,
         MigrateTestResult,
         reelix_api_types::migrate::SourceKind,
         reelix_api_types::migrate::MigrateCategory,
@@ -110,9 +112,11 @@ pub async fn test(
     Ok(ApiJson(MigrateTestResult { version }))
 }
 
-/// What a migration would create, reuse and skip. Changes nothing.
+/// What a migration would create, reuse and skip. Changes nothing. Send the same `categories` as
+/// the run (empty or left out means all), so the plan, and the hidden secrets it asks for, cover
+/// only what the run imports.
 #[utoipa::path(post, path = "/api/v1/system/migrate/preview", tag = "system",
-    request_body = MigrateConnection,
+    request_body = MigratePreviewRequest,
     security(("session" = []), ("api_key" = [])),
     responses(
         (status = 200, description = "Plan", body = MigratePlan),
@@ -121,11 +125,12 @@ pub async fn test(
 pub async fn preview(
     State(state): State<AppState>,
     user: CurrentUser,
-    ApiJson(mut c): ApiJson<MigrateConnection>,
+    ApiJson(mut req): ApiJson<MigratePreviewRequest>,
 ) -> ApiResult<ApiJson<MigratePlan>> {
     user.require(Permissions::ADMIN)?;
-    pending::resolve_key(state.db(), state.secrets(), &mut c).await?;
-    Ok(ApiJson(svc(&state)?.preview(&c).await?))
+    pending::resolve_key(state.db(), state.secrets(), &mut req.connection).await?;
+    let plan = svc(&state)?.preview(&req.connection, &req.categories).await?;
+    Ok(ApiJson(plan))
 }
 
 /// Starts a migration in the background; poll `GET /system/migrate` for progress.
