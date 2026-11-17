@@ -11,24 +11,68 @@ use crate::auth::{RequestMeta, hash_password_blocking, random_token, sha256_hex,
 use crate::error::{ApiError, ApiJson, ApiResult};
 use crate::state::AppState;
 
+/// Name of the file in the data directory that holds the set-up token while no account exists.
+pub const SETUP_TOKEN_FILE: &str = "setup-token";
+
 /// While no user exists, generates the one-time token `POST /setup` requires from remote
 /// clients and announces it in the log and on stdout, so only someone with access to the
-/// server can claim the admin account. Call before the state is cloned.
+/// server can claim the admin account. It is also written to [`SETUP_TOKEN_FILE`] in the data
+/// directory, readable by the server's user only, so an installer need not read the log; the
+/// file is removed once an admin exists. Call before the state is cloned.
 pub async fn require_setup_token(state: AppState) -> ApiResult<AppState> {
+    let path = state.config().data_dir.join(SETUP_TOKEN_FILE);
     if state.db().users().count().await? > 0 {
+        remove_token_file(&path);
         return Ok(state);
     }
     let token = random_token();
+    let saved = match write_token_file(&path, &token) {
+        Ok(()) => format!("; it is also in {}", path.display()),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "could not save the setup token to a file");
+            String::new()
+        }
+    };
     tracing::warn!(
         setup_token = %token,
         "no users yet: open the web UI and enter this setup token to create the admin account \
-         (not needed when browsing from the server itself)"
+         (not needed when browsing from the server itself){saved}"
     );
     println!(
         "\n  Reelix first-run setup token: {token}\n  \
-         Enter it on the setup page to create the admin account.\n"
+         Enter it on the setup page to create the admin account{saved}.\n"
     );
     Ok(state.with_setup_token(token))
+}
+
+/// Writes `token` to `path` for the server's user only (mode 0600 on Unix; on Windows the data
+/// folder's permissions apply). An older file is removed first, so its permissions are not kept,
+/// and the new one is created afresh, so a link left at the path is not followed.
+fn write_token_file(path: &std::path::Path, token: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    writeln!(file, "{token}")?;
+    file.sync_all()
+}
+
+/// Removes the set-up token file once it is no longer needed (an admin exists).
+fn remove_token_file(path: &std::path::Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => tracing::info!(path = %path.display(), "removed the setup token file"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(path = %path.display(), error = %e, "could not remove the setup token file"),
+    }
 }
 
 /// Whether `meta` must present the setup token.
@@ -150,6 +194,7 @@ pub async fn complete(
         .await?;
     let cookie = start_session(&state, &meta, user.id, false).await?;
     tracing::info!(user = %user.username, "first-run setup completed");
+    remove_token_file(&state.config().data_dir.join(SETUP_TOKEN_FILE));
     state.events().publish(DomainEvent::UserCreated {
         user_id: user.id,
         username: user.username.clone(),
@@ -185,14 +230,17 @@ fn wrong_token(meta: &RequestMeta) -> ApiError {
         return ApiError::Validation {
             status: StatusCode::FORBIDDEN,
             message: "open Reelix at http://localhost to set it up from this computer, or enter the \
-                      setup token printed in the server log"
+                      setup token printed in the server log and saved in the setup-token file in \
+                      Reelix's data folder"
                 .into(),
         };
     }
     tracing::warn!(ip = ?meta.ip, "first-run setup attempted without a valid setup token");
     ApiError::Validation {
         status: StatusCode::FORBIDDEN,
-        message: "a valid setup token is required; it is printed in the server log".into(),
+        message: "a valid setup token is required; it is printed in the server log and saved in the \
+                  setup-token file in Reelix's data folder"
+            .into(),
     }
 }
 

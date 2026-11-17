@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use reelix_api_types::migrate::{
-    MigrateConnection, MigratePlan, MigrateRunDto, MigrateRunRequest, MigrateState, SourceKind,
+    MigrateCategory, MigrateConnection, MigratePlan, MigrateRunDto, MigrateRunRequest, MigrateState,
+    SourceKind,
 };
 use reelix_books::BooksService;
 use reelix_db::Db;
@@ -82,11 +83,19 @@ impl MigrateService {
         Ok(self.source(c)?.status().await?.version)
     }
 
-    /// What a migration would do; nothing is changed.
-    pub async fn preview(&self, c: &MigrateConnection) -> Result<MigratePlan, MigrateError> {
-        let snap = self.source(c)?.snapshot().await?;
+    /// What a migration of `categories` (all when empty) would do; nothing is changed.
+    pub async fn preview(
+        &self,
+        c: &MigrateConnection,
+        categories: &[MigrateCategory],
+    ) -> Result<MigratePlan, MigrateError> {
+        let source = self.source(c)?;
+        let snap = source.snapshot().await?;
         let noop = |_: usize, _: &str| {};
-        let mut engine = Engine::new(&self.targets, &snap, c, Mode::Plan, &noop);
+        let mode = Mode::Plan {
+            categories: categories.to_vec(),
+        };
+        let mut engine = Engine::new(&self.targets, &snap, c, &source, mode, &noop);
         engine.run().await.map_err(MigrateError::Internal)?;
         let mut notes = engine.notes;
         notes.extend(source_notes(c.source));
@@ -170,7 +179,7 @@ impl MigrateService {
             categories: req.categories.clone(),
             search_missing: req.search_missing,
         };
-        let mut engine = Engine::new(&self.targets, &snap, &req.connection, mode, &progress);
+        let mut engine = Engine::new(&self.targets, &snap, &req.connection, source, mode, &progress);
         engine.run().await?;
         Ok(engine.items)
     }

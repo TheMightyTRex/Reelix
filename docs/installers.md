@@ -94,7 +94,8 @@ and keeps its data):
 
 Open <http://localhost:7700> and complete the setup wizard. From the same PC no token is needed.
 From another device the wizard asks for a one-time setup token that Reelix prints to its log
-(and, in per-user mode, to its console window): look in `<data folder>\logs`.
+(and, in per-user mode, to its console window), in `<data folder>\logs`. It is also in the file
+`<data folder>\setup-token` until the admin account exists.
 
 ### Updates
 
@@ -225,7 +226,8 @@ systemctl status reelix
 ```
 
 From the same machine the setup wizard needs no token; from another machine it asks for the
-one-time setup token from the log.
+one-time setup token from the log. It is also in the file `setup-token` in the data folder, which
+only Reelix's user can read (`sudo cat <data folder>/setup-token`), until the admin account exists.
 
 ### Updates
 

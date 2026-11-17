@@ -290,6 +290,57 @@ fn reconfigure(app: &mut TestApp, f: impl FnOnce(AppState) -> AppState) {
     app.router = reelix_api::router(app.state.clone());
 }
 
+/// The set-up token is also in a file only Reelix's user can read, so an installer need not read
+/// the log (fork issue #11), and the file goes once the admin account exists.
+#[tokio::test]
+async fn setup_token_is_saved_to_an_owner_only_file_until_setup() {
+    let mut app = app().await;
+    let file = app._dir.path().join(reelix_api::SETUP_TOKEN_FILE);
+    // A file from an earlier start is replaced, whatever its permissions.
+    std::fs::write(&file, "old-token\n").unwrap();
+    // A fresh state, as at start-up: the token is set before the state is cloned.
+    let fresh = AppState::new(
+        app.state.db().clone(),
+        app.state.events().clone(),
+        app.state.jobs().clone(),
+        app.state.secrets().clone(),
+        app.state.config().clone(),
+    );
+    app.state = reelix_api::require_setup_token(fresh).await.unwrap();
+    app.router = reelix_api::router(app.state.clone());
+
+    let saved = std::fs::read_to_string(&file).unwrap();
+    let token = saved.trim();
+    assert_ne!(token, "old-token");
+    assert!(token.len() >= 32, "{token}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    // The file's token is the one a set-up from another computer needs.
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/v1/setup",
+        Req {
+            body: Some(json!({"username": "admin", "password": ADMIN_PW, "setup_token": token})),
+            peer: Some("192.0.2.1:5000"),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(!file.exists(), "removed once the admin exists");
+
+    // At the next start an admin exists: no token, and a file left behind is removed.
+    std::fs::write(&file, "left-over\n").unwrap();
+    reelix_api::require_setup_token(app.state.clone()).await.unwrap();
+    assert!(!file.exists());
+}
+
 #[tokio::test]
 async fn setup_requires_the_token_unless_local() {
     let mut app = app().await;
@@ -1118,6 +1169,46 @@ async fn health_reports_unwritable_data_dir_as_503() {
     assert_eq!(r.body["status"], "error");
 }
 
+/// A download client or indexer problem fails the health report but not the liveness answer the
+/// container health check uses; a fault in Reelix itself fails both (fork issue #8).
+#[tokio::test]
+async fn liveness_ignores_other_apps_but_not_reelix_itself() {
+    struct BrokenClient;
+    impl reelix_api::HealthSource for BrokenClient {
+        fn checks(&self) -> Vec<reelix_api_types::HealthCheck> {
+            vec![reelix_api_types::HealthCheck {
+                source: "download_clients".into(),
+                level: reelix_api_types::HealthLevel::Error,
+                message: "NZBGet cannot be reached".into(),
+            }]
+        }
+    }
+    let mut app = app().await;
+    let sources = reelix_api::HealthSources(vec![std::sync::Arc::new(BrokenClient)]);
+    reconfigure(&mut app, |s| s.with_extension(std::sync::Arc::new(sources)));
+
+    let full = call(&app, Method::GET, "/api/v1/system/health", Req::default()).await;
+    assert_eq!(full.status, StatusCode::SERVICE_UNAVAILABLE);
+    let live = call(&app, Method::GET, "/api/v1/system/health/live", Req::default()).await;
+    assert_eq!(live.status, StatusCode::OK, "{:?}", live.body);
+    assert_eq!(live.body["status"], "ok");
+    assert_eq!(live.body["checks"].as_array().unwrap().len(), 0);
+
+    // An unwritable data directory is Reelix's own fault, so liveness fails too.
+    let db = app.state.db().clone();
+    let events = app.state.events().clone();
+    let queue = app.state.jobs().clone();
+    let cfg = ApiConfig {
+        data_dir: app._dir.path().join("does-not-exist"),
+        ..app.state.config().clone()
+    };
+    app.state = AppState::new(db, events, queue, app.state.secrets().clone(), cfg);
+    app.router = reelix_api::router(app.state.clone());
+    let live = call(&app, Method::GET, "/api/v1/system/health/live", Req::default()).await;
+    assert_eq!(live.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(live.body["status"], "error");
+}
+
 #[tokio::test]
 async fn openapi_and_docs_are_served() {
     let app = app().await;
@@ -1136,6 +1227,7 @@ async fn openapi_and_docs_are_served() {
         "/api/v1/auth/apikeys/{id}",
         "/api/v1/system/status",
         "/api/v1/system/health",
+        "/api/v1/system/health/live",
         "/api/v1/system/tasks",
         "/api/v1/system/tasks/{kind}/run",
         "/api/v1/system/jobs",

@@ -431,7 +431,7 @@ async fn radarr_preview_run_and_rerun() {
     let mut conn = connection(&env, SourceKind::Radarr, &server);
 
     // Preview: nothing changes, and every decision is explained.
-    let plan = env.svc.preview(&conn).await.unwrap();
+    let plan = env.svc.preview(&conn, &[]).await.unwrap();
     assert_eq!(plan.version, "5.2.6.8376");
     let items = &plan.items;
     assert_eq!(find(items, "tag:1").action, MigrateAction::Create);
@@ -486,10 +486,12 @@ async fn radarr_preview_run_and_rerun() {
             find(items, key)
         );
     }
-    assert_eq!(
-        find(items, "movie:2").action,
-        MigrateAction::Failed,
-        "unknown TMDB id"
+    // No metadata source knows it, and it has no folder to add it from with Radarr's details.
+    let unknown = find(items, "movie:2");
+    assert_eq!(unknown.action, MigrateAction::Skip, "{unknown:?}");
+    assert!(
+        unknown.detail.as_deref().unwrap_or_default().contains("folder"),
+        "{unknown:?}"
     );
 
     // What landed in Reelix.
@@ -554,6 +556,45 @@ async fn radarr_preview_run_and_rerun() {
         assert_eq!(find(&again.items, key).action, MigrateAction::Existing, "{key}");
     }
     assert_eq!(env.providers.list(ProviderKind::Indexer).await.unwrap().len(), 1);
+}
+
+/// The preview takes the run's categories, so it neither lists nor asks for the hidden secrets of
+/// things the run leaves out (fork issue #10: "1 hidden keys still needed" for a download client
+/// in a move without download clients).
+#[tokio::test]
+async fn preview_plans_only_the_runs_categories() {
+    let env = env().await;
+    let server = radarr(&env).await;
+    let conn = connection(&env, SourceKind::Radarr, &server);
+
+    let all = env.svc.preview(&conn, &[]).await.unwrap();
+    assert!(all.items.iter().any(|i| i.key == "download_client:2"));
+
+    let cats = [
+        MigrateCategory::Tag,
+        MigrateCategory::RootFolder,
+        MigrateCategory::QualityProfile,
+        MigrateCategory::Movie,
+    ];
+    let plan = env.svc.preview(&conn, &cats).await.unwrap();
+    let items = &plan.items;
+    assert!(items.iter().all(|i| cats.contains(&i.category)), "{items:#?}");
+    assert!(
+        items.iter().all(|i| i.missing_secrets.is_empty()),
+        "no hidden secret is asked for: {items:#?}"
+    );
+    assert_eq!(find(items, "tag:1").action, MigrateAction::Create);
+    assert_eq!(find(items, "movie:1").action, MigrateAction::Create);
+
+    // Only indexers: the indexer's hidden key is still asked for, the download client's is not.
+    let plan = env.svc.preview(&conn, &[MigrateCategory::Indexer]).await.unwrap();
+    assert_eq!(find(&plan.items, "indexer:5").missing_secrets, vec!["apiKey"]);
+    assert!(
+        plan.items.iter().all(|i| i.category == MigrateCategory::Indexer),
+        "{:#?}",
+        plan.items
+    );
+    assert!(env.providers.tags().is_empty(), "a preview changes nothing");
 }
 
 #[tokio::test]
@@ -795,13 +836,240 @@ async fn sonarr_series_found_by_tvdb_or_imdb_id() {
     );
     assert!(env.library.series_by_tmdb(7002).await.unwrap().is_some());
     // The IMDb match names another TVDB id, so the series stays out.
+    // It has no folder either, so it cannot be added with Sonarr's own details.
     let other = find(&run.items, "series:3");
-    assert_eq!(other.action, MigrateAction::Failed, "{run:#?}");
+    assert_eq!(other.action, MigrateAction::Skip, "{run:#?}");
     assert!(
-        other.detail.as_deref().unwrap_or_default().contains("not found"),
+        other.detail.as_deref().unwrap_or_default().contains("folder"),
         "{other:?}"
     );
     assert!(env.library.series_by_tmdb(7003).await.unwrap().is_none());
+}
+
+/// Films and series no metadata source knows are added with the old app's own details, and
+/// matched once a source knows them (fork issue #2).
+#[tokio::test]
+async fn titles_no_source_knows_keep_the_apps_own_details() {
+    use reelix_api_types::library::{MovieListQuery, SeriesListQuery};
+    let env = env().await;
+    let s = MockServer::start().await;
+    let v = "/api/v3";
+    mock(
+        &s,
+        v,
+        "/system/status",
+        json!({"appName": "Radarr", "version": "5.2.6"}),
+    )
+    .await;
+    mock(&s, v, "/tag", json!([])).await;
+    mock(&s, v, "/rootfolder", json!([{"id": 1, "path": "/old/movies/"}])).await;
+    mock(&s, v, "/qualityprofile", profile()).await;
+    mock(&s, v, "/indexer", json!([])).await;
+    mock(&s, v, "/downloadclient", json!([])).await;
+    mock(&s, v, "/remotepathmapping", json!([])).await;
+    let film = |id: u32, title: &str, year: i32, tmdb: u32, extra: Value| {
+        let mut m = json!({"id": id, "title": title, "year": year, "tmdbId": tmdb,
+            "path": format!("/old/movies/{title} ({year})"), "rootFolderPath": "/old/movies/",
+            "monitored": false, "qualityProfileId": 4});
+        m.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        m
+    };
+    mock(
+        &s,
+        v,
+        "/movie",
+        json!([
+            film(
+                1,
+                "Home Film",
+                2004,
+                0,
+                json!({"overview": "Our holiday.", "images": [
+                {"coverType": "fanart", "remoteUrl": "https://image.tmdb.org/t/p/original/fan.jpg"},
+                {"coverType": "poster", "remoteUrl": "https://image.tmdb.org/t/p/original/home.jpg"}]})
+            ),
+            film(
+                2,
+                "Lost Film",
+                1987,
+                888_888,
+                json!({"imdbId": "tt0888888", "images": [
+                {"coverType": "poster", "remoteUrl": "http://radarr:7878/MediaCover/2/poster.jpg"}]})
+            ),
+            film(3, "No Folder", 1990, 777_777, json!({})),
+        ]),
+    )
+    .await;
+    for f in ["Home Film (2004)", "Lost Film (1987)"] {
+        std::fs::create_dir_all(env.movies_dir.path().join(f)).unwrap();
+    }
+    let conn = connection(&env, SourceKind::Radarr, &s);
+
+    let plan = env.svc.preview(&conn, &[]).await.unwrap();
+    let home = find(&plan.items, "movie:1");
+    assert_eq!(home.action, MigrateAction::Create, "{home:?}");
+    assert!(
+        home.detail.as_deref().unwrap().contains("Radarr's own details"),
+        "{home:?}"
+    );
+
+    env.svc
+        .start(MigrateRunRequest {
+            connection: conn,
+            categories: vec![],
+            search_missing: false,
+        })
+        .unwrap();
+    let run = wait(&env.svc).await;
+    assert_eq!(run.state, MigrateState::Finished, "{run:#?}");
+    assert_eq!(
+        find(&run.items, "movie:1").action,
+        MigrateAction::Create,
+        "{run:#?}"
+    );
+    let lost_item = find(&run.items, "movie:2");
+    assert_eq!(lost_item.action, MigrateAction::Create, "{run:#?}");
+    assert!(
+        lost_item
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("no metadata source has it")
+    );
+    assert_eq!(
+        find(&run.items, "movie:3").action,
+        MigrateAction::Skip,
+        "{run:#?}"
+    );
+
+    let films = env
+        .library
+        .list_movies(&MovieListQuery::default())
+        .await
+        .unwrap()
+        .items;
+    assert_eq!(films.len(), 2, "{films:#?}");
+    let home = films.iter().find(|m| m.title == "Home Film").unwrap();
+    assert!(home.custom);
+    assert_eq!(home.year, Some(2004));
+    assert_eq!(home.overview.as_deref(), Some("Our holiday."));
+    assert_eq!(
+        home.images.poster.as_deref(),
+        Some("https://image.tmdb.org/t/p/original/home.jpg")
+    );
+    let lost = films.iter().find(|m| m.title == "Lost Film").unwrap();
+    assert!(lost.custom);
+    assert_eq!(lost.imdb_id.as_deref(), Some("tt0888888"));
+    assert_eq!(lost.images.poster, None, "Radarr's own copy needs its key");
+
+    // A second run finds both in the library.
+    env.svc
+        .start(MigrateRunRequest {
+            connection: connection(&env, SourceKind::Radarr, &s),
+            categories: vec![MigrateCategory::Movie],
+            search_missing: false,
+        })
+        .unwrap();
+    let rerun = wait(&env.svc).await;
+    for key in ["movie:1", "movie:2"] {
+        assert_eq!(
+            find(&rerun.items, key).action,
+            MigrateAction::Existing,
+            "{rerun:#?}"
+        );
+    }
+
+    // Once a source knows the IMDb id, a refresh replaces the film's details with the source's.
+    env.meta
+        .movies
+        .lock()
+        .unwrap()
+        .insert(605, movie(605, "Lost Film", 1987));
+    let mut hit = series_hit(605, None, "Lost Film");
+    hit.kind = reelix_core::MediaKind::Movie;
+    env.meta
+        .finds
+        .lock()
+        .unwrap()
+        .insert("imdb:tt0888888".into(), vec![hit]);
+    env.library.refresh_movie(lost.id).await.unwrap();
+    let matched = env.library.get_movie(lost.id).await.unwrap();
+    assert!(!matched.custom);
+    assert_eq!(matched.tmdb_id, 605);
+    // A film added by hand keeps its details: it has no outside id to match.
+    env.library.refresh_movie(home.id).await.unwrap();
+    assert!(env.library.get_movie(home.id).await.unwrap().custom);
+
+    // Sonarr: a series with no ids keeps Sonarr's seasons, episodes and air dates.
+    let s = MockServer::start().await;
+    mock(
+        &s,
+        v,
+        "/system/status",
+        json!({"appName": "Sonarr", "version": "4.0.1"}),
+    )
+    .await;
+    mock(&s, v, "/tag", json!([])).await;
+    mock(&s, v, "/rootfolder", json!([{"id": 1, "path": "/old/tv"}])).await;
+    mock(&s, v, "/qualityprofile", profile()).await;
+    mock(&s, v, "/indexer", json!([])).await;
+    mock(&s, v, "/downloadclient", json!([])).await;
+    mock(&s, v, "/remotepathmapping", json!([])).await;
+    mock(
+        &s,
+        v,
+        "/series",
+        json!([{"id": 1, "title": "Local Show", "year": 2019, "tvdbId": 0, "tmdbId": 0,
+                "overview": "A town's own news.", "path": "/old/tv/Local Show", "rootFolderPath": "/old/tv",
+                "monitored": true, "seasonFolder": true, "seriesType": "standard",
+                "qualityProfileId": 4, "tags": [], "seasons": [{"seasonNumber": 1, "monitored": true}]}]),
+    )
+    .await;
+    mock(
+        &s,
+        v,
+        "/episode",
+        json!([
+            {"seasonNumber": 1, "episodeNumber": 1, "title": "Pilot", "airDate": "2019-03-01",
+             "airDateUtc": "2019-03-01T20:00:00Z", "monitored": true},
+            {"seasonNumber": 1, "episodeNumber": 2, "title": "Second", "airDate": "2019-03-08",
+             "monitored": false},
+        ]),
+    )
+    .await;
+    std::fs::create_dir_all(env.tv_dir.path().join("Local Show")).unwrap();
+    env.svc
+        .start(MigrateRunRequest {
+            connection: connection(&env, SourceKind::Sonarr, &s),
+            categories: vec![],
+            search_missing: false,
+        })
+        .unwrap();
+    let run = wait(&env.svc).await;
+    assert_eq!(
+        find(&run.items, "series:1").action,
+        MigrateAction::Create,
+        "{run:#?}"
+    );
+    let shows = env
+        .library
+        .list_series(&SeriesListQuery::default())
+        .await
+        .unwrap()
+        .items;
+    let show = shows.iter().find(|s| s.title == "Local Show").unwrap();
+    assert!(show.custom);
+    assert_eq!(show.overview.as_deref(), Some("A town's own news."));
+    let episodes = env.library.episodes(show.id, None).await.unwrap();
+    assert_eq!(episodes.len(), 2, "{episodes:#?}");
+    let pilot = episodes.iter().find(|e| e.episode_number == 1).unwrap();
+    assert_eq!(pilot.title.as_deref(), Some("Pilot"));
+    assert_eq!(pilot.air_date, chrono::NaiveDate::from_ymd_opt(2019, 3, 1));
+    assert!(pilot.monitored);
+    let second = episodes.iter().find(|e| e.episode_number == 2).unwrap();
+    assert!(!second.monitored, "Sonarr's monitoring is kept");
 }
 
 #[tokio::test]
@@ -862,7 +1130,7 @@ async fn jellyseerr_users_and_requests() {
         path_rewrites: vec![],
         secrets: Default::default(),
     };
-    let plan = env.svc.preview(&conn).await.unwrap();
+    let plan = env.svc.preview(&conn, &[]).await.unwrap();
     assert_eq!(
         find(&plan.items, "request:10").action,
         MigrateAction::Create,
@@ -987,7 +1255,7 @@ async fn prowlarr_knaben_is_kept() {
     .await;
     let plan = env
         .svc
-        .preview(&connection(&env, SourceKind::Prowlarr, &s))
+        .preview(&connection(&env, SourceKind::Prowlarr, &s), &[])
         .await
         .unwrap();
     let knaben = find(&plan.items, "indexer:9");
