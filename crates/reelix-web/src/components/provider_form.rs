@@ -80,7 +80,7 @@ fn field_dom_id(index: usize) -> String {
     format!("pf-field-{index}")
 }
 
-/// One schema field bound to `values`. These fields hold another app's sign-in, so every typed
+/// One schema field bound to `values`. These fields hold another app's sign-in, so every text
 /// input has `autocomplete="off"` (secrets `new-password`) and the password managers' ignore hints.
 #[component]
 fn SchemaField(field: FieldSchema, index: usize, values: RwSignal<Map<String, Value>>) -> impl IntoView {
@@ -829,10 +829,10 @@ mod tests {
         assert_ne!(field_dom_id(0), field_dom_id(1));
     }
 
-    /// Every typed input in the form opts out of autofill, so a download client's username and
+    /// Every text input in the form opts out of autofill, so a download client's username and
     /// password are never filled with the Reelix sign-in (fork issue #3).
     #[test]
-    fn every_typed_input_opts_out_of_autofill() {
+    fn every_text_input_opts_out_of_autofill() {
         let source = include_str!("provider_form.rs");
         let source = &source[..source.find("#[cfg(test)]").unwrap()];
         let schema_field = &source[source.find("fn SchemaField(").unwrap()..];
