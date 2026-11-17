@@ -170,6 +170,19 @@ pub struct MigratePlan {
     pub notes: Vec<String>,
 }
 
+/// A preview request: the connection, and the categories the run will take, so the plan (and the
+/// hidden secrets it asks for) covers only what the run would import. A bare connection is still
+/// a valid request, planning everything.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MigratePreviewRequest {
+    #[serde(flatten)]
+    pub connection: MigrateConnection,
+    /// Categories to plan; empty (or left out) means all, as for the run.
+    #[serde(default)]
+    pub categories: Vec<MigrateCategory>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MigrateRunRequest {
@@ -225,4 +238,30 @@ pub struct PendingMigrationSource {
     /// Always [`SAVED_API_KEY`].
     pub api_key: String,
     pub added_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bare connection, as older callers send, is still a preview of everything; `categories`
+    /// narrows it (fork issue #10).
+    #[test]
+    fn preview_request_takes_a_bare_connection_or_categories() {
+        let bare: MigratePreviewRequest =
+            serde_json::from_str(r#"{"source": "radarr", "url": "http://radarr:7878", "api_key": "k"}"#)
+                .unwrap();
+        assert_eq!(bare.connection.source, SourceKind::Radarr);
+        assert!(bare.categories.is_empty());
+
+        let narrowed: MigratePreviewRequest = serde_json::from_str(
+            r#"{"source": "radarr", "url": "http://radarr:7878", "api_key": "k",
+                "categories": ["movie", "root_folder"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            narrowed.categories,
+            [MigrateCategory::Movie, MigrateCategory::RootFolder]
+        );
+    }
 }
