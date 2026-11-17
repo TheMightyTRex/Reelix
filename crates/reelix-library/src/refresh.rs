@@ -13,13 +13,16 @@ use crate::series::apply_series_metadata;
 
 impl LibraryService {
     /// Refreshes one movie from TMDB. A movie removed from TMDB is marked `deleted`. A custom
-    /// movie (typed details, no TMDB match) is left as it is.
+    /// movie (typed details, no TMDB match) is left as it is, unless it came from another app
+    /// with an IMDb id a source now knows.
     pub async fn refresh_movie(&self, id: i64) -> Result<()> {
         let profiles = self.profiles().await?;
         let mut m = movies::get(&self.db, id, &profiles)
             .await?
             .ok_or_else(|| LibraryError::not_found("movie", id))?;
-        if m.custom {
+        // A film added from another app's details is matched once a source knows it; any other
+        // custom film keeps its typed details.
+        if m.custom && !self.adopt_source_match_movie(&mut m).await? {
             return Ok(());
         }
         let meta = match self.metadata.movie(m.tmdb_id).await {
@@ -89,7 +92,9 @@ impl LibraryService {
     /// series keeps its typed details; its episodes come from its files at each scan.
     pub async fn refresh_series(&self, id: i64) -> Result<()> {
         let mut s = self.series_row(id).await?;
-        if s.custom {
+        // A series added from another app's details is matched once a source knows it; any
+        // other custom series keeps its typed details.
+        if s.custom && !self.adopt_source_match_series(&mut s).await? {
             return Ok(());
         }
         let tmdb = s.tmdb_id.unwrap_or_default();
