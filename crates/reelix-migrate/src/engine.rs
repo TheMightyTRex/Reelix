@@ -33,7 +33,8 @@ const PAGE: u32 = 500;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Mode {
-    Plan,
+    /// Plans only `categories` (all when empty), as the run with the same categories would.
+    Plan { categories: Vec<MigrateCategory> },
     Run {
         categories: Vec<MigrateCategory>,
         search_missing: bool,
@@ -137,11 +138,12 @@ impl<'a> Engine<'a> {
         matches!(self.mode, Mode::Run { .. })
     }
 
-    /// Whether items of `c` are created (always true for a plan).
+    /// Whether items of `c` are created (or, in a plan, would be).
     fn creates(&self, c: MigrateCategory) -> bool {
         match &self.mode {
-            Mode::Plan => true,
-            Mode::Run { categories, .. } => categories.is_empty() || categories.contains(&c),
+            Mode::Plan { categories } | Mode::Run { categories, .. } => {
+                categories.is_empty() || categories.contains(&c)
+            }
         }
     }
 
