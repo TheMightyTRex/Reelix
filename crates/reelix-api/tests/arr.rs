@@ -813,11 +813,112 @@ async fn signalr_hub_answers_bazarr() {
     ws.read_exact(&mut payload).await.unwrap();
     assert_eq!(payload, b"{}\x1e", "the handshake succeeds");
 
-    // The connection stays open: nothing more arrives straight away (no events yet).
+    // The connection stays open: nothing arrives while the library does not change.
     let mut more = [0u8; 1];
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(300), ws.read(&mut more))
             .await
             .is_err()
     );
+
+    /// The next server text frame's payload (server frames are not masked).
+    async fn next_text(ws: &mut tokio::net::TcpStream) -> Option<String> {
+        let mut h = [0u8; 2];
+        tokio::time::timeout(std::time::Duration::from_secs(10), ws.read_exact(&mut h))
+            .await
+            .ok()?
+            .ok()?;
+        let len = match h[1] & 0x7f {
+            126 => {
+                let mut l = [0u8; 2];
+                ws.read_exact(&mut l).await.ok()?;
+                usize::from(u16::from_be_bytes(l))
+            }
+            127 => {
+                let mut l = [0u8; 8];
+                ws.read_exact(&mut l).await.ok()?;
+                usize::try_from(u64::from_be_bytes(l)).ok()?
+            }
+            n => usize::from(n),
+        };
+        let mut payload = vec![0u8; len];
+        ws.read_exact(&mut payload).await.ok()?;
+        String::from_utf8(payload).ok()
+    }
+
+    /// The next `receiveMessage` invocation (pings skipped), or a panic naming `what`.
+    async fn next_message(ws: &mut tokio::net::TcpStream, what: &str) -> Value {
+        loop {
+            let Some(text) = next_text(ws).await else {
+                panic!("no message for {what}");
+            };
+            let m: Value = serde_json::from_str(text.trim_end_matches('\u{1e}')).unwrap();
+            if m["type"] == 6 {
+                continue;
+            }
+            assert_eq!(m["type"], 1, "{m}");
+            assert_eq!(m["target"], "receiveMessage", "{m}");
+            return m;
+        }
+    }
+
+    // A series added through the Sonarr API reaches Sonarr's hub as Sonarr sends it
+    // (fork issue #6).
+    let root = app.tv_dir.path().to_str().unwrap().to_owned();
+    let (_, profiles) = call(&app, Method::GET, "/sonarr/api/v3/qualityprofile", None).await;
+    let (s, series) = call(
+        &app,
+        Method::POST,
+        "/sonarr/api/v3/series",
+        Some(json!({
+            "tvdbId": 2399, "title": "The Show", "qualityProfileId": profiles[0]["id"],
+            "rootFolderPath": root, "seasonFolder": true, "monitored": true, "seriesType": "standard",
+            "seasons": [{"seasonNumber": 1, "monitored": true}],
+            "addOptions": {"searchForMissingEpisodes": false}
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{series}");
+    let id = series["id"].as_i64().unwrap();
+    let m = next_message(&mut ws, "the new series").await;
+    assert_eq!(m["arguments"][0]["name"], "series", "{m}");
+    let body = &m["arguments"][0]["body"];
+    assert_eq!(body["action"], "created", "{m}");
+    assert_eq!(body["resource"]["id"], id, "{m}");
+    assert_eq!(body["resource"]["title"], "The Show");
+
+    // An episode's change arrives as the episode with its series.
+    let (_, eps) = call(
+        &app,
+        Method::GET,
+        &format!("/sonarr/api/v3/episode?seriesId={id}"),
+        None,
+    )
+    .await;
+    let episode = eps[0]["id"].as_i64().unwrap();
+    let (s, _) = call(
+        &app,
+        Method::PUT,
+        &format!("/sonarr/api/v3/episode/{episode}"),
+        Some(json!({"monitored": false})),
+    )
+    .await;
+    assert!(s.is_success(), "{s}");
+    let mut seen_episode = false;
+    while !seen_episode {
+        let m = next_message(&mut ws, "the changed episode").await;
+        let body = &m["arguments"][0]["body"];
+        match m["arguments"][0]["name"].as_str().unwrap() {
+            "series" => assert_eq!(body["resource"]["id"], id, "{m}"),
+            "episode" => {
+                assert_eq!(body["action"], "updated", "{m}");
+                assert_eq!(body["resource"]["id"], episode, "{m}");
+                assert_eq!(body["resource"]["seriesId"], id, "{m}");
+                assert_eq!(body["resource"]["series"]["title"], "The Show", "{m}");
+                assert_eq!(body["resource"]["monitored"], false, "{m}");
+                seen_episode = true;
+            }
+            other => panic!("Sonarr's hub sends no {other} messages: {m}"),
+        }
+    }
 }
