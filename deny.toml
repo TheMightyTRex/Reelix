@@ -9,6 +9,9 @@ yanked = "deny"
 unmaintained = "workspace"
 # Each entry has no compatible fix upstream; recheck when librespot or openidconnect update.
 ignore = [
+    # chrono is marked unmaintained (17 November 2026). This is a notice that no one maintains it, not a known flaw.
+    # Accepted by the owner the same day so the fork's fixes can go in; replacing it with the time crate is a task.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: no known flaw; accepted 17 November 2026 until it is replaced" },
     # quick-xml 0.38 is pinned by librespot-core 0.8, whose session.rs parses the ProductInfo
     # packet sent by Spotify over the authenticated session (plain Reader, no attributes() or
     # NsReader). librespot-core 0.8.0, the newest release, still asks for quick-xml ^0.38.
