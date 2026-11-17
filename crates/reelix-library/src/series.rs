@@ -618,6 +618,24 @@ impl LibraryService {
         Ok(eps)
     }
 
+    /// The series an episode belongs to, if the episode still exists.
+    pub async fn series_of_episode(&self, episode_id: i64) -> Result<Option<i64>> {
+        Ok(sqlx::query_scalar("SELECT series_id FROM episodes WHERE id = ?")
+            .bind(episode_id)
+            .fetch_optional(self.db.pool())
+            .await?)
+    }
+
+    /// The episodes an episode file holds.
+    pub async fn episodes_of_file(&self, file_id: i64) -> Result<Vec<i64>> {
+        Ok(
+            sqlx::query_scalar("SELECT id FROM episodes WHERE episode_file_id = ?")
+                .bind(file_id)
+                .fetch_all(self.db.pool())
+                .await?,
+        )
+    }
+
     pub async fn episode_files(&self, series_id: i64) -> Result<Vec<EpisodeFileDto>> {
         let s = self.series_row(series_id).await?;
         self.episode_files_of(&s).await

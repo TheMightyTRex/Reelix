@@ -183,7 +183,7 @@ fn episode_file_json(f: &EpisodeFileDto) -> Value {
     Value::Object(m)
 }
 
-fn episode_json(e: &EpisodeDto, series: Option<&SeriesDto>) -> Value {
+pub(super) fn episode_json(e: &EpisodeDto, series: Option<&SeriesDto>) -> Value {
     let mut v = json!({
         "id": e.id,
         "seriesId": e.series_id,

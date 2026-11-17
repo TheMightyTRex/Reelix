@@ -562,6 +562,16 @@ impl LibraryService {
             .collect())
     }
 
+    /// The film a movie file belongs to, if the file still exists.
+    pub async fn movie_of_file(&self, file_id: i64) -> Result<Option<i64>> {
+        Ok(
+            sqlx::query_scalar("SELECT movie_id FROM movie_files WHERE id = ?")
+                .bind(file_id)
+                .fetch_optional(self.db.pool())
+                .await?,
+        )
+    }
+
     /// Deletes a movie file from disk (recycle bin when configured) and the database.
     pub async fn delete_movie_file(&self, file_id: i64) -> Result<()> {
         let f = files::get(&self.db, FileTable::Movie, file_id)
