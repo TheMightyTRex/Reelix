@@ -84,9 +84,10 @@ impl MigrateService {
 
     /// What a migration would do; nothing is changed.
     pub async fn preview(&self, c: &MigrateConnection) -> Result<MigratePlan, MigrateError> {
-        let snap = self.source(c)?.snapshot().await?;
+        let source = self.source(c)?;
+        let snap = source.snapshot().await?;
         let noop = |_: usize, _: &str| {};
-        let mut engine = Engine::new(&self.targets, &snap, c, Mode::Plan, &noop);
+        let mut engine = Engine::new(&self.targets, &snap, c, &source, Mode::Plan, &noop);
         engine.run().await.map_err(MigrateError::Internal)?;
         let mut notes = engine.notes;
         notes.extend(source_notes(c.source));
@@ -170,7 +171,7 @@ impl MigrateService {
             categories: req.categories.clone(),
             search_missing: req.search_missing,
         };
-        let mut engine = Engine::new(&self.targets, &snap, &req.connection, mode, &progress);
+        let mut engine = Engine::new(&self.targets, &snap, &req.connection, source, mode, &progress);
         engine.run().await?;
         Ok(engine.items)
     }

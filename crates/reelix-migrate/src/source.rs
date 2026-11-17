@@ -118,6 +118,12 @@ impl Source {
         })
     }
 
+    /// Sonarr's episodes of one series (`GET /episode?seriesId=`), for a series no metadata
+    /// source knows, which is added with Sonarr's own details (fork issue #2).
+    pub async fn episodes(&self, series_id: i64) -> Result<Vec<Episode>, MigrateError> {
+        self.get(&format!("/episode?seriesId={series_id}")).await
+    }
+
     /// `GET /system/status` (Jellyseerr: `/status`), which also checks the key.
     pub async fn status(&self) -> Result<SystemStatus, MigrateError> {
         let path = if self.kind == SourceKind::Jellyseerr {
@@ -436,6 +442,8 @@ pub struct Movie {
     pub id: i64,
     pub title: String,
     pub year: i32,
+    pub overview: Option<String>,
+    pub images: Vec<Image>,
     pub tmdb_id: u32,
     pub imdb_id: Option<String>,
     pub path: String,
@@ -453,6 +461,8 @@ pub struct Series {
     pub id: i64,
     pub title: String,
     pub year: i32,
+    pub overview: Option<String>,
+    pub images: Vec<Image>,
     pub tvdb_id: u32,
     pub tmdb_id: u32,
     pub imdb_id: Option<String>,
@@ -466,6 +476,28 @@ pub struct Series {
     pub quality_profile_id: i64,
     pub tags: Vec<i64>,
     pub seasons: Vec<Season>,
+}
+
+/// A picture of a film or series: `coverType` (`poster`, `fanart`, …) and the address it came from.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Image {
+    pub cover_type: String,
+    pub remote_url: Option<String>,
+}
+
+/// One of Sonarr's episodes.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Episode {
+    pub season_number: u32,
+    pub episode_number: u32,
+    pub title: Option<String>,
+    pub overview: Option<String>,
+    /// `YYYY-MM-DD`.
+    pub air_date: Option<String>,
+    pub air_date_utc: Option<String>,
+    pub monitored: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
