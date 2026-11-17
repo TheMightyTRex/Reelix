@@ -41,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/apikeys/{id}", delete(auth::delete_key))
         .route("/system/status", get(system::status))
         .route("/system/health", get(system::health))
+        .route("/system/health/live", get(system::live))
         .route("/system/tasks", get(system::tasks))
         .route("/system/tasks/{kind}/run", post(system::run_task))
         .route(
@@ -127,6 +128,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
         routes::auth::delete_key,
         routes::system::status,
         routes::system::health,
+        routes::system::live,
         routes::system::tasks,
         routes::system::run_task,
         routes::system::background_work,
