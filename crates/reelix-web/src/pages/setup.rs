@@ -436,7 +436,7 @@ fn StepBody(wizard: Wizard, id: StepId, code: RwSignal<String>) -> impl IntoView
         StepId::Code => view! {
             <div class="field">
                 <label for="setup-token">"Set-up code"</label>
-                <p id="setup-token-hint" class="field-hint">"Printed in the server log when Reelix starts with no accounts."</p>
+                <p id="setup-token-hint" class="field-hint">"Printed in the server log when Reelix starts with no accounts, and saved in the file setup-token in its data folder (/config/setup-token in Docker)."</p>
                 <input id="setup-token" class="input mono" type="text" autocomplete="off" autocapitalize="none"
                     spellcheck="false" aria-describedby="setup-token-hint" data-snag-private=""
                     prop:value=move || code.get() on:input=move |e| code.set(event_target_value(&e)) />
