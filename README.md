@@ -76,6 +76,7 @@ Reelix does the jobs of Radarr, Sonarr, Prowlarr, Jellyseerr, Readarr and Lidarr
 ### Integrations
 - **Media servers:** Jellyfin, Emby and Plex (library refresh and availability), plus Audiobookshelf (books and podcast libraries), Kavita, Calibre-Web and Navidrome.
 - **Import lists:** TMDB, Trakt, IMDb, MDBList, Plex and Jellyfin watchlists, other Reelix instances, URL lists, and Last.fm, ListenBrainz and Spotify for music.
+- **Subtitles** (off until activated): OpenSubtitles.com with your own API key and Stremio subtitle add-ons, saved beside films and episodes as Jellyfin reads them (normal, SDH and forced per language); a subtitle made for the file comes first. Details in [docs/subtitles.md](docs/subtitles.md).
 - **Notifications:** Discord, Slack, Telegram, email (SMTP), Pushover, Gotify, ntfy, Apprise, Matrix, webhooks and custom scripts.
 
 ### System

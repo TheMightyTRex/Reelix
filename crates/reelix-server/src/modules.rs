@@ -44,6 +44,8 @@ pub struct Modules {
     pub activity: std::sync::Arc<reelix_pipeline::ActivityService>,
     pub maintenance: std::sync::Arc<crate::maintenance::MaintenanceService>,
     pub migrate: std::sync::Arc<reelix_migrate::MigrateService>,
+    /// Subtitles from OpenSubtitles and Stremio add-ons (off until activated).
+    pub subtitles: std::sync::Arc<reelix_subtitles::SubtitleService>,
 }
 
 impl Modules {
@@ -295,6 +297,14 @@ impl Modules {
                 deps.http.clone(),
             ))
         };
+        // subtitles (off until activated in the subtitle settings)
+        let subtitles = std::sync::Arc::new(reelix_subtitles::SubtitleService::new(
+            deps.db.clone(),
+            deps.events.clone(),
+            deps.secrets.clone(),
+            deps.http.clone(),
+            reelix_subtitles::Options::default(),
+        ));
         Ok(Self {
             deps,
             providers,
@@ -309,6 +319,7 @@ impl Modules {
             activity,
             maintenance,
             migrate,
+            subtitles,
         })
     }
 
@@ -344,6 +355,8 @@ impl Modules {
         builder = reelix_pipeline::monitor::jobs::register(builder, &self.activity);
         // maintenance (backup, update_check)
         builder = crate::maintenance::MaintenanceService::register(builder, &self.maintenance);
+        // subtitles (subtitles_search)
+        builder = reelix_subtitles::jobs::register(builder, &self.subtitles);
         builder
     }
 
@@ -389,6 +402,10 @@ impl Modules {
             self.maintenance.clone(),
         )));
         state = state.with_extension(self.migrate.clone());
+        // subtitles: new film and episode files go first in the subtitle schedule
+        self.subtitles.set_queue(_queue.clone());
+        self.subtitles.spawn_listener();
+        state = state.with_extension(self.subtitles.clone());
         state
     }
 }

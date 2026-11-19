@@ -4119,6 +4119,7 @@ dependencies = [
  "reelix-providers",
  "reelix-radio",
  "reelix-requests",
+ "reelix-subtitles",
  "reqwest",
  "serde",
  "serde_json",
@@ -4672,6 +4673,7 @@ dependencies = [
  "reelix-providers",
  "reelix-radio",
  "reelix-requests",
+ "reelix-subtitles",
  "reqwest",
  "rpassword",
  "rustix 1.1.6",
@@ -4695,6 +4697,29 @@ dependencies = [
  "windows-service",
  "wiremock",
  "zip",
+]
+
+[[package]]
+name = "reelix-subtitles"
+version = "0.8.7"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "reelix-api-types",
+ "reelix-core",
+ "reelix-db",
+ "reelix-jobs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
