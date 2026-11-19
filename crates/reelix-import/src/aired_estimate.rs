@@ -274,7 +274,11 @@ mod tests {
     #[test]
     fn good_place_finale_after_a_double_premiere() {
         let eps = good_place();
-        assert_eq!(estimate_episode(2, 13, &eps, today()), Some(212), "Somewhere Else");
+        assert_eq!(
+            estimate_episode(2, 13, &eps, today()),
+            Some(212),
+            "Somewhere Else"
+        );
         assert_eq!(estimate_episode(3, 13, &eps, today()), Some(312), "Pandemonium");
     }
 
