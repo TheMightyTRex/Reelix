@@ -31,6 +31,9 @@ const END_WORDS: &[&str] = &[
 /// Words dropped on both sides: articles, `and`, and the "part" of "Part 1" (TMDB writes "(1)").
 const IGNORED_WORDS: &[&str] = &["the", "a", "an", "and", "part", "pt"];
 
+/// Words a special's title may add or leave out ("Christmas" and "Christmas Special").
+const SPECIAL_WORDS: &[&str] = &["special", "specials"];
+
 /// Titles that do not name one episode ("Episode 3", "TBA").
 const GENERIC_WORDS: &[&str] = &["episode", "chapter", "tba", "tbd"];
 
@@ -100,17 +103,37 @@ pub fn match_episode_title(release: &str, season: Option<u32>, episodes: &[Episo
     if !exact.is_empty() {
         return one(&exact, season);
     }
-    let longest = titles
+    if let Some(longest) = titles
         .iter()
         .filter(|(_, t)| named.starts_with(t))
         .map(|(_, t)| t.len())
-        .max()?;
-    let prefix: Vec<EpisodeTitle<'_>> = titles
+        .max()
+    {
+        let prefix: Vec<EpisodeTitle<'_>> = titles
+            .iter()
+            .filter(|(_, t)| t.len() == longest && named.starts_with(t))
+            .map(|(e, _)| *e)
+            .collect();
+        return one(&prefix, season);
+    }
+    // "Christmas" for the special TMDB calls "Christmas Special": the same words once "special"
+    // is left out on both sides.
+    let core = |t: &[String]| -> Vec<String> {
+        t.iter()
+            .filter(|w| !SPECIAL_WORDS.contains(&w.as_str()))
+            .cloned()
+            .collect()
+    };
+    let named_core = core(&named);
+    if !is_specific(&named_core) {
+        return None;
+    }
+    let special: Vec<EpisodeTitle<'_>> = titles
         .iter()
-        .filter(|(_, t)| t.len() == longest && named.starts_with(t))
+        .filter(|(_, t)| core(t) == named_core)
         .map(|(e, _)| *e)
         .collect();
-    one(&prefix, season)
+    one(&special, season)
 }
 
 fn one(found: &[EpisodeTitle<'_>], season: Option<u32>) -> Option<i64> {
@@ -259,5 +282,39 @@ mod tests {
             match_episode_title("Show.S02E10.Whos.There.720p", Some(2), &eps),
             Some(8)
         );
+    }
+
+    #[test]
+    fn a_special_matches_without_the_word_special() {
+        // Friday Night Dinner: the release calls the 2012 Christmas special S02E07 "Christmas".
+        let eps = vec![
+            ep(201, 2, "Buggy"),
+            ep(206, 2, "The Mouse"),
+            ep(1, 0, "Christmas Special"),
+            ep(301, 3, "The Secret"),
+        ];
+        assert_eq!(
+            match_episode_title(
+                "Friday.Night.Dinner.S02E07.Christmas.1080p.ALL4.WEB-DL.AAC2.0.H.264-FUZEER",
+                Some(2),
+                &eps
+            ),
+            Some(1)
+        );
+        // Food Unwrapped: "Supermarket Special" is a special by its full title.
+        let food = vec![ep(8445, 12, "Whisky, Halloumi, Sweetcorn"), ep(8322, 0, "Supermarket Special")];
+        assert_eq!(
+            match_episode_title(
+                "Food.Unwrapped.S12E05.Supermarket.Special.1080p.HEVC.x265-MeGusta",
+                Some(12),
+                &food
+            ),
+            Some(8322)
+        );
+        // Two Christmas specials: not clear, so the numbers decide.
+        let two = vec![ep(1, 0, "Christmas Special"), ep(2, 0, "Christmas Special")];
+        assert_eq!(match_episode_title("Show.S02E07.Christmas.1080p", Some(2), &two), None);
+        // "Special" alone names nothing.
+        assert_eq!(match_episode_title("Show.S02E07.Special.1080p", Some(2), &eps), None);
     }
 }

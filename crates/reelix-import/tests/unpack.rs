@@ -16,7 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use reelix_import::unpack::{
-    STAGING_DIR, UnpackConfig, find_archives, is_first_volume, remove_unpacked, unpack_download,
+    ArchiveKind, STAGING_DIR, UnpackConfig, archive_kind, find_archives, holds_media, is_first_volume,
+    remove_unpacked, unpack_download,
 };
 
 const VIDEO: &str = "Some.Movie.2020.1080p.WEB-DL.x264-GRP.mkv";
@@ -177,7 +178,7 @@ async fn archive_without_video_is_left_packed() {
     assert!(u.files.is_empty());
     assert_eq!(
         u.messages,
-        ["The RAR archives in the download hold no video files"]
+        ["The archives in the download hold no video, audio or book files"]
     );
     assert_eq!(names(&dl), ["novideo.rar"]);
 }
@@ -260,4 +261,182 @@ async fn folder_without_archives_does_nothing() {
     fs::write(dl.join("readme.txt"), b"x").unwrap();
     let u = unpack_download(&dl, &UnpackConfig::default()).await;
     assert!(u.files.is_empty() && u.messages.is_empty());
+}
+
+/// Writes a ZIP at `path` holding `entries` (name, bytes), deflated.
+fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
+    use std::io::Write;
+    let mut z = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        z.start_file(*name, opts).unwrap();
+        z.write_all(bytes).unwrap();
+    }
+    z.finish().unwrap();
+}
+
+fn seven_zip() -> Option<&'static str> {
+    ["7zz", "7z", "7za"].into_iter().find(|p| {
+        std::process::Command::new(p)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+    })
+}
+
+#[test]
+fn archive_kinds() {
+    for (name, kind) in [
+        ("a.zip", Some(ArchiveKind::Zip)),
+        ("A.ZIP", Some(ArchiveKind::Zip)),
+        ("a.7z", Some(ArchiveKind::SevenZip)),
+        ("a.7z.001", Some(ArchiveKind::SevenZip)),
+        ("a.7z.002", None),
+        ("a.rar", Some(ArchiveKind::Rar)),
+        ("a.part01.rar", Some(ArchiveKind::Rar)),
+        ("a.part02.rar", None),
+        ("a.r00", None),
+        ("a.cbz", None),
+        ("a.epub", None),
+    ] {
+        assert_eq!(archive_kind(Path::new(name)), kind, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_zip_is_unpacked_and_its_programs_left_out() {
+    let (_d, dl) = download(&[]);
+    make_zip(
+        &dl.join("bundle.zip"),
+        &[
+            (VIDEO, &[7u8; 6000]),
+            ("Subs/English.srt", b"1"),
+            ("setup.exe", b"MZ"),
+            ("../escape.mkv", b"no"),
+        ],
+    );
+    let u = unpack_download(&dl, &UnpackConfig::default()).await;
+    assert!(u.messages.is_empty(), "{:?}", u.messages);
+    assert_eq!(u.files, [dl.join(VIDEO), dl.join("Subs/English.srt")]);
+    assert_unpacked(&dl, &["bundle.zip"]);
+    assert!(!dl.join("setup.exe").exists(), "programs are never unpacked");
+    assert!(!dl.parent().unwrap().join("escape.mkv").exists());
+    remove_unpacked(&u.files).await;
+    assert_eq!(names(&dl), ["Subs", "bundle.zip"]);
+}
+
+#[tokio::test]
+async fn a_book_in_a_rar_in_a_zip_is_unpacked_in_turn() {
+    // Scene book releases (the owner's BitBook downloads, 19 November 2026): a .zip holding a
+    // .rar holding the .epub, with an .nfo and a file_id.diz.
+    if !unrar_available() {
+        return;
+    }
+    let (_d, dl) = download(&[]);
+    let inner = fs::read(fixtures().join("single.rar")).unwrap();
+    make_zip(
+        &dl.join("bbj74pca.zip"),
+        &[("bbj74pc.rar", &inner), ("bb-utopi.nfo", b"nfo"), ("file_id.diz", b"diz")],
+    );
+    let u = unpack_download(&dl, &UnpackConfig::default()).await;
+    assert!(u.messages.is_empty(), "{:?}", u.messages);
+    assert!(u.files.contains(&dl.join("bbj74pc.rar")), "{:?}", u.files);
+    assert!(u.files.contains(&dl.join(VIDEO)), "{:?}", u.files);
+    assert_eq!(fs::metadata(dl.join(VIDEO)).unwrap().len(), 6000);
+    // The zip from the client stays; everything unpacked goes after import.
+    remove_unpacked(&u.files).await;
+    assert_eq!(names(&dl), ["bbj74pca.zip"]);
+}
+
+#[tokio::test]
+async fn each_episode_folder_of_a_season_pack_is_unpacked() {
+    // The Addams Family S02 (19 November 2026): one folder per episode, each an old-style
+    // split RAR set NZBGet did not unpack.
+    if !unrar_available() {
+        return;
+    }
+    let (_d, dl) = download(&[]);
+    for ep in ["S02E01", "S02E02"] {
+        let folder = dl.join(format!("The.Addams.Family.1964.{ep}.1080p.BluRay.x264-BROADCAST"));
+        fs::create_dir_all(&folder).unwrap();
+        for part in ["oldsplit.rar", "oldsplit.r00", "oldsplit.r01"] {
+            fs::copy(fixtures().join(part), folder.join(part)).unwrap();
+        }
+        fs::write(folder.join("x.nfo"), b"nfo").unwrap();
+    }
+    let u = unpack_download(&dl, &UnpackConfig::default()).await;
+    assert!(u.messages.is_empty(), "{:?}", u.messages);
+    assert_eq!(u.files.len(), 2, "{:?}", u.files);
+    for f in &u.files {
+        assert_eq!(f.file_name().unwrap().to_string_lossy(), VIDEO);
+        assert!(f.parent().unwrap().join("oldsplit.r00").exists(), "the set stays for seeding");
+    }
+}
+
+#[tokio::test]
+async fn a_damaged_zip_says_so() {
+    let (_d, dl) = download(&[]);
+    fs::write(dl.join("broken.zip"), b"PK\x03\x04 not really a zip").unwrap();
+    let u = unpack_download(&dl, &UnpackConfig::default()).await;
+    assert!(u.files.is_empty());
+    assert_eq!(u.messages, ["broken.zip: the archive is damaged or incomplete"]);
+}
+
+#[tokio::test]
+async fn a_7z_is_unpacked() {
+    let Some(program) = seven_zip() else {
+        assert!(
+            std::env::var("REELIX_REQUIRE_UNRAR").map_or(true, |v| v.is_empty()),
+            "7-Zip is required where unrar is"
+        );
+        eprintln!("7-Zip is not on PATH; skipping");
+        return;
+    };
+    let (_d, dl) = download(&[]);
+    let src = tempfile::tempdir().unwrap();
+    fs::write(src.path().join(VIDEO), [9u8; 6000]).unwrap();
+    fs::write(src.path().join("trojan.scr"), b"MZ").unwrap();
+    let status = std::process::Command::new(program)
+        .args(["a", "-bd", "-y"])
+        .arg(dl.join("movie.7z"))
+        .arg(src.path().join(VIDEO))
+        .arg(src.path().join("trojan.scr"))
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let u = unpack_download(&dl, &UnpackConfig::default()).await;
+    assert!(u.messages.is_empty(), "{:?}", u.messages);
+    assert_eq!(u.files, [dl.join(VIDEO)]);
+    assert_unpacked(&dl, &["movie.7z"]);
+    assert!(!dl.join("trojan.scr").exists());
+}
+
+#[tokio::test]
+async fn a_missing_7zip_says_so() {
+    let (_d, dl) = download(&[]);
+    fs::write(dl.join("movie.7z"), b"7z").unwrap();
+    let config = UnpackConfig {
+        seven_zip_paths: vec![dl.join("no-such-7z")],
+        ..UnpackConfig::default()
+    };
+    let u = unpack_download(&dl, &config).await;
+    assert!(u.files.is_empty());
+    assert_eq!(u.messages, ["7-Zip is not installed, so the 7z archives cannot be unpacked"]);
+}
+
+#[tokio::test]
+async fn holds_media_looks_inside_archives() {
+    let (_d, dl) = download(&[]);
+    fs::write(dl.join("Scrubs.S02E08.exe"), b"MZ").unwrap();
+    assert!(!holds_media(&dl, &UnpackConfig::default()).await);
+    assert!(!holds_media(&dl.join("Scrubs.S02E08.exe"), &UnpackConfig::default()).await);
+    make_zip(&dl.join("payload.zip"), &[("readme.txt", b"x"), ("run.exe", b"MZ")]);
+    assert!(!holds_media(&dl, &UnpackConfig::default()).await, "a zip of programs is not media");
+    make_zip(&dl.join("book.zip"), &[("Book.epub", b"x")]);
+    assert!(holds_media(&dl, &UnpackConfig::default()).await);
+    fs::remove_file(dl.join("book.zip")).unwrap();
+    fs::write(dl.join("Song.flac"), b"x").unwrap();
+    assert!(holds_media(&dl, &UnpackConfig::default()).await);
 }

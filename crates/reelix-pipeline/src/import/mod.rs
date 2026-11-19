@@ -12,6 +12,7 @@ use std::time::Duration;
 use reelix_api_types::library::{ImportMode, MediaManagementSettings};
 use reelix_core::MediaKind;
 use reelix_decision::engine::Scored;
+use reelix_import::aired_estimate::{EpisodeFacts, estimate_episode};
 use reelix_import::episode_map::match_by_episode_map;
 use reelix_import::episode_title::{EpisodeTitle, match_episode_title};
 use reelix_import::files::{
@@ -395,6 +396,17 @@ impl<'a> FileImporter<'a> {
                 })
             })
             .collect();
+        let facts: Vec<EpisodeFacts> = st
+            .episodes
+            .iter()
+            .map(|e| EpisodeFacts {
+                id: e.id,
+                season: e.season_number,
+                episode: e.episode_number,
+                air_date: e.air_date,
+                runtime_minutes: e.runtime_minutes,
+            })
+            .collect();
         let runtime = st.series.runtime_minutes;
         let non_samples: Vec<usize> = (0..planned.len())
             .filter(|i| {
@@ -448,10 +460,17 @@ impl<'a> FileImporter<'a> {
                     p.rejections.push("No episodes matched the file name".into());
                     continue;
                 }
-                (None, None, Err(e)) => {
-                    p.rejections.push(format!("Unable to match episodes: {e}"));
-                    continue;
-                }
+                (None, None, Err(e)) => match estimated(p, st, &facts) {
+                    // Numbers TMDB does not have, read in the season's likely aired order.
+                    Some(id) => {
+                        p.other_numbering = true;
+                        vec![id]
+                    }
+                    None => {
+                        p.rejections.push(format!("Unable to match episodes: {e}"));
+                        continue;
+                    }
+                },
             };
             if ids.iter().any(|e| claimed.contains(e)) {
                 p.rejections
@@ -724,6 +743,22 @@ impl<'a> FileImporter<'a> {
 
 /// The episode a one-episode file or release names by its title. Broadcast or TVDB numbering can
 /// give that episode another number than TMDB's, so the title is trusted over the number.
+/// The episode a single-episode `SxxEyy` name points at in the season's estimated aired order
+/// ([`estimate_episode`]), when the series has no TMDB episode group to read it by.
+fn estimated(p: &PlannedFile, st: &SeriesTarget, facts: &[EpisodeFacts]) -> Option<i64> {
+    if st.episode_map.is_some() {
+        return None;
+    }
+    let info = p.parsed.episode()?;
+    if info.full_season || info.season_range.is_some() || info.air_date.is_some() {
+        return None;
+    }
+    match info.episodes.as_slice() {
+        [episode] => estimate_episode(info.season?, *episode, facts),
+        _ => None,
+    }
+}
+
 fn episode_by_title(
     p: &PlannedFile,
     release_title: Option<&str>,

@@ -18,6 +18,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 unicode-normalization = "0.1"
+zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
