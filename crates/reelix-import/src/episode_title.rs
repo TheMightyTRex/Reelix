@@ -302,7 +302,10 @@ mod tests {
             Some(1)
         );
         // Food Unwrapped: "Supermarket Special" is a special by its full title.
-        let food = vec![ep(8445, 12, "Whisky, Halloumi, Sweetcorn"), ep(8322, 0, "Supermarket Special")];
+        let food = vec![
+            ep(8445, 12, "Whisky, Halloumi, Sweetcorn"),
+            ep(8322, 0, "Supermarket Special"),
+        ];
         assert_eq!(
             match_episode_title(
                 "Food.Unwrapped.S12E05.Supermarket.Special.1080p.HEVC.x265-MeGusta",
@@ -313,8 +316,14 @@ mod tests {
         );
         // Two Christmas specials: not clear, so the numbers decide.
         let two = vec![ep(1, 0, "Christmas Special"), ep(2, 0, "Christmas Special")];
-        assert_eq!(match_episode_title("Show.S02E07.Christmas.1080p", Some(2), &two), None);
+        assert_eq!(
+            match_episode_title("Show.S02E07.Christmas.1080p", Some(2), &two),
+            None
+        );
         // "Special" alone names nothing.
-        assert_eq!(match_episode_title("Show.S02E07.Special.1080p", Some(2), &eps), None);
+        assert_eq!(
+            match_episode_title("Show.S02E07.Special.1080p", Some(2), &eps),
+            None
+        );
     }
 }

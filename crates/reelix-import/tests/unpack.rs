@@ -337,7 +337,11 @@ async fn a_book_in_a_rar_in_a_zip_is_unpacked_in_turn() {
     let inner = fs::read(fixtures().join("single.rar")).unwrap();
     make_zip(
         &dl.join("bbj74pca.zip"),
-        &[("bbj74pc.rar", &inner), ("bb-utopi.nfo", b"nfo"), ("file_id.diz", b"diz")],
+        &[
+            ("bbj74pc.rar", &inner),
+            ("bb-utopi.nfo", b"nfo"),
+            ("file_id.diz", b"diz"),
+        ],
     );
     let u = unpack_download(&dl, &UnpackConfig::default()).await;
     assert!(u.messages.is_empty(), "{:?}", u.messages);
@@ -370,7 +374,10 @@ async fn each_episode_folder_of_a_season_pack_is_unpacked() {
     assert_eq!(u.files.len(), 2, "{:?}", u.files);
     for f in &u.files {
         assert_eq!(f.file_name().unwrap().to_string_lossy(), VIDEO);
-        assert!(f.parent().unwrap().join("oldsplit.r00").exists(), "the set stays for seeding");
+        assert!(
+            f.parent().unwrap().join("oldsplit.r00").exists(),
+            "the set stays for seeding"
+        );
     }
 }
 
@@ -423,7 +430,10 @@ async fn a_missing_7zip_says_so() {
     };
     let u = unpack_download(&dl, &config).await;
     assert!(u.files.is_empty());
-    assert_eq!(u.messages, ["7-Zip is not installed, so the 7z archives cannot be unpacked"]);
+    assert_eq!(
+        u.messages,
+        ["7-Zip is not installed, so the 7z archives cannot be unpacked"]
+    );
 }
 
 #[tokio::test]
@@ -432,8 +442,14 @@ async fn holds_media_looks_inside_archives() {
     fs::write(dl.join("Scrubs.S02E08.exe"), b"MZ").unwrap();
     assert!(!holds_media(&dl, &UnpackConfig::default()).await);
     assert!(!holds_media(&dl.join("Scrubs.S02E08.exe"), &UnpackConfig::default()).await);
-    make_zip(&dl.join("payload.zip"), &[("readme.txt", b"x"), ("run.exe", b"MZ")]);
-    assert!(!holds_media(&dl, &UnpackConfig::default()).await, "a zip of programs is not media");
+    make_zip(
+        &dl.join("payload.zip"),
+        &[("readme.txt", b"x"), ("run.exe", b"MZ")],
+    );
+    assert!(
+        !holds_media(&dl, &UnpackConfig::default()).await,
+        "a zip of programs is not media"
+    );
     make_zip(&dl.join("book.zip"), &[("Book.epub", b"x")]);
     assert!(holds_media(&dl, &UnpackConfig::default()).await);
     fs::remove_file(dl.join("book.zip")).unwrap();

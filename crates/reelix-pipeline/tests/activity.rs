@@ -466,14 +466,22 @@ async fn a_seeding_torrent_keeps_its_stray_program_until_it_is_removed() {
     let id = track(&e, "hash-seed", title, None, Some(sid), eps.clone()).await;
     let folder = e.downloads.join(title);
     for n in 1..=3 {
-        write(&folder.join(format!("The.Show.S01E0{n}.1080p.WEB-DL.x264-GRP.mkv")), 4000 + n);
+        write(
+            &folder.join(format!("The.Show.S01E0{n}.1080p.WEB-DL.x264-GRP.mkv")),
+            4000 + n,
+        );
     }
     write(&folder.join("Keygen.exe"), 1);
     let mut it = item("hash-seed", title, DownloadState::Completed, Some(&folder));
     it.can_be_removed = false;
     e.client.items.lock().unwrap().push(it);
     e.svc.poll().await.unwrap();
-    assert_eq!(state_of(&e, id).await, TrackedState::Imported, "{:?}", messages_of(&e, id).await);
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
     assert!(folder.join("Keygen.exe").exists(), "seeding is not broken");
     assert!(e.client.removed.lock().unwrap().is_empty());
 }
@@ -508,7 +516,10 @@ async fn a_program_posing_as_an_episode_is_removed_blocklisted_and_searched_agai
     assert!(jobs.contains(&"search".to_owned()), "{jobs:?}");
     assert_eq!(history_events(&e).await, vec!["download_failed"]);
     let why = messages_of(&e, id).await;
-    assert!(why[0].starts_with("Removed: the download held a program"), "{why:?}");
+    assert!(
+        why[0].starts_with("Removed: the download held a program"),
+        "{why:?}"
+    );
     assert!(why[0].contains(".exe"), "{why:?}");
     for ep in eps {
         assert!(file_of(&e, ep).await.is_none());
@@ -1560,7 +1571,12 @@ async fn a_double_length_finale_takes_the_number_after_it() {
     let (sid, eps) = add_series(&e).await;
     runtimes(&e, &eps, &[24, 24, 48]).await;
     let id = complete_episode(&e, "hashDF", "The.Show.S01E04.1080p.BluRay.REMUX-GRP", sid).await;
-    assert_eq!(state_of(&e, id).await, TrackedState::Imported, "{:?}", messages_of(&e, id).await);
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
     assert!(file_of(&e, eps[2]).await.is_some());
     assert!(file_of(&e, eps[0]).await.is_none());
 }
@@ -1576,7 +1592,12 @@ async fn specials_aired_before_the_season_shift_its_numbers() {
     // A five-minute extra is not an episode.
     add_special(&e, sid, 3, "Mini", "2019-12-20", 5).await;
     let id = complete_episode(&e, "hashSP", "The.Show.S01E05.MULTi.1080p.WEB.x264-GRP", sid).await;
-    assert_eq!(state_of(&e, id).await, TrackedState::Imported, "{:?}", messages_of(&e, id).await);
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
     assert!(file_of(&e, eps[2]).await.is_some());
 }
 
@@ -1594,7 +1615,10 @@ async fn an_unclear_number_is_left_for_choose_the_episode() {
         assert!(file_of(&e, ep).await.is_none());
     }
     assert!(
-        messages_of(&e, id).await.iter().any(|m| m.contains("Unable to match episodes")),
+        messages_of(&e, id)
+            .await
+            .iter()
+            .any(|m| m.contains("Unable to match episodes")),
         "{:?}",
         messages_of(&e, id).await
     );
@@ -1613,7 +1637,12 @@ async fn a_christmas_release_finds_the_christmas_special() {
         sid,
     )
     .await;
-    assert_eq!(state_of(&e, id).await, TrackedState::Imported, "{:?}", messages_of(&e, id).await);
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
     assert!(file_of(&e, special).await.is_some());
     for ep in eps {
         assert!(file_of(&e, ep).await.is_none());
@@ -1631,7 +1660,10 @@ async fn an_estimated_episode_with_a_file_follows_the_upgrade_rules() {
     let again = complete_episode(&e, "hashUP2", "The.Show.S01E04.1080p.BluRay.REMUX-OTHER", sid).await;
     assert_eq!(state_of(&e, again).await, TrackedState::ImportPending);
     assert!(
-        messages_of(&e, again).await.iter().any(|m| m.contains("Not an upgrade")),
+        messages_of(&e, again)
+            .await
+            .iter()
+            .any(|m| m.contains("Not an upgrade")),
         "{:?}",
         messages_of(&e, again).await
     );

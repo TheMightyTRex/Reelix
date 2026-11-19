@@ -754,7 +754,10 @@ fn estimated(p: &PlannedFile, st: &SeriesTarget, facts: &[EpisodeFacts]) -> Opti
         return None;
     }
     match info.episodes.as_slice() {
-        [episode] => estimate_episode(info.season?, *episode, facts),
+        [episode] => {
+            let today = chrono::Utc::now().date_naive();
+            estimate_episode(info.season?, *episode, facts, today)
+        }
         _ => None,
     }
 }

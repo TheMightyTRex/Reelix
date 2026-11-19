@@ -185,7 +185,10 @@ pub async fn list(archive: &Path, config: &UnpackConfig) -> Result<Vec<PathBuf>,
 
 /// Whether `archive` holds at least one video file.
 pub async fn has_video(archive: &Path, config: &UnpackConfig) -> Result<bool, UnpackError> {
-    Ok(list(archive, config).await?.iter().any(|p| crate::files::is_video(p)))
+    Ok(list(archive, config)
+        .await?
+        .iter()
+        .any(|p| crate::files::is_video(p)))
 }
 
 /// Whether `archive` holds a media file (video, audio, book) or another archive.
@@ -281,7 +284,11 @@ pub async fn unpack_download(dir: &Path, config: &UnpackConfig) -> Unpacked {
             if missing.contains(&kind) {
                 continue;
             }
-            let name = archive.strip_prefix(&base).unwrap_or(&archive).display().to_string();
+            let name = archive
+                .strip_prefix(&base)
+                .unwrap_or(&archive)
+                .display()
+                .to_string();
             let result = match worth_unpacking(&archive, config).await {
                 Ok(false) => {
                     without_media += 1;
@@ -419,7 +426,11 @@ fn zip_list(archive: &Path) -> Result<Vec<PathBuf>, UnpackError> {
 fn zip_extract(archive: &Path, stage: &Path) -> Result<(), UnpackError> {
     let mut zip = zip_open(archive)?;
     for i in 0..zip.len() {
-        if zip.by_index_raw(i).map_err(|e| zip_error(archive, e))?.encrypted() {
+        if zip
+            .by_index_raw(i)
+            .map_err(|e| zip_error(archive, e))?
+            .encrypted()
+        {
             return Err(UnpackError::Encrypted);
         }
         let mut entry = zip.by_index(i).map_err(|e| zip_error(archive, e))?;

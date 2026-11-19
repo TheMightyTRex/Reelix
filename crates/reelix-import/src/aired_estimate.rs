@@ -35,10 +35,21 @@ const SPECIAL_MIN_SHARE: f64 = 0.6;
 /// that other orders may count as two.
 const DOUBLE_SHARE: f64 = 1.7;
 
+/// A season with no later season counts as finished once its last episode aired this many days
+/// before today.
+const SETTLED_DAYS: i64 = 180;
+
 /// The TMDB episode that `season`/`episode`, read in an aired order, points at, or `None` when
-/// no aired order reaches it or the orders disagree. Season 0 is never estimated. The caller
-/// uses this only for a number TMDB's own numbering does not have.
-pub fn estimate_episode(season: u32, episode: u32, episodes: &[EpisodeFacts]) -> Option<i64> {
+/// no aired order reaches it or the orders disagree. Season 0 is never estimated, and neither is
+/// a season that may still be airing (no later season, last episode under 180 days before
+/// `today`): there a number TMDB lacks is more likely a new episode TMDB has not listed yet. The
+/// caller uses this only for a number TMDB's own numbering does not have.
+pub fn estimate_episode(
+    season: u32,
+    episode: u32,
+    episodes: &[EpisodeFacts],
+    today: NaiveDate,
+) -> Option<i64> {
     if season == 0 || episode == 0 {
         return None;
     }
@@ -48,12 +59,21 @@ pub fn estimate_episode(season: u32, episode: u32, episodes: &[EpisodeFacts]) ->
     }
     regular.sort_by_key(|e| e.episode);
     // Positions only mean something when TMDB numbers the season 1, 2, 3 and so on.
-    if regular.iter().enumerate().any(|(i, e)| e.episode as usize != i + 1) {
+    if regular
+        .iter()
+        .enumerate()
+        .any(|(i, e)| e.episode as usize != i + 1)
+    {
         return None;
     }
     let usual = median_runtime(&regular);
     let first = regular.iter().filter_map(|e| e.air_date).min();
     let last = regular.iter().filter_map(|e| e.air_date).max();
+    let later_season = episodes.iter().any(|e| e.season > season);
+    let settled = last.is_some_and(|l| (today - l).num_days() > SETTLED_DAYS);
+    if !later_season && !settled {
+        return None;
+    }
     let previous_end = season_end(episodes, season.checked_sub(1).filter(|s| *s > 0));
     let next_start = season_start(episodes, season + 1);
 
@@ -145,7 +165,11 @@ fn read(
 }
 
 fn median_runtime(eps: &[&EpisodeFacts]) -> Option<f64> {
-    let mut r: Vec<u32> = eps.iter().filter_map(|e| e.runtime_minutes).filter(|r| *r > 0).collect();
+    let mut r: Vec<u32> = eps
+        .iter()
+        .filter_map(|e| e.runtime_minutes)
+        .filter(|r| *r > 0)
+        .collect();
     if r.is_empty() {
         return None;
     }
@@ -173,6 +197,10 @@ fn season_start(episodes: &[EpisodeFacts], season: u32) -> Option<NaiveDate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, 19).unwrap()
+    }
 
     fn d(s: &str) -> Option<NaiveDate> {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
@@ -222,11 +250,11 @@ mod tests {
     #[test]
     fn archer_tvdb_numbers_after_the_specials() {
         let eps = archer();
-        assert_eq!(estimate_episode(3, 11, &eps), Some(308));
-        assert_eq!(estimate_episode(3, 12, &eps), Some(309));
-        assert_eq!(estimate_episode(3, 13, &eps), Some(310));
+        assert_eq!(estimate_episode(3, 11, &eps, today()), Some(308));
+        assert_eq!(estimate_episode(3, 12, &eps, today()), Some(309));
+        assert_eq!(estimate_episode(3, 13, &eps, today()), Some(310));
         // Nothing reaches a number beyond every reading.
-        assert_eq!(estimate_episode(3, 14, &eps), None);
+        assert_eq!(estimate_episode(3, 14, &eps, today()), None);
     }
 
     /// The Good Place: each season opens with a double-length premiere TVDB counts as two.
@@ -246,8 +274,8 @@ mod tests {
     #[test]
     fn good_place_finale_after_a_double_premiere() {
         let eps = good_place();
-        assert_eq!(estimate_episode(2, 13, &eps), Some(212), "Somewhere Else");
-        assert_eq!(estimate_episode(3, 13, &eps), Some(312), "Pandemonium");
+        assert_eq!(estimate_episode(2, 13, &eps, today()), Some(212), "Somewhere Else");
+        assert_eq!(estimate_episode(3, 13, &eps, today()), Some(312), "Pandemonium");
     }
 
     #[test]
@@ -262,7 +290,7 @@ mod tests {
             air_date: None,
             runtime_minutes: Some(29),
         });
-        assert_eq!(estimate_episode(8, 19, &eps), Some(818), "My Finale");
+        assert_eq!(estimate_episode(8, 19, &eps, today()), Some(818), "My Finale");
     }
 
     #[test]
@@ -270,7 +298,7 @@ mod tests {
         let mut eps = season(2, 6, "2012-10-07", 24);
         eps.extend(season(3, 6, "2014-01-03", 24));
         eps.push(ep(1, 0, 1, "2012-12-24", 30));
-        assert_eq!(estimate_episode(2, 7, &eps), Some(1));
+        assert_eq!(estimate_episode(2, 7, &eps, today()), Some(1));
     }
 
     #[test]
@@ -280,15 +308,30 @@ mod tests {
         let mut eps = season(1, 5, "2020-01-08", 30);
         eps[1].runtime_minutes = Some(60);
         eps.push(ep(9, 0, 1, "2020-02-20", 30));
-        assert_eq!(estimate_episode(1, 6, &eps), None);
+        assert_eq!(estimate_episode(1, 6, &eps, today()), None);
         // E07 is reached only when both apply, so that reading stands alone.
-        assert_eq!(estimate_episode(1, 7, &eps), Some(9));
+        assert_eq!(estimate_episode(1, 7, &eps, today()), Some(9));
     }
 
     #[test]
     fn season_zero_and_unknown_seasons_are_not_estimated() {
         let eps = archer();
-        assert_eq!(estimate_episode(0, 9, &eps), None);
-        assert_eq!(estimate_episode(9, 1, &eps), None);
+        assert_eq!(estimate_episode(0, 9, &eps, today()), None);
+        assert_eq!(estimate_episode(9, 1, &eps, today()), None);
+    }
+
+    #[test]
+    fn a_season_still_airing_is_not_estimated() {
+        // E11 of a season whose ten episodes aired in the last weeks, with a double-length
+        // premiere: most likely a new episode TMDB has not listed yet, not the tenth.
+        let mut eps = season(1, 10, "2026-09-01", 22);
+        eps[0].runtime_minutes = Some(44);
+        assert_eq!(estimate_episode(1, 11, &eps, today()), None);
+        // The same season once a later one exists, or long after it aired.
+        let mut with_next = eps.clone();
+        with_next.extend(season(2, 2, "2027-09-01", 22));
+        assert_eq!(estimate_episode(1, 11, &with_next, today()), Some(110));
+        let later = NaiveDate::from_ymd_opt(2027, 11, 19).unwrap();
+        assert_eq!(estimate_episode(1, 11, &eps, later), Some(110));
     }
 }

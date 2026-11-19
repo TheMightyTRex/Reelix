@@ -890,9 +890,7 @@ impl ActivityService {
         // A download whose videos are packed in archives (at most a sample is loose): unpack
         // them next to the archives and look again.
         let mut unpacked = Vec::new();
-        let only_samples = planned
-            .iter()
-            .all(|p| p.rejections.iter().any(|r| r == "Sample"));
+        let only_samples = planned.iter().all(|p| p.rejections.iter().any(|r| r == "Sample"));
         if only_samples {
             let u = unpack_download(source, &UnpackConfig::default()).await;
             messages.extend(u.messages);
@@ -1478,7 +1476,9 @@ async fn delete_found(t: &TrackedDownload, source: &Path, found: &[PathBuf]) {
         };
         match tokio::fs::remove_file(&path).await {
             Ok(()) => tracing::info!(id = t.id, path = %path.display(), "deleted a program in a download"),
-            Err(e) => tracing::warn!(path = %path.display(), error = %e, "could not delete a program in a download"),
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "could not delete a program in a download")
+            }
         }
     }
 }
