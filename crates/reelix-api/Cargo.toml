@@ -36,6 +36,7 @@ reelix-music.workspace = true
 reelix-radio.workspace = true
 reelix-pipeline.workspace = true
 reelix-requests.workspace = true
+reelix-subtitles.workspace = true
 reelix-indexers.workspace = true
 url.workspace = true
 reelix-providers.workspace = true

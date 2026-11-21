@@ -6,10 +6,12 @@
 //!   (hardlink / copy / move), recycle bin, permissions and free space.
 //! - [`matching`]: match parsed releases to expected movies and episodes.
 //! - [`episode_title`]: find an episode by the title in a release name (other numbering).
+//! - [`aired_estimate`]: an estimate of a season's aired order when TMDB has no episode group.
 //! - [`episode_map`]: another numbering of a series (TMDB's episode groups) mapped to TMDB's.
 //! - [`content`]: finished downloads handed to the books and music importers.
-//! - [`unpack`]: RAR archives in finished downloads, unpacked with `unrar`.
+//! - [`unpack`]: RAR, ZIP and 7z archives in finished downloads, unpacked before import.
 
+pub mod aired_estimate;
 pub mod content;
 pub mod episode_map;
 pub mod episode_title;

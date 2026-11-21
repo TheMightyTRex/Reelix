@@ -433,12 +433,12 @@ async fn completed_torrent_movie_is_hardlinked_into_the_library() {
 }
 
 #[tokio::test]
-async fn a_download_with_programs_or_scripts_is_held_not_imported() {
-    // DASH-407: a "film" that holds an installer and a shortcut is most likely malware.
-    let e = env(Protocol::Torrent, true).await;
+async fn a_program_beside_real_media_is_deleted_and_the_media_imported() {
+    // A stray installer and shortcut next to the film: the programs go, the film comes in.
+    let e = env(Protocol::Usenet, true).await;
     let movie = add_movie(&e).await;
     let title = "The.Matrix.1999.1080p.BluRay.x264-GRP";
-    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+    let id = track(&e, "nzo-x", title, Some(movie), None, vec![]).await;
     let folder = e.downloads.join(title);
     write(&folder.join(format!("{title}.mkv")), 5000);
     write(&folder.join("Codec").join("setup.exe"), 1);
@@ -447,57 +447,105 @@ async fn a_download_with_programs_or_scripts_is_held_not_imported() {
         .items
         .lock()
         .unwrap()
-        .push(item("hash1", title, DownloadState::Completed, Some(&folder)));
+        .push(item("nzo-x", title, DownloadState::Completed, Some(&folder)));
 
     e.svc.poll().await.unwrap();
-    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
-    assert!(files_under(&e.movies).is_empty(), "nothing imported");
-    let q = e.svc.queue(None, None).await.unwrap();
-    let held = q.items.iter().find(|i| i.download_id == "hash1").unwrap();
-    assert!(
-        held.messages[0].starts_with("Held, not imported"),
-        "{:?}",
-        held.messages
-    );
-    assert!(held.messages[0].contains("setup.exe"), "{:?}", held.messages);
-    assert!(held.messages[0].contains("Play Movie.lnk"), "{:?}", held.messages);
-    assert_eq!(history_events(&e).await, vec!["import_failed"]);
-    // Not removed from the client or blocklisted: the person decides.
-    assert!(e.client.removed.lock().unwrap().is_empty());
-    assert!(
-        e.sent
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|n| matches!(n, NotificationEvent::ManualInteractionRequired { .. }))
-    );
-    // A later poll leaves it held, without a second history row.
-    e.svc.poll().await.unwrap();
-    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
-    assert_eq!(history_events(&e).await, vec!["import_failed"]);
+    assert_eq!(state_of(&e, id).await, TrackedState::Imported);
+    assert_eq!(files_under(&e.movies.join("The Matrix (1999)")).len(), 1);
+    assert!(!folder.join("Codec").join("setup.exe").exists());
+    assert!(!folder.join("Play Movie.lnk").exists());
+    assert_eq!(history_events(&e).await, vec!["imported"]);
+    assert_eq!(blocklist::list(&e.db, 0, 10).await.unwrap().1, 0);
 }
 
 #[tokio::test]
-async fn a_download_disguising_a_program_as_a_video_is_held() {
-    let e = env(Protocol::Torrent, false).await;
-    let movie = add_movie(&e).await;
-    let title = "The.Matrix.1999.2160p.WEB-DL.x265-FAKE";
-    let id = track(&e, "hash1", title, Some(movie), None, vec![]).await;
+async fn a_seeding_torrent_keeps_its_stray_program_until_it_is_removed() {
+    let e = env(Protocol::Torrent, true).await;
+    let (sid, eps) = add_series(&e).await;
+    let title = "The.Show.S01.1080p.WEB-DL.x264-GRP";
+    let id = track(&e, "hash-seed", title, None, Some(sid), eps.clone()).await;
     let folder = e.downloads.join(title);
-    write(&folder.join(format!("{title}.mkv.exe")), 5);
+    for n in 1..=3 {
+        write(
+            &folder.join(format!("The.Show.S01E0{n}.1080p.WEB-DL.x264-GRP.mkv")),
+            4000 + n,
+        );
+    }
+    write(&folder.join("Keygen.exe"), 1);
+    let mut it = item("hash-seed", title, DownloadState::Completed, Some(&folder));
+    it.can_be_removed = false;
+    e.client.items.lock().unwrap().push(it);
+    e.svc.poll().await.unwrap();
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
+    assert!(folder.join("Keygen.exe").exists(), "seeding is not broken");
+    assert!(e.client.removed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_program_posing_as_an_episode_is_removed_blocklisted_and_searched_again() {
+    // The owner's Scrubs case (19 November 2026): a 1.1 GB Windows program named as an episode.
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    let title = "Scrubs 2026 S02E08 My Emergency 1080p WEB H264-MeGusta";
+    let id = track(&e, "hash-exe", title, None, Some(sid), vec![eps[1]]).await;
+    let file = e.downloads.join(format!("{title}.exe"));
+    write(&file, 64);
     e.client
         .items
         .lock()
         .unwrap()
-        .push(item("hash1", title, DownloadState::Completed, Some(&folder)));
+        .push(item("hash-exe", title, DownloadState::Completed, Some(&file)));
+
     e.svc.poll().await.unwrap();
-    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
-    let q = e.svc.queue(None, None).await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::Failed);
+    // Removed from the client with its files, even though failed downloads are normally kept.
+    assert_eq!(*e.client.removed.lock().unwrap(), vec!["hash-exe".to_owned()]);
+    let (bl, total) = blocklist::list(&e.db, 0, 10).await.unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(bl[0].source_title, title);
+    assert_eq!(bl[0].message.as_deref(), Some("a program passed off as media"));
+    let jobs: Vec<String> = sqlx::query_scalar("SELECT kind FROM jobs")
+        .fetch_all(e.db.pool())
+        .await
+        .unwrap();
+    assert!(jobs.contains(&"search".to_owned()), "{jobs:?}");
+    assert_eq!(history_events(&e).await, vec!["download_failed"]);
+    let why = messages_of(&e, id).await;
     assert!(
-        q.items[0].messages[0].contains(".mkv.exe"),
-        "{:?}",
-        q.items[0].messages
+        why[0].starts_with("Removed: the download held a program"),
+        "{why:?}"
     );
+    assert!(why[0].contains(".exe"), "{why:?}");
+    for ep in eps {
+        assert!(file_of(&e, ep).await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn a_disguised_program_with_only_a_readme_is_removed() {
+    let e = env(Protocol::Usenet, false).await;
+    let movie = add_movie(&e).await;
+    let title = "The.Matrix.1999.2160p.WEB-DL.x265-FAKE";
+    let id = track(&e, "nzo-fake", title, Some(movie), None, vec![]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv.exe")), 5);
+    write(&folder.join("readme.txt"), 5);
+    write(&folder.join("run.bat"), 5);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item("nzo-fake", title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    assert_eq!(state_of(&e, id).await, TrackedState::Failed);
+    assert_eq!(*e.client.removed.lock().unwrap(), vec!["nzo-fake".to_owned()]);
+    assert_eq!(blocklist::list(&e.db, 0, 10).await.unwrap().1, 1);
+    assert!(files_under(&e.movies).is_empty());
 }
 
 #[tokio::test]
@@ -1467,4 +1515,156 @@ async fn tmdb_numbers_win_when_every_file_fits_them() {
     assert_eq!(state_of(&e, id).await, TrackedState::Imported);
     assert!(file_of(&e, eps[0]).await.is_some());
     assert!(file_of(&e, eps[1]).await.is_none());
+}
+
+/// Sets the runtimes (minutes) of the series' episodes, in order.
+async fn runtimes(e: &Env, eps: &[i64], minutes: &[u32]) {
+    for (id, m) in eps.iter().zip(minutes) {
+        sqlx::query("UPDATE episodes SET runtime = ? WHERE id = ?")
+            .bind(m)
+            .bind(id)
+            .execute(e.db.pool())
+            .await
+            .unwrap();
+    }
+}
+
+/// Adds a special (season 0) to the series and returns its id.
+async fn add_special(e: &Env, sid: i64, number: u32, title: &str, air_date: &str, runtime: u32) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO episodes (series_id, season_number, episode_number, title, air_date, runtime, monitored, \
+         created_at, updated_at) VALUES (?, 0, ?, ?, ?, ?, 1, 0, 0) RETURNING id",
+    )
+    .bind(sid)
+    .bind(number)
+    .bind(title)
+    .bind(air_date)
+    .bind(runtime)
+    .fetch_one(e.db.pool())
+    .await
+    .unwrap()
+}
+
+/// Completes a one-file download named `title` for the series and runs one poll.
+async fn complete_episode(e: &Env, hash: &str, title: &str, sid: i64) -> i64 {
+    let id = track(e, hash, title, None, Some(sid), vec![999_999]).await;
+    let folder = e.downloads.join(title);
+    write(&folder.join(format!("{title}.mkv")), 4000);
+    e.client
+        .items
+        .lock()
+        .unwrap()
+        .push(item(hash, title, DownloadState::Completed, Some(&folder)));
+    e.svc.poll().await.unwrap();
+    id
+}
+
+async fn messages_of(e: &Env, id: i64) -> Vec<String> {
+    tracked::get(&e.db, id).await.unwrap().unwrap().status_messages
+}
+
+#[tokio::test]
+async fn a_double_length_finale_takes_the_number_after_it() {
+    // Scrubs' "My Finale" and The Good Place's finales: TVDB counts a double-length episode
+    // twice, so the release's S01E04 is TMDB's S01E03 when E03 runs twice as long.
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    runtimes(&e, &eps, &[24, 24, 48]).await;
+    let id = complete_episode(&e, "hashDF", "The.Show.S01E04.1080p.BluRay.REMUX-GRP", sid).await;
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
+    assert!(file_of(&e, eps[2]).await.is_some());
+    assert!(file_of(&e, eps[0]).await.is_none());
+}
+
+#[tokio::test]
+async fn specials_aired_before_the_season_shift_its_numbers() {
+    // Archer: TVDB's season 3 opens with "Heart of Archness", which TMDB keeps as specials.
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    runtimes(&e, &eps, &[22, 22, 22]).await;
+    add_special(&e, sid, 1, "Heart of Archness (1)", "2019-12-01", 22).await;
+    add_special(&e, sid, 2, "Heart of Archness (2)", "2019-12-08", 22).await;
+    // A five-minute extra is not an episode.
+    add_special(&e, sid, 3, "Mini", "2019-12-20", 5).await;
+    let id = complete_episode(&e, "hashSP", "The.Show.S01E05.MULTi.1080p.WEB.x264-GRP", sid).await;
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
+    assert!(file_of(&e, eps[2]).await.is_some());
+}
+
+#[tokio::test]
+async fn an_unclear_number_is_left_for_choose_the_episode() {
+    // E04 is the special aired after the season, or the second half of a double-length E02:
+    // two answers, so nothing is imported.
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    runtimes(&e, &eps, &[22, 44, 22]).await;
+    add_special(&e, sid, 1, "Extra", "2020-01-20", 22).await;
+    let id = complete_episode(&e, "hashUC", "The.Show.S01E04.1080p.WEB.x264-GRP", sid).await;
+    assert_eq!(state_of(&e, id).await, TrackedState::ImportPending);
+    for ep in eps {
+        assert!(file_of(&e, ep).await.is_none());
+    }
+    assert!(
+        messages_of(&e, id)
+            .await
+            .iter()
+            .any(|m| m.contains("Unable to match episodes")),
+        "{:?}",
+        messages_of(&e, id).await
+    );
+}
+
+#[tokio::test]
+async fn a_christmas_release_finds_the_christmas_special() {
+    // Friday Night Dinner: "S02E07 Christmas" is TMDB's special "Christmas Special".
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    let special = add_special(&e, sid, 1, "Christmas Special", "2020-12-24", 30).await;
+    let id = complete_episode(
+        &e,
+        "hashXM",
+        "The.Show.S01E07.Christmas.1080p.ALL4.WEB-DL.AAC2.0.H.264-GRP",
+        sid,
+    )
+    .await;
+    assert_eq!(
+        state_of(&e, id).await,
+        TrackedState::Imported,
+        "{:?}",
+        messages_of(&e, id).await
+    );
+    assert!(file_of(&e, special).await.is_some());
+    for ep in eps {
+        assert!(file_of(&e, ep).await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn an_estimated_episode_with_a_file_follows_the_upgrade_rules() {
+    let e = env(Protocol::Torrent, false).await;
+    let (sid, eps) = add_series(&e).await;
+    runtimes(&e, &eps, &[24, 24, 48]).await;
+    let first = complete_episode(&e, "hashUP1", "The.Show.S01E04.1080p.BluRay.REMUX-GRP", sid).await;
+    assert_eq!(state_of(&e, first).await, TrackedState::Imported);
+    // The same quality again is not an upgrade.
+    let again = complete_episode(&e, "hashUP2", "The.Show.S01E04.1080p.BluRay.REMUX-OTHER", sid).await;
+    assert_eq!(state_of(&e, again).await, TrackedState::ImportPending);
+    assert!(
+        messages_of(&e, again)
+            .await
+            .iter()
+            .any(|m| m.contains("Not an upgrade")),
+        "{:?}",
+        messages_of(&e, again).await
+    );
 }

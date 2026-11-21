@@ -69,7 +69,8 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::custom_items::routes())
         .merge(routes::command::routes())
         .merge(routes::maintenance::routes())
-        .merge(routes::migrate::routes());
+        .merge(routes::migrate::routes())
+        .merge(routes::subtitles::routes());
     #[cfg(feature = "direct")]
     let v1 = v1.merge(routes::direct::routes());
 
@@ -112,6 +113,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     doc.merge(routes::command::Api::openapi());
     doc.merge(routes::maintenance::Api::openapi());
     doc.merge(routes::migrate::Api::openapi());
+    doc.merge(routes::subtitles::Api::openapi());
     #[cfg(feature = "direct")]
     doc.merge(routes::direct::Api::openapi());
     doc.info.version = reelix_core::VERSION.to_owned();
