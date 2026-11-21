@@ -43,7 +43,16 @@ pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "tbn"];
 /// malware passed off as media.
 pub const DANGEROUS_EXTENSIONS: &[&str] = &[
     "exe", "scr", "com", "pif", "cpl", "msi", "msp", "bat", "cmd", "lnk", "js", "jse", "vbs", "vbe", "wsf",
-    "wsh", "hta", "ps1", "psm1", "jar", "reg", "dll",
+    "wsh", "hta", "ps1", "psm1", "jar", "reg", "dll", "apk",
+];
+/// Audio extensions (lowercase, without dot): music and audiobooks.
+pub const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "m4a", "m4b", "aac", "ogg", "oga", "opus", "wav", "wma", "alac", "aiff", "aif", "ape",
+    "wv", "mka", "dsf",
+];
+/// Book extensions (lowercase, without dot): ebooks and comics.
+pub const BOOK_EXTENSIONS: &[&str] = &[
+    "epub", "mobi", "azw", "azw3", "kfx", "pdf", "cbz", "cbr", "cb7", "djvu", "fb2", "lit",
 ];
 /// Download client in-progress markers; such files are never imported.
 pub const PARTIAL_EXTENSIONS: &[&str] = &["part", "partial", "!qb", "!ut", "crdownload", "tmp", "dlpart"];
@@ -96,6 +105,17 @@ pub fn extension(path: &Path) -> Option<String> {
 
 pub fn is_video(path: &Path) -> bool {
     extension(path).is_some_and(|e| VIDEO_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// True for a file a download is for: a video, a disc image, audio or a book.
+pub fn is_media(path: &Path) -> bool {
+    extension(path).is_some_and(|e| {
+        let e = e.as_str();
+        VIDEO_EXTENSIONS.contains(&e)
+            || DISC_IMAGE_EXTENSIONS.contains(&e)
+            || AUDIO_EXTENSIONS.contains(&e)
+            || BOOK_EXTENSIONS.contains(&e)
+    })
 }
 
 /// True for a program or script ([`DANGEROUS_EXTENSIONS`]), including a disguised one

@@ -55,10 +55,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      # The RAR unpacking tests run against the real unrar; elsewhere they are skipped.
-      - name: install unrar
+      # The RAR and 7z unpacking tests run against the real unrar and 7-Zip; elsewhere they are skipped.
+      - name: install unrar and 7-Zip
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y unrar
+        run: sudo apt-get update && sudo apt-get install -y unrar 7zip
       - run: cargo test --locked
         env:
           REELIX_REQUIRE_UNRAR: ${{ runner.os == 'Linux' && '1' || '' }}

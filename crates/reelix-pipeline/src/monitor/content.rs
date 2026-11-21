@@ -8,7 +8,8 @@ use std::sync::atomic::Ordering;
 
 use reelix_core::ContentKind;
 use reelix_downloaders::DownloadItem;
-use reelix_import::files::TransferMode;
+use reelix_import::files::{ScanOptions, TransferMode, is_media, scan_async};
+use reelix_import::unpack::{UnpackConfig, Unpacked, remove_unpacked, unpack_download};
 use reelix_notify::{FileSummary, MediaSummary, NotificationEvent};
 use reelix_parser::QualityModel;
 
@@ -282,6 +283,12 @@ impl ActivityService {
         current.status_messages.clear();
         self.emit("queue", "updated", t.id);
         let r = self.download_ref(t);
+        // A book or album packed in archives (scene book releases: a .zip holding a .rar holding
+        // the .epub): unpack them next to the archives first.
+        let mut unpacked = Unpacked::default();
+        if !has_loose_media(source).await {
+            unpacked = unpack_download(source, &UnpackConfig::default()).await;
+        }
         let d = ContentDownload {
             source: source.to_path_buf(),
             release_title: Some(t.title.clone()),
@@ -289,12 +296,23 @@ impl ActivityService {
             download_client: r.client.clone(),
             download_id: Some(t.download_id.clone()),
         };
-        let imported = match self.run_content_import(t, &d).await {
+        let outcome = self.run_content_import(t, &d).await.map(|o| match o {
+            // Why an archive could not be unpacked explains a download with nothing to import.
+            Outcome::Rejected(msgs) if !unpacked.messages.is_empty() => {
+                let mut all = unpacked.messages.clone();
+                all.extend(msgs);
+                Outcome::Rejected(all)
+            }
+            o => o,
+        });
+        let imported = match outcome {
             Ok(Outcome::Imported {
                 files,
                 is_upgrade,
                 replaced,
             }) => {
+                // The library has its own copy now; the archives stay for the client to seed.
+                remove_unpacked(&unpacked.files).await;
                 self.record_content_import(t, &r, &files, is_upgrade, &replaced)
                     .await;
                 // Media servers are refreshed from the import's change event by the server's
@@ -399,4 +417,17 @@ impl ActivityService {
             })
             .await;
     }
+}
+
+/// Whether `source` holds a video, audio or book file outside any archive.
+async fn has_loose_media(source: &Path) -> bool {
+    let opts = ScanOptions {
+        include_non_video: true,
+        ..ScanOptions::default()
+    };
+    scan_async(source.to_path_buf(), opts)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .any(|f| is_media(&f.path))
 }
