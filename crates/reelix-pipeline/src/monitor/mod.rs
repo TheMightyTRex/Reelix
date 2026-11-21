@@ -30,7 +30,7 @@ use reelix_db::{Db, NewJob, now_ms};
 use reelix_downloaders::{DownloadId, DownloadItem, DownloadState, FailureAction, UsenetFailure};
 use reelix_import::files::{TransferMode, dangerous_files};
 use reelix_import::matching::{best_movie_match, match_parsed_episodes};
-use reelix_import::unpack::{UnpackConfig, remove_unpacked, unpack_download};
+use reelix_import::unpack::{UnpackConfig, holds_media, remove_unpacked, unpack_download};
 use reelix_jobs::JobQueue;
 use reelix_library::LibraryService;
 use reelix_music::MusicService;
@@ -709,7 +709,7 @@ impl ActivityService {
             self.needs_manual(t, vec![msg.to_owned()]).await?;
             return Ok(());
         }
-        if self.held_as_dangerous(t, &local).await? {
+        if self.removed_as_dangerous(t, Some((h, item)), &local).await? {
             return Ok(());
         }
         let mm = self.library.media_management().await?;
@@ -726,32 +726,51 @@ impl ActivityService {
         Ok(())
     }
 
-    /// DASH-407: a download holding programs or scripts (`.exe`, `.scr`, `.bat`, `.lnk`, `.js`
-    /// and the like) is held and flagged instead of imported, with an import-failed history
-    /// row. Returns whether it was held. Nothing is removed or blocklisted: the queue's Remove
-    /// does that, and manual import is still there for a download the person trusts.
-    async fn held_as_dangerous(&self, t: &TrackedDownload, source: &Path) -> Result<bool> {
+    /// Programs and scripts (`.exe`, `.scr`, `.bat`, `.lnk`, `.js` and the like) in a finished
+    /// download, which media never needs. With no media beside them the download is malware
+    /// passed off as media: it is removed from the client with its files, the release is
+    /// blocklisted and another is searched for, and the reason goes into the history and the
+    /// queue. Returns whether it was removed. Beside real media the programs are deleted and the
+    /// media is imported as usual; a torrent that is still seeding keeps them until the client
+    /// removes it, so its seeding is not broken.
+    async fn removed_as_dangerous(
+        &self,
+        t: &TrackedDownload,
+        client: Option<(&ClientHandle, &DownloadItem)>,
+        source: &Path,
+    ) -> Result<bool> {
         let found = dangerous_files(source).await;
         if found.is_empty() {
             return Ok(false);
         }
-        let message = dangerous_message(&found);
-        tracing::warn!(id = t.id, title = %t.title, files = ?found, "download held: it holds programs or scripts");
-        if t.state != TrackedState::ImportPending {
-            let mut h = NewHistory::new(HistoryEvent::ImportFailed, &t.title);
-            fill_media(&mut h, t.movie_id, t.series_id, t.episode_ids.first().copied());
-            self.fill_content(&mut h, &t.content).await;
-            fill_release(&mut h, &self.download_ref(t));
-            h.data = serde_json::json!({
-                "messages": [message.clone()],
-                "source_path": source,
-                "dangerous_files": found,
-            });
-            history::insert(&self.db, &h).await?;
-            self.emit("history", "created", 0);
+        let config = UnpackConfig::default();
+        if !holds_media(source, &config).await {
+            let message = dangerous_message(&found);
+            tracing::warn!(id = t.id, title = %t.title, files = ?found, "download removed: a program, not media");
+            match client {
+                Some((h, item)) => self.remove_from_client(h, &item.download_id, true).await,
+                // The client no longer reports it: delete the programs themselves.
+                None => delete_found(t, source, &found).await,
+            }
+            let action = FailureAction {
+                blocklist: true,
+                search_again: true,
+                health_warning: false,
+                reason: DANGEROUS_REASON,
+            };
+            self.handle_failure(t, &message, action, None, false).await?;
+            return Ok(true);
         }
-        self.needs_manual(t, vec![message]).await?;
-        Ok(true)
+        let seeding = client.is_some_and(|(h, item)| {
+            t.protocol == Protocol::Torrent && !item.can_be_removed && h.client.info().remove_completed
+        });
+        if seeding {
+            tracing::info!(id = t.id, title = %t.title, files = ?found,
+                "programs beside the media are left until the torrent is removed after seeding");
+            return Ok(false);
+        }
+        delete_found(t, source, &found).await;
+        Ok(false)
     }
 
     /// Marks a download as waiting for manual interaction (and notifies once).
@@ -868,9 +887,11 @@ impl ActivityService {
         };
         let mut planned = fi.plan(source, &hint).await?;
         let mut messages = Vec::new();
-        // A download that holds only RAR archives: unpack them next to the archives and look again.
+        // A download whose videos are packed in archives (at most a sample is loose): unpack
+        // them next to the archives and look again.
         let mut unpacked = Vec::new();
-        if planned.is_empty() && source.is_dir() {
+        let only_samples = planned.iter().all(|p| p.rejections.iter().any(|r| r == "Sample"));
+        if only_samples {
             let u = unpack_download(source, &UnpackConfig::default()).await;
             messages.extend(u.messages);
             unpacked = u.files;
@@ -1312,7 +1333,7 @@ impl ActivityService {
                 "the download isn't matched to a movie or series; use manual import",
             ));
         }
-        if self.held_as_dangerous(&t, Path::new(&path)).await? {
+        if self.removed_as_dangerous(&t, None, Path::new(&path)).await? {
             self.emit("queue", "updated", id);
             return Ok(false);
         }
@@ -1445,6 +1466,26 @@ async fn futures_join(clients: &[ClientHandle]) -> Vec<std::result::Result<Vec<D
 }
 
 /// The queue message for a download held for its programs or scripts (up to five named).
+/// Deletes the programs `found` (relative to `source`) from a download.
+async fn delete_found(t: &TrackedDownload, source: &Path, found: &[PathBuf]) {
+    for rel in found {
+        let path = if source.is_dir() {
+            source.join(rel)
+        } else {
+            source.to_path_buf()
+        };
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => tracing::info!(id = t.id, path = %path.display(), "deleted a program in a download"),
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "could not delete a program in a download")
+            }
+        }
+    }
+}
+
+/// Blocklist reason for a download that held a program and no media.
+pub(crate) const DANGEROUS_REASON: &str = "a program passed off as media";
+
 pub(crate) fn dangerous_message(found: &[PathBuf]) -> String {
     let mut names: Vec<String> = found
         .iter()
@@ -1455,9 +1496,9 @@ pub(crate) fn dangerous_message(found: &[PathBuf]) -> String {
         names.push(format!("and {} more", found.len() - 5));
     }
     format!(
-        "Held, not imported: the download has files that can run programs ({}), which media never \
-         needs, so it may be malware. Remove it from the queue and blocklist the release, or use \
-         manual import only if you trust it.",
+        "Removed: the download held a program ({}) and no video, audio or book, so it was malware \
+         passed off as media. Its files were deleted, the release is blocklisted and Reelix is \
+         searching for another.",
         names.join(", ")
     )
 }

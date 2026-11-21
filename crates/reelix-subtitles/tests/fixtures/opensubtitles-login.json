@@ -1,0 +1,6 @@
+{
+  "user": {"allowed_translations": 1, "allowed_downloads": 20, "level": "Sub leecher", "user_id": 123456, "ext_installed": false, "vip": false},
+  "base_url": "api.opensubtitles.com",
+  "token": "test-token-not-real",
+  "status": 200
+}

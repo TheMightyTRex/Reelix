@@ -1359,9 +1359,9 @@ dependencies = [
 
 [[package]]
 name = "email-encoding"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420b9da095f052ea597503e39073b5b3c522f7db933fbac202d91d24492693fd"
+checksum = "9f690ae2169f2ceb3f45b28b6fcd8fa16839f2f5c8818546774b9425f5f71004"
 dependencies = [
  "base64 0.23.1",
  "memchr",
@@ -2625,9 +2625,9 @@ dependencies = [
 
 [[package]]
 name = "lettre"
-version = "0.11.23"
+version = "0.11.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
+checksum = "f294f3d7cdb313e578acef7d7727d4e8d897e0fcd0d6d58c19959cec95073f19"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4119,6 +4119,7 @@ dependencies = [
  "reelix-providers",
  "reelix-radio",
  "reelix-requests",
+ "reelix-subtitles",
  "reqwest",
  "serde",
  "serde_json",
@@ -4296,6 +4297,7 @@ dependencies = [
  "tokio",
  "tracing",
  "unicode-normalization",
+ "zip",
 ]
 
 [[package]]
@@ -4672,6 +4674,7 @@ dependencies = [
  "reelix-providers",
  "reelix-radio",
  "reelix-requests",
+ "reelix-subtitles",
  "reqwest",
  "rpassword",
  "rustix 1.1.6",
@@ -4695,6 +4698,29 @@ dependencies = [
  "windows-service",
  "wiremock",
  "zip",
+]
+
+[[package]]
+name = "reelix-subtitles"
+version = "0.8.7"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "reelix-api-types",
+ "reelix-core",
+ "reelix-db",
+ "reelix-jobs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -6930,7 +6956,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

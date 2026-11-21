@@ -16,6 +16,7 @@ pub mod profiles;
 pub mod providers;
 pub mod radio;
 pub mod requests;
+pub mod subtitles;
 pub mod system;
 
 use chrono::{DateTime, Utc};

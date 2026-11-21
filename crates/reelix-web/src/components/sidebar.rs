@@ -207,6 +207,7 @@ pub const NAV: &[&[NavItem]] = &[
                 ("Users", "/settings/users"),
                 ("Tags", "/settings/tags"),
                 ("Metadata", "/settings/metadata"),
+                ("Subtitles", "/settings/subtitles"),
                 ("Radio", "/settings/radio"),
                 ("Security", "/settings/security"),
                 ("Set-up Wizard", "/settings/wizard"),
