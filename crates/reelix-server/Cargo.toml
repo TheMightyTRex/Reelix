@@ -43,6 +43,7 @@ reelix-notify.workspace = true
 reelix-parser.workspace = true
 reelix-providers.workspace = true
 reelix-requests.workspace = true
+reelix-subtitles.workspace = true
 qrcodegen.workspace = true
 rand.workspace = true
 reqwest.workspace = true

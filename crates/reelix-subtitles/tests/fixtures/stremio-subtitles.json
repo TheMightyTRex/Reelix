@@ -1,0 +1,10 @@
+{
+  "subtitles": [
+    {"id": "1001", "url": "{{BASE}}/files/1001.srt", "lang": "eng", "SubEncoding": "UTF-8"},
+    {"id": "1002", "url": "{{BASE}}/files/1002.srt", "lang": "eng"},
+    {"id": "1003", "url": "{{BASE}}/files/1003.vtt", "lang": "fre"},
+    {"id": "1004", "url": "{{BASE}}/files/1004.srt", "lang": "pob"},
+    {"id": "1005", "url": "ftp://example.invalid/1005.srt", "lang": "eng"},
+    {"id": "1006", "lang": "eng"}
+  ]
+}

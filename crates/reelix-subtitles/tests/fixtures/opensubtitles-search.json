@@ -1,0 +1,102 @@
+{
+  "total_pages": 1,
+  "total_count": 6,
+  "per_page": 60,
+  "page": 1,
+  "data": [
+    {
+      "id": "9001",
+      "type": "subtitle",
+      "attributes": {
+        "subtitle_id": "9001",
+        "language": "en",
+        "download_count": 1200,
+        "new_download_count": 12,
+        "hearing_impaired": false,
+        "hd": true,
+        "fps": 23.976,
+        "votes": 3,
+        "ratings": 8.0,
+        "from_trusted": true,
+        "foreign_parts_only": false,
+        "upload_date": "2021-03-04T10:11:12Z",
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Heat.1995.1080p.BluRay.x264-GRP",
+        "moviehash_match": true,
+        "feature_details": {"feature_id": 1, "feature_type": "Movie", "year": 1995, "title": "Heat", "movie_name": "1995 - Heat", "imdb_id": 113277, "tmdb_id": 949},
+        "files": [{"file_id": 7001, "cd_number": 1, "file_name": "Heat.1995.1080p.BluRay.x264-GRP.srt"}]
+      }
+    },
+    {
+      "id": "9002",
+      "type": "subtitle",
+      "attributes": {
+        "language": "en",
+        "download_count": 800,
+        "hearing_impaired": true,
+        "foreign_parts_only": false,
+        "ai_translated": false,
+        "machine_translated": false,
+        "release": "Heat.1995.REMASTERED.1080p.BluRay.x264-GRP",
+        "moviehash_match": false,
+        "files": [{"file_id": 7002, "cd_number": 1, "file_name": "Heat.SDH.srt"}]
+      }
+    },
+    {
+      "id": "9003",
+      "type": "subtitle",
+      "attributes": {
+        "language": "en",
+        "download_count": 300,
+        "hearing_impaired": false,
+        "foreign_parts_only": true,
+        "release": "Heat.1995.1080p.BluRay.x264-GRP.Forced",
+        "moviehash_match": false,
+        "files": [{"file_id": 7003, "cd_number": 1, "file_name": "Heat.forced.srt"}]
+      }
+    },
+    {
+      "id": "9004",
+      "type": "subtitle",
+      "attributes": {
+        "language": "pt-PT",
+        "download_count": 50,
+        "hearing_impaired": false,
+        "foreign_parts_only": false,
+        "ai_translated": false,
+        "machine_translated": true,
+        "release": "Heat.1995.720p.WEB-DL",
+        "files": [{"file_id": 7004, "cd_number": 1, "file_name": "Heat.pt.srt"}]
+      }
+    },
+    {
+      "id": "9005",
+      "type": "subtitle",
+      "attributes": {
+        "language": "en",
+        "download_count": 5000,
+        "hearing_impaired": false,
+        "foreign_parts_only": false,
+        "release": "Heat.1995.DVDRip.XviD-OLD",
+        "files": [
+          {"file_id": 7051, "cd_number": 1, "file_name": "Heat.CD1.srt"},
+          {"file_id": 7052, "cd_number": 2, "file_name": "Heat.CD2.srt"}
+        ]
+      }
+    },
+    {
+      "id": "9006",
+      "type": "subtitle",
+      "attributes": {
+        "language": "de",
+        "download_count": 400,
+        "hearing_impaired": false,
+        "foreign_parts_only": false,
+        "release": "Heat.1995.1080p.BluRay.x264-GRP",
+        "moviehash_match": true,
+        "files": [{"file_id": 7006, "cd_number": 1, "file_name": "Heat.de.srt"}]
+      }
+    }
+  ]
+}

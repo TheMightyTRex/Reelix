@@ -17,6 +17,7 @@ pub mod providers;
 pub mod radio;
 pub mod requests;
 pub mod setup;
+pub mod subtitles;
 pub mod system;
 pub mod torznab;
 pub mod users;
