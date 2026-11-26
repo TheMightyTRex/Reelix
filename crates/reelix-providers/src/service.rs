@@ -126,6 +126,9 @@ pub struct ProviderService {
     reload_lock: tokio::sync::Mutex<()>,
     sync_lock: tokio::sync::Mutex<()>,
     syncing: std::sync::atomic::AtomicBool,
+    /// What `indexer_status` holds for each indexer, as last read or written here, so an unchanged
+    /// status is not written again (an RSS sync or a health check would rewrite every row each run).
+    saved_status: std::sync::Mutex<HashMap<i64, IndexerStatus>>,
 }
 
 fn read<T>(l: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
@@ -264,6 +267,7 @@ impl ProviderService {
             reload_lock: tokio::sync::Mutex::new(()),
             sync_lock: tokio::sync::Mutex::new(()),
             syncing: std::sync::atomic::AtomicBool::new(false),
+            saved_status: std::sync::Mutex::default(),
         });
         svc.load_definitions().await;
         svc.seal_plaintext_secrets().await?;
@@ -273,6 +277,7 @@ impl ProviderService {
             svc.reload_kind(kind, true).await?;
         }
         for (id, status) in repo::load_indexer_status(&svc.db).await? {
+            svc.saved_status().insert(id, status.clone());
             svc.manager.restore_status(id, status);
         }
         Ok(svc)
@@ -683,6 +688,8 @@ impl ProviderService {
         let found = repo::delete(&self.db, kind, id).await?;
         if found {
             write(&self.cache).client_status.remove(&id);
+            // The row went with its provider (ON DELETE CASCADE); forget it so a new one is written.
+            self.saved_status().remove(&id);
             self.reload_kind(kind, false).await?;
             self.publish(kind.as_str(), "deleted", id);
         }
@@ -1016,12 +1023,24 @@ impl ProviderService {
     }
 
     /// Writes the manager's back-off state to `indexer_status`.
+    /// Only an indexer whose status differs from what is stored is written, so `updated_at` is the
+    /// time of the last change.
     pub async fn persist_indexer_status(&self) {
         for s in self.manager.stats() {
-            if let Err(e) = repo::save_indexer_status(&self.db, s.indexer_id, &s.status).await {
-                tracing::warn!(id = s.indexer_id, error = %e, "cannot persist indexer status");
+            if self.saved_status().get(&s.indexer_id) == Some(&s.status) {
+                continue;
+            }
+            match repo::save_indexer_status(&self.db, s.indexer_id, &s.status).await {
+                Ok(()) => {
+                    self.saved_status().insert(s.indexer_id, s.status);
+                }
+                Err(e) => tracing::warn!(id = s.indexer_id, error = %e, "cannot persist indexer status"),
             }
         }
+    }
+
+    fn saved_status(&self) -> std::sync::MutexGuard<'_, HashMap<i64, IndexerStatus>> {
+        self.saved_status.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     // ------------------------------------------------------------------
