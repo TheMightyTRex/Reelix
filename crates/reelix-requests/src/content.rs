@@ -812,11 +812,7 @@ impl RequestService {
         let rows = self
             .content_repo()
             .find(&ContentFilter {
-                statuses: vec![
-                    RequestStatus::Approved,
-                    RequestStatus::Processing,
-                    RequestStatus::PartiallyAvailable,
-                ],
+                statuses: crate::content_repo::OPEN_STATUSES.to_vec(),
                 ..Default::default()
             })
             .await?;
