@@ -1668,3 +1668,27 @@ async fn an_estimated_episode_with_a_file_follows_the_upgrade_rules() {
         messages_of(&e, again).await
     );
 }
+
+#[tokio::test]
+async fn monitor_is_due_only_with_an_active_download_or_after_the_idle_poll() {
+    let e = env(Protocol::Torrent, false).await;
+    // Never polled: due, so the first poll happens.
+    assert!(e.svc.monitor_due().await.unwrap());
+    e.svc.poll().await.unwrap();
+    // Just polled, nothing downloading: nothing to do, so no scheduled job row.
+    assert!(!e.svc.monitor_due().await.unwrap());
+    // A download is tracked: due on every scheduled run.
+    let movie = add_movie(&e).await;
+    track(
+        &e,
+        "hash1",
+        "The.Matrix.1999.1080p.BluRay.x264-GRP",
+        Some(movie),
+        None,
+        vec![],
+    )
+    .await;
+    assert!(e.svc.monitor_due().await.unwrap());
+    // The tick agrees: it polls (and does not fail) while the download is active.
+    e.svc.monitor_tick().await.unwrap();
+}
