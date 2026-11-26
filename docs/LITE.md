@@ -7,7 +7,7 @@ switched off and a slimmer image. It is not part of upstream Reelix.
 |---|---|---|
 | Direct downloads (YouTube, Spotify) | Yes | No (`direct` feature off) |
 | `/api/docs` page | Yes | No (`docs` feature off; `/api/v1/openapi.json` is kept) |
-| ffmpeg | Debian's full package (479 MB) | A stand-alone `ffprobe`, and a 3 MB `ffmpeg` that only rewraps radio captures (MPEG-TS to Matroska audio) |
+| ffmpeg | Debian's full package (479 MB) | An `ffprobe` built from FFmpeg's source with only what Reelix reads (about 8 MB; a full static `ffprobe` is 135 MB), and a 3 MB `ffmpeg` that only rewraps radio captures (MPEG-TS to Matroska audio) |
 | Deno and yt-dlp | Yes (138 MB) | No |
 | Web app | Yes | Yes (set `REELIX_WEB_DIR` to an empty folder for headless use) |
 | Tokio worker threads | One per processor core | Two (`TOKIO_WORKER_THREADS=2`); set it in the compose file to use more cores on a big server |
@@ -71,3 +71,24 @@ To take in a new upstream release:
 The image is published only from a run started by hand with "publish" ticked, and only for a release
 `fork/lite` already has: a run that would have to merge a new release first refuses to publish, so only
 reviewed code reaches `ghcr.io/themightytrex/reelix:lite`.
+
+## The small ffprobe (26 November 2026)
+
+`docker/Dockerfile.lite` builds `ffprobe` from the FFmpeg 7.1.2 source (the same pinned source as the radio `ffmpeg`):
+file protocol only, the demuxers of the usual containers (Matroska, MP4 and QuickTime, AVI, MPEG-TS and program streams,
+FLAC, MP3, Ogg, WAV, AAC, AC-3, DTS, TrueHD and some more), every parser and the decoders of the usual codecs. The
+decoders are needed: without them `ffprobe` leaves out the profile name (such as "DTS-HD MA" or "Dolby TrueHD + Dolby
+Atmos"), the bit depth, the colour transfer and primaries and the channel layout, which Reelix reads. `--enable-small` is
+left off because it drops the profile names.
+
+Checked on 26 November 2026 against `mwader/static-ffmpeg:7.1` (the full static `ffprobe` Lite used before) with
+`-print_format json -show_format -show_streams`, the way Reelix runs it, on 793 files from the server's library (films,
+series, music, audiobooks and radio; H.264, HEVC 8 and 10 bit, AV1, VC-1, MPEG-4, HDR10 and Dolby Vision; AC-3, E-AC-3 with
+and without Atmos, TrueHD, DTS, AAC, FLAC, MP3, Opus). Every field Reelix reads (container, duration, bit rate, codec,
+profile, size, pixel format, bit depth, frame rate, colour transfer and primaries, Dolby Vision and mastering data,
+channels and layout, language, title, forced and default flags) was the same in all of them. The only differences were
+for streams Reelix does not read: the size of a cover-art PNG, and the size and duration of picture subtitles. The
+chapter lists of 210 audio files were the same. AV1 has no libdav1d here; the 4 AV1 files checked read the same.
+
+If a new kind of file reads less than it did, build with Debian's `ffmpeg` package or the static image instead: copy the
+old `FFPROBE_IMAGE` stage from this file's history.

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # The fork's lite image (TheMightyTRex/Reelix, 4 November 2026): the same build as docker/Dockerfile, without
-# direct downloads (YouTube, Spotify) or the /api/docs page, and with a stand-alone ffprobe instead of Debian's
-# full ffmpeg, Deno and yt-dlp. For films, series, books and music Reelix only runs ffprobe. Radio filing rewraps
+# direct downloads (YouTube, Spotify) or the /api/docs page, and with a small ffprobe built from FFmpeg's source
+# instead of Debian's full ffmpeg, Deno and yt-dlp. For films, series, books and music Reelix only runs ffprobe. Radio filing rewraps
 # MPEG-TS captures with `ffmpeg -c copy`, so the image has a 3 MB FFmpeg built for that alone (6 November 2026).
 #
 # Build: docker build -f docker/Dockerfile.lite -t reelix:lite .
@@ -9,8 +9,6 @@
 
 # Cargo features for reelix-server: empty for lite, "direct,docs" for the full feature set.
 ARG REELIX_FEATURES=""
-# A static ffprobe, pinned. Change the tag to update it.
-ARG FFPROBE_IMAGE=mwader/static-ffmpeg:7.1
 # The Reelix version, written into the image's version label so Starboard and other tools can tell which
 # version runs, even under the floating "lite" tag (added 5 November 2026). lite.yml passes the release, such as 0.7.1.
 ARG VERSION=dev
@@ -47,7 +45,34 @@ RUN cargo chef cook --release --locked --recipe-path recipe.json \
 COPY . .
 RUN cd crates/reelix-web && trunk build --release
 
-FROM ${FFPROBE_IMAGE} AS ffprobe
+# ffprobe, built from the same FFmpeg source as the remux ffmpeg below, with only what Reelix reads (RFX-108, 26 November
+# 2026): the demuxers of the containers films, series, books and music come in, every parser, and the decoders of the
+# codecs found in them. ffprobe needs the decoders for the stream fields Reelix reads (profile such as "DTS-HD MA" or
+# "Dolby TrueHD + Dolby Atmos", bit depth, colour transfer and primaries, channel layout); without them those are missing.
+# `--enable-small` is left off because it drops the profile names. About 8 MB instead of 135 MB for a full static ffprobe.
+# No AV1 decoder library (libdav1d) is built in; the 4 AV1 files checked read the same, but it is the least tested codec.
+# Checked against the full static ffprobe (mwader/static-ffmpeg:7.1) on 793 real files, field by field (docs/LITE.md).
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS ffprobe
+ARG FFMPEG_VERSION=7.1.2
+ARG FFMPEG_SHA256=089bc60fb59d6aecc5d994ff530fd0dcb3ee39aa55867849a2bbc4e555f9c304
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gcc make libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+RUN curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
+    && echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c - \
+    && tar xf ffmpeg.tar.xz --strip-components=1 \
+    && ./configure --disable-everything --disable-autodetect --disable-asm --disable-doc --disable-network \
+        --disable-ffplay --disable-ffmpeg --enable-ffprobe --disable-avdevice --disable-swscale --disable-postproc \
+        --disable-avfilter --disable-swresample \
+        --enable-static --disable-shared \
+        --enable-protocol=file \
+        --enable-demuxer=matroska,mov,avi,mpegts,mpegps,flac,mp3,ogg,wav,aac,ac3,eac3,dts,dtshd,truehd,asf,flv,ape,wv,h264,hevc,mpegvideo,m4v,aiff,ivf,mlp,caf,w64,tta,tak,wsd,dsf,dff,amr,au,rm,gif,image2,mxf \
+        --enable-parsers \
+        --enable-decoder=h264,hevc,vp9,vp8,av1,mpeg1video,mpeg2video,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,wmv1,wmv2,wmv3,vc1,mjpeg,png,bmp,gif,aac,aac_latm,ac3,eac3,dca,truehd,mlp,flac,mp1,mp2,mp3,opus,vorbis,alac,wmav1,wmav2,wmapro,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8,pcm_s16be,pcm_s24be,pcm_bluray,pcm_dvd,pcm_s8,ape,wavpack,tta,tak,amrnb,amrwb,pgssub,dvdsub,dvbsub,subrip,srt,ass,ssa,mov_text,webvtt,text,movtext,hdmv_text_subtitle \
+        --extra-ldflags=-static \
+    && make -j"$(nproc)" ffprobe \
+    && strip ffprobe && cp ffprobe /ffprobe
 
 # FFmpeg for radio filing only: MPEG-TS in, Matroska audio out, audio copied as is (crates/reelix-radio/src/filing.rs).
 # No encoders, no network and no video, so it is about 3 MB instead of 135 MB for a full static FFmpeg.
