@@ -678,7 +678,8 @@ async fn delay_profile_holds_release_then_pending_grabs_it() {
     let listed = e.svc.list_pending().await.unwrap();
     assert_eq!(listed[0].media.as_ref().unwrap().title, "The Matrix");
 
-    // Not due yet: nothing happens.
+    // Not due yet: nothing happens, and the scheduler does not queue a run.
+    assert!(!e.svc.pending_due().await);
     assert_eq!(e.svc.process_pending().await.unwrap().grabbed, 0);
     assert_eq!(pending::all(&e.db).await.unwrap().len(), 1);
 
@@ -689,7 +690,9 @@ async fn delay_profile_holds_release_then_pending_grabs_it() {
     pending::insert(&e.db, Some(movie), None, &[], &rel, "delay", 0)
         .await
         .unwrap();
+    assert!(e.svc.pending_due().await);
     assert_eq!(e.svc.process_pending().await.unwrap().grabbed, 1);
+    assert!(!e.svc.pending_due().await);
     assert!(pending::all(&e.db).await.unwrap().is_empty());
     assert_eq!(
         grabbed_titles(&e.db).await,
@@ -751,13 +754,16 @@ async fn rss_sync_grabs_wanted_media_only() {
         ],
     )
     .await;
+    // Never synced: due.
+    assert!(e.svc.rss_due());
     let sum = e.svc.rss_sync(true).await.unwrap().unwrap();
     assert_eq!(sum.grabbed, 2, "{sum:?}");
     let rows = tracked::active(&e.db).await.unwrap();
     assert!(rows.iter().any(|t| t.movie_id == Some(movie)));
     assert!(rows.iter().any(|t| t.episode_ids == vec![eps[2]]));
 
-    // Interval not elapsed → skipped.
+    // Interval not elapsed → skipped, and the scheduler does not queue a run.
+    assert!(!e.svc.rss_due());
     assert!(e.svc.rss_sync(false).await.unwrap().is_none());
     let _ = &e.providers;
 }

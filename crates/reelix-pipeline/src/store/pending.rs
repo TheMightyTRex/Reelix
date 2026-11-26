@@ -144,6 +144,15 @@ pub async fn due(db: &Db, now_ms: i64) -> Result<Vec<PendingRelease>> {
     .await
 }
 
+/// Whether any pending release is due; one cheap read for the scheduler.
+pub async fn any_due(db: &Db, now_ms: i64) -> Result<bool> {
+    let n: i64 = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pending_releases WHERE release_at <= ?)")
+        .bind(now_ms)
+        .fetch_one(db.pool())
+        .await?;
+    Ok(n != 0)
+}
+
 pub async fn delete(db: &Db, id: i64) -> Result<bool> {
     Ok(sqlx::query("DELETE FROM pending_releases WHERE id = ?")
         .bind(id)

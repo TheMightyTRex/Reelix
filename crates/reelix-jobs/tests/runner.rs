@@ -585,3 +585,85 @@ async fn background_pace_stretches_the_next_run_and_can_be_changed() {
     cancel.cancel();
     handle.await.unwrap();
 }
+
+/// Says whether its scheduled run is due, and counts how often it is asked and how often it runs.
+struct Gated {
+    due: Arc<std::sync::atomic::AtomicBool>,
+    asked: Arc<AtomicUsize>,
+    runs: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl JobHandler for Gated {
+    fn kind(&self) -> &'static str {
+        "gated"
+    }
+    async fn run(&self, _ctx: &JobContext, _payload: Value) -> anyhow::Result<()> {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+    async fn scheduled_run_due(&self) -> bool {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.due.load(Ordering::SeqCst)
+    }
+}
+
+#[tokio::test]
+async fn scheduler_skips_a_run_the_handler_says_is_not_due() {
+    let db = Db::in_memory().await.unwrap();
+    let bus = EventBus::default();
+    let mut rx = bus.subscribe();
+    let due = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let asked = Arc::new(AtomicUsize::new(0));
+    let runs = Arc::new(AtomicUsize::new(0));
+    let sys = fast(&db, &bus)
+        .handler(Gated {
+            due: due.clone(),
+            asked: asked.clone(),
+            runs: runs.clone(),
+        })
+        .task(TaskDef {
+            kind: "gated",
+            name: "Gated",
+            // Due again about every second: the interval cannot be shorter.
+            interval: Duration::from_secs(1),
+            run_on_startup: true,
+        })
+        .build();
+    let queue = sys.queue();
+    let cancel = CancellationToken::new();
+    let handle = sys.start(cancel.clone());
+
+    // Not due: asked more than once over two intervals, yet no job row and no run.
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    assert!(
+        asked.load(Ordering::SeqCst) >= 2,
+        "asked {}",
+        asked.load(Ordering::SeqCst)
+    );
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    assert_eq!(db.jobs().next_queued_at().await.unwrap(), None);
+    let task = db.tasks().get("gated").await.unwrap().unwrap();
+    assert!(task.last_run.is_none(), "a skipped run is not recorded as a run");
+    assert!(
+        task.next_run.unwrap().timestamp_millis() > now_ms() - 1_100,
+        "the next check is still scheduled"
+    );
+
+    // "Run now" ignores the check.
+    let id = queue.run_task_now("gated").await.unwrap().unwrap();
+    wait_for(&mut rx, finished(id, JobStatus::Completed)).await;
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+
+    // Due: the next tick queues and runs it.
+    due.store(true, Ordering::SeqCst);
+    wait_for(
+        &mut rx,
+        |e| matches!(e, DomainEvent::JobFinished { kind, .. } if kind == "gated"),
+    )
+    .await;
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+
+    cancel.cancel();
+    handle.await.unwrap();
+}
