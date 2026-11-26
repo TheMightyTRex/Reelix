@@ -16,18 +16,22 @@ use super::mapping::{Mapped, MediaIndex, expected_episodes, may_be_radio, releas
 use super::{Result, SearchService, SearchSummary, episode_wanted, lock};
 
 impl SearchService {
+    /// Whether a scheduled RSS sync would run now: the interval is not 0 (off) and it has elapsed since the
+    /// last sync. Memory only, so the scheduler can ask before it queues a job.
+    pub fn rss_due(&self) -> bool {
+        let interval = self.providers.indexer_settings().rss_interval_minutes;
+        if interval == 0 {
+            return false;
+        }
+        let last = *lock(&self.rss_last);
+        last.is_none_or(|l| l.elapsed() >= Duration::from_secs(u64::from(interval) * 60 - 30))
+    }
+
     /// Task `rss_sync`. Runs when `rss_interval_minutes` (indexer settings) has elapsed since
     /// the last sync (`force` ignores the interval; 0 disables unless forced).
     pub async fn rss_sync(&self, force: bool) -> Result<Option<SearchSummary>> {
-        let interval = self.providers.indexer_settings().rss_interval_minutes;
-        if !force {
-            if interval == 0 {
-                return Ok(None);
-            }
-            let last = *lock(&self.rss_last);
-            if last.is_some_and(|l| l.elapsed() < Duration::from_secs(u64::from(interval) * 60 - 30)) {
-                return Ok(None);
-            }
+        if !force && !self.rss_due() {
+            return Ok(None);
         }
         *lock(&self.rss_last) = Some(Instant::now());
         let mut shared = self.shared().await?;
