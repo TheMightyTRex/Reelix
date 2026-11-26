@@ -92,12 +92,15 @@ COPY --from=builder --chmod=0755 /reelix /app/reelix
 COPY --from=web /src/crates/reelix-web/dist /app/web
 COPY --chmod=0755 docker/entrypoint.sh /app/entrypoint.sh
 
-# Two glibc malloc arenas instead of up to eight per core. For headless use with Starboard as the only
+# Two glibc malloc arenas instead of up to eight per core, and two Tokio worker threads instead of one per
+# processor core (RFX-108; on a copy of a real library 27.6 MB against 44.9 MB in docker stats, 15 threads
+# instead of 16). Set TOKIO_WORKER_THREADS in the compose file for more on a big server. For headless use with Starboard as the only
 # interface, set REELIX_WEB_DIR to an empty folder: Reelix then serves a short notice and the API as usual.
 ENV REELIX_DATA_DIR=/config \
     REELIX_WEB_DIR=/app/web \
     REELIX_DOCKER=1 \
     MALLOC_ARENA_MAX=2 \
+    TOKIO_WORKER_THREADS=2 \
     PUID=1000 \
     PGID=1000 \
     UMASK=022
