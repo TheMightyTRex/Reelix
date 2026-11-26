@@ -27,10 +27,25 @@ macro_rules! handler {
     };
 }
 
-handler!(DownloadMonitor, kinds::DOWNLOAD_MONITOR, |svc, _p| {
-    svc.monitor_tick().await?;
-    Ok(())
-});
+pub struct DownloadMonitor(pub Arc<ActivityService>);
+
+#[async_trait::async_trait]
+impl JobHandler for DownloadMonitor {
+    fn kind(&self) -> &'static str {
+        kinds::DOWNLOAD_MONITOR
+    }
+
+    async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> anyhow::Result<()> {
+        self.0.monitor_tick().await?;
+        Ok(())
+    }
+
+    /// No job row unless a download is active or the idle poll (2 minutes) is due.
+    async fn scheduled_run_due(&self) -> bool {
+        // On a read error run the job, which reports the error as before.
+        self.0.monitor_due().await.unwrap_or(true)
+    }
+}
 
 handler!(ProcessDownload, kinds::PROCESS_DOWNLOAD, |svc, p| {
     let id = p

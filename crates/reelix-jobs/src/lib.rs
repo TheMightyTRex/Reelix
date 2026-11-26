@@ -28,6 +28,14 @@ pub trait JobHandler: Send + Sync + 'static {
         1
     }
     async fn run(&self, ctx: &JobContext, payload: serde_json::Value) -> anyhow::Result<()>;
+
+    /// Asked by the scheduler before it queues this kind's scheduled run (not for "run now" or for
+    /// jobs queued by other code). Returning `false` skips the run: no job row, no database write, and the
+    /// task's last run stays as it was. The next check is one interval later. Keep it cheap: a read or a
+    /// look at memory. The default always runs.
+    async fn scheduled_run_due(&self) -> bool {
+        true
+    }
 }
 
 /// What a running job gets access to. `cancel` fires on shutdown.
@@ -562,7 +570,13 @@ async fn schedule_tick(shared: &Shared) {
         if !shared.handlers.contains_key(task.kind.as_str()) {
             continue;
         }
-        if let Err(e) = queue.enqueue(task_job(&task.kind)).await {
+        // A handler may know cheaply that there is nothing to do (no active download, no
+        // release waiting, RSS interval not yet reached); then no job row is written at all.
+        let run = match shared.handlers.get(task.kind.as_str()) {
+            Some(reg) => reg.handler.scheduled_run_due().await,
+            None => true,
+        };
+        if run && let Err(e) = queue.enqueue(task_job(&task.kind)).await {
             tracing::error!(kind = task.kind, error = %e, "failed to enqueue scheduled task");
             continue;
         }
