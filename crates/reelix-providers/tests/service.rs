@@ -230,6 +230,75 @@ async fn failing_indexer_status_is_persisted_and_reported() {
     .await
     .unwrap();
     assert_eq!(svc2.indexer_manager().status(row.id).unwrap().failure_count, 2);
+
+    // What the restart read is what is known: asking again writes nothing.
+    let (_, written) = status_row(&e, row.id).await;
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    svc2.persist_indexer_status().await;
+    let (_, after) = status_row(&e, row.id).await;
+    assert_eq!(after, written);
+}
+
+async fn status_row(e: &Env, id: i64) -> (i64, i64) {
+    sqlx::query_as("SELECT failure_count, updated_at FROM indexer_status WHERE provider_id = ?")
+        .bind(id)
+        .fetch_one(e.db.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn indexer_status_is_written_only_when_it_changes() {
+    let e = env().await;
+    allow_private(&e.svc).await;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let row = e
+        .svc
+        .create(ProviderKind::Indexer, &indexer_input(&server.uri(), "Broken"))
+        .await
+        .unwrap();
+    // A change (the first failure) is written.
+    e.svc.search(&SearchQuery::basic("x"), None, true).await;
+    let (failures, written) = status_row(&e, row.id).await;
+    assert_eq!(failures, 1);
+
+    // Nothing changed: nothing is written, however often it is asked. The clock moves on first, so a
+    // write would show in updated_at.
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    for _ in 0..3 {
+        e.svc.persist_indexer_status().await;
+    }
+    assert_eq!(status_row(&e, row.id).await, (1, written));
+
+    // A change (the next failure) is written again.
+    e.svc.check_indexers().await;
+    let (failures, later) = status_row(&e, row.id).await;
+    assert_eq!(failures, 2);
+    assert!(later > written);
+
+    // A restored status that differs is written.
+    e.svc.restore_indexer_status(
+        row.id,
+        reelix_indexers::IndexerStatus {
+            failure_count: 7,
+            ..Default::default()
+        },
+    );
+    e.svc.persist_indexer_status().await;
+    assert_eq!(status_row(&e, row.id).await.0, 7);
+
+    // Deleting the indexer removes its row and forgets it.
+    assert!(e.svc.delete(ProviderKind::Indexer, row.id).await.unwrap());
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM indexer_status WHERE provider_id = ?")
+        .bind(row.id)
+        .fetch_one(e.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }
 
 #[tokio::test]
