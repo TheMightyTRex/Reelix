@@ -126,7 +126,7 @@ impl RequestService {
     /// Also starts watching book/music library changes (prompt request status updates).
     pub fn set_queue(&self, queue: JobQueue) {
         if self.queue.set(queue.clone()).is_ok() {
-            jobs::spawn_content_watch(&self.events, queue);
+            jobs::spawn_content_watch(&self.events, queue, self.db.clone());
         }
     }
 

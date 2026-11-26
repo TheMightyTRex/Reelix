@@ -6,9 +6,10 @@ use std::time::Duration;
 use reelix_api_types::requests::CreateRequestDto;
 use reelix_core::bus::EventBus;
 use reelix_core::{DomainEvent, MediaKind};
-use reelix_db::NewJob;
+use reelix_db::{Db, NewJob};
 use reelix_jobs::{JobContext, JobHandler, JobQueue, TaskDef};
 
+use crate::content_repo::ContentRepo;
 use crate::repo::RequestFilter;
 use crate::{Error, RequestService, Result};
 
@@ -74,7 +75,11 @@ const CONTENT_SYNC_MAX_WAIT: Duration = Duration::from_secs(30);
 /// Watches book/music library changes and queues a book/album request status sync shortly
 /// after they settle, so requests turn `processing` / `available` without waiting for the
 /// 15-minute task. Needs a tokio runtime; does nothing without one.
-pub(crate) fn spawn_content_watch(events: &EventBus, queue: JobQueue) {
+///
+/// A settled burst queues a sync only when a book, album or radio request is still open (one read): with
+/// none, the sync would change nothing, but its job row costs about five database writes, and a download
+/// reports progress every 30 seconds.
+pub fn spawn_content_watch(events: &EventBus, queue: JobQueue, db: Db) {
     let Ok(rt) = tokio::runtime::Handle::try_current() else {
         tracing::debug!("no runtime: book/album request status watch disabled");
         return;
@@ -105,6 +110,9 @@ pub(crate) fn spawn_content_watch(events: &EventBus, queue: JobQueue) {
                     () = quiet => break,
                 }
             }
+            if !content_sync_wanted(&db).await {
+                continue;
+            }
             // A sync that is already queued/running deduplicates this one; retry a few times
             // so changes made during a running sync are not lost.
             for _ in 0..5 {
@@ -121,6 +129,12 @@ pub(crate) fn spawn_content_watch(events: &EventBus, queue: JobQueue) {
             }
         }
     });
+}
+
+/// Whether a book/album/radio request status sync has anything to look at: a request is still open.
+/// If that cannot be read, say yes, so the sync runs and reports the problem as before.
+pub async fn content_sync_wanted(db: &Db) -> bool {
+    ContentRepo(db).any_open().await.unwrap_or(true)
 }
 
 pub struct WatchlistSyncJob(pub Arc<RequestService>);

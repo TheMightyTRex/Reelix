@@ -589,3 +589,80 @@ async fn discover_rows_must_be_known() {
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn the_library_watch_queues_a_status_sync_only_while_a_request_is_open() {
+    use reelix_requests::content_repo::{ContentFilter, ContentRepo, NewContent};
+
+    let db = Db::in_memory().await.unwrap();
+    let bus = EventBus::default();
+    let queue = reelix_jobs::JobSystem::builder(db.clone(), bus.clone())
+        .build()
+        .queue();
+    reelix_requests::jobs::spawn_content_watch(&bus, queue, db.clone());
+    let u = user(&db, "alice", Permissions::ROLE_USER | Permissions::REQUEST_BOOK).await;
+    let changed = || {
+        bus.publish(reelix_core::DomainEvent::EntityChanged {
+            entity: "queue".into(),
+            action: "updated".into(),
+            id: 1,
+            user_id: None,
+        })
+    };
+
+    // No request at all: a download's progress changes queue nothing (the sync would find nothing to do).
+    assert!(!reelix_requests::jobs::content_sync_wanted(&db).await);
+    changed();
+    tokio::time::sleep(std::time::Duration::from_millis(6_000)).await;
+    assert_eq!(db.jobs().next_queued_at().await.unwrap(), None);
+
+    // A request that still waits for approval is not open for the library either.
+    let repo = ContentRepo(&db);
+    let id = repo
+        .create(NewContent {
+            user_id: u.id,
+            kind: ContentRequestKind::Book,
+            foreign_id: DUNE.into(),
+            title: "Dune".into(),
+            subtitle: None,
+            year: None,
+            poster: None,
+            formats: vec![BookFormat::Ebook],
+            profile_id: None,
+            root_folder_id: None,
+            tags: vec![],
+            source: "test",
+        })
+        .await
+        .unwrap();
+    assert!(!repo.any_open().await.unwrap(), "pending is not open");
+
+    // Approved: open, and the next change queues the sync.
+    let mut row = repo
+        .find(&ContentFilter::default())
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.id == id)
+        .unwrap();
+    row.status = RequestStatus::Approved;
+    repo.save(&row).await.unwrap();
+    assert!(repo.any_open().await.unwrap());
+    assert!(reelix_requests::jobs::content_sync_wanted(&db).await);
+    changed();
+    // The watch lets a burst settle (3 s) first; wait up to 30 s on a slow computer.
+    let mut queued = false;
+    for _ in 0..60 {
+        if db.jobs().next_queued_at().await.unwrap().is_some() {
+            queued = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(queued, "the sync was queued");
+
+    // Available: closed again.
+    row.status = RequestStatus::Available;
+    repo.save(&row).await.unwrap();
+    assert!(!repo.any_open().await.unwrap());
+}

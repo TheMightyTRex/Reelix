@@ -150,7 +150,29 @@ impl ContentFilter {
 
 pub struct ContentRepo<'a>(pub &'a Db);
 
+/// The statuses of a book, album or radio request that still waits for the library: its status is
+/// brought up to date from the library's availability.
+pub(crate) const OPEN_STATUSES: [RequestStatus; 3] = [
+    RequestStatus::Approved,
+    RequestStatus::Processing,
+    RequestStatus::PartiallyAvailable,
+];
+
 impl ContentRepo<'_> {
+    /// Whether any book, album or radio request is still open (see [`OPEN_STATUSES`]); one cheap read.
+    pub async fn any_open(&self) -> Result<bool> {
+        let mut q = QueryBuilder::<Sqlite>::new(
+            "SELECT EXISTS (SELECT 1 FROM requests WHERE media_kind IN ('book', 'music', 'radio') AND status IN (",
+        );
+        let mut sep = q.separated(", ");
+        for s in OPEN_STATUSES {
+            sep.push_bind(s.as_str());
+        }
+        q.push("))");
+        let n: i64 = q.build_query_scalar().fetch_one(self.0.pool()).await?;
+        Ok(n != 0)
+    }
+
     pub async fn create(&self, n: NewContent) -> Result<i64> {
         let now = now_ms();
         let res = sqlx::query(
