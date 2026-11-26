@@ -1,7 +1,7 @@
 //! [`LibraryService`]: the facade used by the API, jobs and (via adapters) requests.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{NaiveDate, Utc};
 use reelix_api_types::library::{LibrarySearchKind, SearchRequest};
@@ -23,6 +23,8 @@ pub struct LibraryService {
     pub(crate) queue: OnceLock<JobQueue>,
     /// Override "today" (tests).
     pub(crate) today_override: OnceLock<NaiveDate>,
+    /// The parsed quality profiles and custom formats, with the [`Db::profiles_generation`] they were read at.
+    profile_cache: Mutex<Option<(u64, Arc<ProfileCache>)>>,
 }
 
 /// Quality profiles + custom formats snapshot used to score files and compute cutoffs.
@@ -46,6 +48,7 @@ impl LibraryService {
             metadata,
             queue: OnceLock::new(),
             today_override: OnceLock::new(),
+            profile_cache: Mutex::new(None),
         }
     }
 
@@ -80,14 +83,33 @@ impl LibraryService {
         });
     }
 
-    pub(crate) async fn profiles(&self) -> Result<ProfileCache> {
+    /// The video quality profiles and custom formats. They are read and parsed once, then kept until a
+    /// profile or format is created, changed, deleted or seeded (the database counts these in
+    /// [`Db::profiles_generation`]); a refresh, scan or search used to read them again on every call.
+    pub(crate) async fn profiles(&self) -> Result<Arc<ProfileCache>> {
+        // Read the number before the profiles: a change made while they load makes the copy look old
+        // at its next use, never new.
+        let generation = self.db.profiles_generation();
+        if let Some((g, cache)) = self
+            .profile_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            && *g == generation
+        {
+            return Ok(cache.clone());
+        }
         let profiles = self.db.quality_profiles().list().await?;
         let formats = self.db.custom_formats().list().await?;
-        Ok(ProfileCache {
+        let cache = Arc::new(ProfileCache {
             profiles: profiles.into_iter().map(|p| (p.id, p)).collect(),
             format_names: formats.iter().map(|f| (f.id, f.name.clone())).collect(),
             formats,
-        })
+        });
+        // The first read of a new database seeds the built-in profiles, which moves the number on; the copy
+        // then looks old once and is read again, after which it is kept.
+        *self.profile_cache.lock().unwrap_or_else(|p| p.into_inner()) = Some((generation, cache.clone()));
+        Ok(cache)
     }
 
     pub(crate) async fn check_profile(&self, id: i64) -> Result<()> {
@@ -137,5 +159,168 @@ impl LibraryService {
         );
         self.enqueue(NewJob::new(kinds::SEARCH, payload).dedupe(dedupe))
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+    use reelix_core::MediaKind;
+    use reelix_metadata::{
+        CollectionMetadata, ExternalSource, MetaError, MovieMetadata, SearchHit, SeriesExternalId,
+        SeriesMetadata,
+    };
+
+    use super::*;
+
+    /// A metadata source that is never asked anything.
+    struct NoMetadata;
+
+    #[async_trait]
+    impl MetadataSource for NoMetadata {
+        async fn movie(&self, _: u32) -> Result<MovieMetadata, MetaError> {
+            Err(MetaError::NotFound)
+        }
+        async fn series(&self, _: SeriesExternalId) -> Result<SeriesMetadata, MetaError> {
+            Err(MetaError::NotFound)
+        }
+        async fn collection(&self, _: u32) -> Result<CollectionMetadata, MetaError> {
+            Err(MetaError::NotFound)
+        }
+        async fn search(&self, _: &str, _: MediaKind, _: Option<i32>) -> Result<Vec<SearchHit>, MetaError> {
+            Ok(vec![])
+        }
+        async fn find(&self, _: ExternalSource, _: &str, _: MediaKind) -> Result<Vec<SearchHit>, MetaError> {
+            Ok(vec![])
+        }
+    }
+
+    async fn service() -> (LibraryService, Db) {
+        let db = Db::in_memory().await.unwrap();
+        let svc = LibraryService::new(db.clone(), EventBus::default(), Arc::new(NoMetadata));
+        (svc, db)
+    }
+
+    fn format(name: &str) -> CustomFormat {
+        CustomFormat {
+            id: 0,
+            name: name.into(),
+            include_in_rename: false,
+            specifications: vec![],
+        }
+    }
+
+    #[tokio::test]
+    #[allow(unused_assignments)] // the last `last` is not read
+    async fn profiles_are_read_once_and_again_after_every_kind_of_change() {
+        let (svc, db) = service().await;
+        // The first read seeds the built-in profiles; after that the same copy is handed out.
+        svc.profiles().await.unwrap();
+        let first = svc.profiles().await.unwrap();
+        assert!(!first.profiles.is_empty());
+        assert!(
+            Arc::ptr_eq(&first, &svc.profiles().await.unwrap()),
+            "kept while nothing changes"
+        );
+
+        // A read that goes round the cache (the API's reads) changes nothing either.
+        db.quality_profiles().list().await.unwrap();
+        db.custom_formats().list().await.unwrap();
+        assert!(Arc::ptr_eq(&first, &svc.profiles().await.unwrap()));
+
+        // Every change path gives a new copy that shows the change.
+        let mut last = first;
+        macro_rules! changed {
+            ($what:expr) => {{
+                let now = svc.profiles().await.unwrap();
+                assert!(!Arc::ptr_eq(&last, &now), "{} was not noticed", $what);
+                assert!(
+                    Arc::ptr_eq(&now, &svc.profiles().await.unwrap()),
+                    "{} is kept again",
+                    $what
+                );
+                last = now.clone();
+                now
+            }};
+        }
+
+        // Quality profile: create, update, delete.
+        let mut profile = last.profiles.values().next().unwrap().clone();
+        profile.name = "Cache test".into();
+        let created = db.quality_profiles().create(&profile).await.unwrap();
+        assert!(changed!("create profile").profiles.contains_key(&created.id));
+
+        let mut edited = created.clone();
+        edited.name = "Cache test renamed".into();
+        edited.cutoff_format_score = 123;
+        db.quality_profiles().update(created.id, &edited).await.unwrap();
+        let now = changed!("update profile");
+        assert_eq!(now.profiles[&created.id].name, "Cache test renamed");
+        assert_eq!(now.profiles[&created.id].cutoff_format_score, 123);
+
+        // Custom format: create, update, delete (which also removes its score from profiles).
+        let cf = db
+            .custom_formats()
+            .create(&format("Cache format"), None)
+            .await
+            .unwrap();
+        let now = changed!("create format");
+        assert_eq!(now.format_names[&cf.id], "Cache format");
+        let mut scored = now.profiles[&created.id].clone();
+        scored.format_items = vec![reelix_decision::FormatItem {
+            format_id: cf.id,
+            score: 50,
+        }];
+        db.quality_profiles().update(created.id, &scored).await.unwrap();
+        assert_eq!(
+            changed!("score a format").profiles[&created.id]
+                .format_items
+                .len(),
+            1
+        );
+
+        let mut renamed = cf.clone();
+        renamed.name = "Cache format renamed".into();
+        db.custom_formats().update(cf.id, &renamed).await.unwrap();
+        assert_eq!(
+            changed!("update format").format_names[&cf.id],
+            "Cache format renamed"
+        );
+
+        db.custom_formats().delete(cf.id).await.unwrap();
+        let now = changed!("delete format");
+        assert!(!now.format_names.contains_key(&cf.id));
+        assert!(
+            now.profiles[&created.id].format_items.is_empty(),
+            "its score went with it"
+        );
+
+        // Built-in formats made at start count as creations.
+        db.custom_formats().ensure_builtins().await.unwrap();
+        assert!(
+            changed!("built-in formats")
+                .formats
+                .iter()
+                .any(|f| f.name == "BSL")
+        );
+
+        // Delete the profile.
+        db.quality_profiles().delete(created.id).await.unwrap();
+        assert!(!changed!("delete profile").profiles.contains_key(&created.id));
+    }
+
+    #[tokio::test]
+    async fn a_clone_of_the_database_handle_shares_the_change_count() {
+        let (svc, db) = service().await;
+        let before = svc.profiles().await.unwrap();
+        let other = db.clone();
+        other
+            .custom_formats()
+            .create(&format("From a clone"), None)
+            .await
+            .unwrap();
+        let after = svc.profiles().await.unwrap();
+        assert!(after.formats.iter().any(|f| f.name == "From a clone"));
+        assert!(!Arc::ptr_eq(&before, &after));
     }
 }

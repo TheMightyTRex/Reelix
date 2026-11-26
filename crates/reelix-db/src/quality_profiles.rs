@@ -100,12 +100,16 @@ impl QualityProfileRepo<'_> {
             f => format!("quality_profiles.{}", f.as_str()),
         };
         let mut tx = self.db.pool().begin().await?;
-        if claim_seed(&mut tx, &key).await? {
+        let seeded = claim_seed(&mut tx, &key).await?;
+        if seeded {
             for p in default_profiles_for(family) {
                 insert(&mut tx, &QualityProfile { family, ..p }).await?;
             }
         }
         tx.commit().await?;
+        if seeded {
+            self.db.profiles_changed();
+        }
         Ok(())
     }
 
@@ -165,6 +169,7 @@ impl QualityProfileRepo<'_> {
         let mut conn = self.db.pool().acquire().await?;
         let id = insert(&mut conn, p).await.map_err(|e| conflict(e, &p.name))?;
         drop(conn);
+        self.db.profiles_changed();
         Ok(self.get_any(id).await?.unwrap_or_else(|| p.clone()))
     }
 
@@ -192,6 +197,7 @@ impl QualityProfileRepo<'_> {
         .execute(self.db.pool())
         .await
         .map_err(|e| conflict(e, &p.name))?;
+        self.db.profiles_changed();
         if res.rows_affected() == 0 {
             return Ok(None);
         }
@@ -203,6 +209,7 @@ impl QualityProfileRepo<'_> {
             .bind(id)
             .execute(self.db.pool())
             .await?;
+        self.db.profiles_changed();
         Ok(res.rows_affected() > 0)
     }
 }

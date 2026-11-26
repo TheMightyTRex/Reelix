@@ -80,6 +80,7 @@ impl CustomFormatRepo<'_> {
         .execute(self.db.pool())
         .await
         .map_err(|e| conflict(e, &f.name))?;
+        self.db.profiles_changed();
         let mut out = f.clone();
         out.id = res.last_insert_rowid();
         out.name = f.name.trim().to_string();
@@ -99,6 +100,7 @@ impl CustomFormatRepo<'_> {
         .execute(self.db.pool())
         .await
         .map_err(|e| conflict(e, &f.name))?;
+        self.db.profiles_changed();
         if res.rows_affected() == 0 {
             return Ok(None);
         }
@@ -116,6 +118,7 @@ impl CustomFormatRepo<'_> {
             remove_format_scores(&mut tx, id).await?;
         }
         tx.commit().await?;
+        self.db.profiles_changed();
         Ok(res.rows_affected() > 0)
     }
 
