@@ -230,6 +230,13 @@ async fn failing_indexer_status_is_persisted_and_reported() {
     .await
     .unwrap();
     assert_eq!(svc2.indexer_manager().status(row.id).unwrap().failure_count, 2);
+
+    // What the restart read is what is known: asking again writes nothing.
+    let (_, written) = status_row(&e, row.id).await;
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    svc2.persist_indexer_status().await;
+    let (_, after) = status_row(&e, row.id).await;
+    assert_eq!(after, written);
 }
 
 async fn status_row(e: &Env, id: i64) -> (i64, i64) {
@@ -273,29 +280,15 @@ async fn indexer_status_is_written_only_when_it_changes() {
     assert_eq!(failures, 2);
     assert!(later > written);
 
-    // After a restart the stored status is what is known, so asking again writes nothing.
-    let svc2 = ProviderService::new(
-        e.db.clone(),
-        SecretBox::from_key([9; 32]),
-        EventBus::default(),
-        reqwest::Client::new(),
-        ProviderOptions::new(e._dir.path()),
-    )
-    .await
-    .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    svc2.persist_indexer_status().await;
-    assert_eq!(status_row(&e, row.id).await, (2, later));
-
     // A restored status that differs is written.
-    svc2.restore_indexer_status(
+    e.svc.restore_indexer_status(
         row.id,
         reelix_indexers::IndexerStatus {
             failure_count: 7,
             ..Default::default()
         },
     );
-    svc2.persist_indexer_status().await;
+    e.svc.persist_indexer_status().await;
     assert_eq!(status_row(&e, row.id).await.0, 7);
 
     // Deleting the indexer removes its row and forgets it.
