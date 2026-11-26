@@ -51,6 +51,7 @@ When releasing, rename `Unreleased` to the version and date (`## [0.2.0] - 2026-
 
 ### Changed
 - **Lite builds a small ffprobe.** The Lite image used a full static ffprobe (135 MB, over a third of its size). It now builds ffprobe from the same FFmpeg 7.1.2 source as the radio remux ffmpeg, with only the file protocol, the usual demuxers, every parser and the decoders of the usual codecs: about 8 MB. On 793 files from a real library every field Reelix reads was the same as with the full ffprobe; see `docs/LITE.md` (RFX-108).
+- **Lite uses two worker threads by default.** The Lite image sets `TOKIO_WORKER_THREADS=2`, so Reelix starts two worker threads instead of one for each processor core. On a copy of a real library this used 27.6 MB instead of 44.9 MB in `docker stats`. A large import or scan then uses at most two cores; set `TOKIO_WORKER_THREADS` in the compose file to change it (RFX-108).
 - **Less work on small servers.** An RSS sync reads every monitored series' episodes and files in a few queries instead of about five per series, and the book library once instead of once for each book release. Release profile terms are compiled once instead of for every release checked. A series refresh no longer rewrites episodes whose details did not change. The job runner sleeps until the next queued job is due (at most 30 seconds; a new or finished job wakes it at once) instead of reading the jobs table every second. The download monitor reads a client's tracked downloads once per poll instead of once per item. Nothing visible changes.
 
 ### Security

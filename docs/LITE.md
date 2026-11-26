@@ -10,6 +10,7 @@ switched off and a slimmer image. It is not part of upstream Reelix.
 | ffmpeg | Debian's full package (479 MB) | An `ffprobe` built from FFmpeg's source with only what Reelix reads (about 8 MB; a full static `ffprobe` is 135 MB), and a 3 MB `ffmpeg` that only rewraps radio captures (MPEG-TS to Matroska audio) |
 | Deno and yt-dlp | Yes (138 MB) | No |
 | Web app | Yes | Yes (set `REELIX_WEB_DIR` to an empty folder for headless use) |
+| Tokio worker threads | One per processor core | Two (`TOKIO_WORKER_THREADS=2`); set it in the compose file to use more cores on a big server |
 
 Build it: `docker build -f docker/Dockerfile.lite -t reelix:lite .`
 
