@@ -613,7 +613,7 @@ async fn the_library_watch_queues_a_status_sync_only_while_a_request_is_open() {
     // No request at all: a download's progress changes queue nothing (the sync would find nothing to do).
     assert!(!reelix_requests::jobs::content_sync_wanted(&db).await);
     changed();
-    tokio::time::sleep(std::time::Duration::from_millis(4_000)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(6_000)).await;
     assert_eq!(db.jobs().next_queued_at().await.unwrap(), None);
 
     // A request that still waits for approval is not open for the library either.
@@ -650,11 +650,16 @@ async fn the_library_watch_queues_a_status_sync_only_while_a_request_is_open() {
     assert!(repo.any_open().await.unwrap());
     assert!(reelix_requests::jobs::content_sync_wanted(&db).await);
     changed();
-    tokio::time::sleep(std::time::Duration::from_millis(4_000)).await;
-    assert!(
-        db.jobs().next_queued_at().await.unwrap().is_some(),
-        "the sync was queued"
-    );
+    // The watch lets a burst settle (3 s) first; wait up to 30 s on a slow computer.
+    let mut queued = false;
+    for _ in 0..60 {
+        if db.jobs().next_queued_at().await.unwrap().is_some() {
+            queued = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(queued, "the sync was queued");
 
     // Available: closed again.
     row.status = RequestStatus::Available;
