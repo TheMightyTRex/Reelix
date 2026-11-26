@@ -211,6 +211,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(unused_assignments)] // the last `last` is not read
     async fn profiles_are_read_once_and_again_after_every_kind_of_change() {
         let (svc, db) = service().await;
         // The first read seeds the built-in profiles; after that the same copy is handed out.
