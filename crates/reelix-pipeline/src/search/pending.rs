@@ -140,6 +140,14 @@ impl SearchService {
         }
     }
 
+    /// Whether any pending release is due now (one read), so the scheduler can skip an empty run.
+    pub async fn pending_due(&self) -> bool {
+        // On a read error say yes: the job then runs and reports it.
+        pending::any_due(&self.db, chrono::Utc::now().timestamp_millis())
+            .await
+            .unwrap_or(true)
+    }
+
     /// Task `process_pending`: grabs due releases that are still accepted (best per media
     /// item first); due releases that are no longer wanted are dropped.
     pub async fn process_pending(&self) -> Result<SearchSummary> {

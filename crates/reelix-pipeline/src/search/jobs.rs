@@ -118,7 +118,7 @@ impl JobHandler for RadioMissingSearchJob {
     }
 }
 
-/// Ticks every minute; syncs when the configured RSS interval has elapsed.
+/// Checked every minute; a job is queued only when the configured RSS interval has elapsed.
 pub struct RssSyncJob(pub Arc<SearchService>);
 
 #[async_trait::async_trait]
@@ -135,6 +135,11 @@ impl JobHandler for RssSyncJob {
         self.0.rss_sync(force).await?;
         Ok(())
     }
+
+    /// No job row until the RSS interval has elapsed (it is off at 0).
+    async fn scheduled_run_due(&self) -> bool {
+        self.0.rss_due()
+    }
 }
 
 pub struct ProcessPendingJob(pub Arc<SearchService>);
@@ -148,6 +153,11 @@ impl JobHandler for ProcessPendingJob {
     async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> anyhow::Result<()> {
         self.0.process_pending().await?;
         Ok(())
+    }
+
+    /// No job row while no pending release is due.
+    async fn scheduled_run_due(&self) -> bool {
+        self.0.pending_due().await
     }
 }
 

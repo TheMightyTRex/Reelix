@@ -350,12 +350,23 @@ impl ActivityService {
 
     /// Scheduled entry point: polls every run while downloads are active, else every 2 min.
     pub async fn monitor_tick(&self) -> Result<()> {
-        let active = !tracked::active(&self.db).await?.is_empty();
-        let due = lock(&self.last_poll).is_none_or(|t| t.elapsed() >= IDLE_POLL);
-        if active || due {
+        if self.monitor_due().await? {
             self.poll().await?;
         }
         Ok(())
+    }
+
+    /// Whether a scheduled poll has anything to do: a download is active, or the idle poll interval
+    /// has passed since the last poll. A read only; the scheduler asks before it queues a job.
+    pub async fn monitor_due(&self) -> Result<bool> {
+        if self.idle_poll_elapsed() {
+            return Ok(true);
+        }
+        Ok(!tracked::active(&self.db).await?.is_empty())
+    }
+
+    fn idle_poll_elapsed(&self) -> bool {
+        lock(&self.last_poll).is_none_or(|t| t.elapsed() >= IDLE_POLL)
     }
 
     /// Polls every client once and processes the results. Returns whether the queue changed.
