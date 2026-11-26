@@ -77,6 +77,9 @@ pub struct Db {
     pool: SqlitePool,
     /// API key use not yet written (see [`key_use`]).
     key_use: std::sync::Arc<key_use::KeyUse>,
+    /// Counts every change to quality profiles and custom formats, so a reader that keeps a parsed copy
+    /// can tell when it is out of date (see [`Db::profiles_generation`]).
+    profiles_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl Db {
@@ -200,7 +203,22 @@ impl Db {
         Ok(Db {
             pool,
             key_use: std::sync::Arc::default(),
+            profiles_generation: std::sync::Arc::default(),
         })
+    }
+
+    /// A number that changes whenever a quality profile or custom format is created, changed, deleted or
+    /// seeded through this handle (or a clone of it). Read it before loading the profiles and keep it with
+    /// them: if it has moved on by the next use, they are old. Every writer in this crate bumps it after its
+    /// change is committed, so a copy read after the number was read is never kept past a later change.
+    pub fn profiles_generation(&self) -> u64 {
+        self.profiles_generation
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) fn profiles_changed(&self) {
+        self.profiles_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 
     pub fn pool(&self) -> &SqlitePool {
