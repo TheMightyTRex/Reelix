@@ -592,7 +592,7 @@ impl LibraryService {
 
     /// Queues a metadata refresh for one movie.
     pub async fn queue_refresh_movie(&self, id: i64) -> Result<Option<i64>> {
-        if movies::get(&self.db, id, &self.profiles().await?)
+        if movies::get(&self.db, id, self.profiles().await?.as_ref())
             .await?
             .is_none()
         {
@@ -651,7 +651,7 @@ impl LibraryService {
     }
 
     pub async fn queue_rescan_movie(&self, id: i64) -> Result<Option<i64>> {
-        if movies::get(&self.db, id, &self.profiles().await?)
+        if movies::get(&self.db, id, self.profiles().await?.as_ref())
             .await?
             .is_none()
         {
